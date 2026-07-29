@@ -57,8 +57,8 @@ A generation resolution is always 900 ms and is skippable by tapping: draw flash
 not take 14 seconds.
 
 **Round length.** 5.85 generations on average under the never-bank policy;
-6.4% of rounds die in generation 1; 35% are over by generation 3; 2.2% reach
-generation 18.
+6.4% of rounds die in generation 1; 35% are extinct by generation 3; 2.2%
+survive all 18 generations.
 
 ---
 

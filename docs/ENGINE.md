@@ -242,6 +242,18 @@ does. What the player's actions determine is only *which* committed draws their
 colony meets. The action log is bound separately by the receipt ledger and the
 frame fence (§5), so an operator cannot rewrite history in either direction.
 
+`adapterFingerprint()` in `tools/simulate.mjs` is the reference implementation
+of `stagedSurvivalFingerprint` for this adapter, binding exactly the field list
+in §2. For `swarm-colony-v1 @ 1.0.0` it is
+
+```
+0ce06d9c6d3f5d55cd7379c42c46d3efedae4d3966d103acd307038e9aa4290b
+```
+
+and `tests/derivation.test.mjs` freezes it, so any change to the offspring
+bands, the ladder, the thresholds, the target RTP or the cap changes the
+fingerprint and fails the build until the adapter version is bumped with it.
+
 The commitment must be durably published before the round opens and before any
 seed-dependent information reaches the client. The seed is revealed only at
 settlement.

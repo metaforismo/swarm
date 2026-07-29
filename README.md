@@ -67,7 +67,7 @@ can be exact rather than approximate.
 
 | | |
 | --- | --- |
-| RTP | **95%** exactly (`19/20`) — for every bet type and every strategy |
+| Theoretical RTP | **95%** exactly (`19/20`) — every bet type, every strategy |
 | Max win | **905.77x** the stake; declared cap `906x`, proven never to bind |
 | Biggest single settlement | `527.35x` |
 | FULL BLOOM | 1 in 22,218 rounds |
@@ -94,7 +94,8 @@ Full derivations, exact fractions and the strategy proof: [docs/MATH.md](docs/MA
   `tools/simulate.mjs` is a working reference implementation of the derivation.
 - **Exact arithmetic end to end.** Probabilities and money are BigInt rationals;
   the only rounding is a single floor at each credit, in integer minor units
-  (`1 credit = 10^6 units`).
+  (`1 credit = 10^6 units`), which costs under `2e-5` of a 1-credit stake per
+  round.
 - **No latency-sensitive decisions.** Nothing in SWARM is timed. A slow
   connection cannot cost you a payout.
 

@@ -238,8 +238,14 @@ Check: `sum p * multiplier = (19/48) * E[N(1)] = (19/48) * (12/5) = 19/20`.
 **Theorem.** Let `pi` be any decision policy: any function, deterministic or
 randomized, of everything the player has observed so far (generation index,
 current and past populations, its own past harvests, wall-clock time, mood).
-Then the expected total credit of a round played under `pi` is exactly `19/20`
-per unit staked.
+Then the expected total *theoretical* payout of a round played under `pi` is
+exactly `19/20` per unit staked.
+
+"Theoretical" is doing precise work here, not hedging: the theorem is a
+statement about the exact rational value the paytable owes. What a wallet
+actually credits is that value floored to integer minor units at each credit
+event, which is below it by less than one unit per event — section 12 bounds
+the gap at `1.8e-5` credits per round.
 
 **Proof.** Define the wealth process `W(t) = banked(t) + c(t) * N(t)`.
 
@@ -254,7 +260,7 @@ per unit staked.
 5. The round stops by generation 18 and `0 <= W <= 906`, so optional stopping
    applies to any stopping time and any adapted thinning rule.
 
-Therefore `E[total credit] = W(0) = 19/20`. ∎
+Therefore `E[total theoretical payout] = W(0) = 19/20`. ∎
 
 **Machine check.** The theorem is also verified by exhaustive backward induction
 in `proveStrategyInvariance()`: for every one of the **255** decision states the
@@ -345,7 +351,10 @@ punished: two 95% bets combine to a 95% return.
 
 ## 8. The shape of the distribution
 
-Survival of the colony under RUN (no harvesting):
+Survival of the colony under RUN (no harvesting). A colony that has already
+force-settled at FULL BLOOM stops being counted as alive in later generations;
+the total mass removed that way is `4.50086e-05`, so the curve is a survival
+curve and a round-still-open curve to within that figure:
 
 <!-- generated:survival -->
 | After generation | P(colony alive) |
@@ -433,9 +442,10 @@ worth.
   player who taps at random. There is no "theoretical vs practical" gap to
   disclose because there is no gap.
 - **Rounding.** Floor rounding at the credit boundary costs at most one minor
-  unit per credit event; with 10^6 minor units per credit and at most 18 credit
-  events, payable RTP is below theoretical RTP by less than `1.8e-5` credits per
-  round, i.e. under `2e-5` of a 1-credit stake (section 12).
+  unit per credit event. A round has at most 18 credit events (a harvest at each
+  of generations 1 to 17, plus one settlement), so with 10^6 minor units per
+  credit the payable RTP is below the theoretical RTP by less than `1.8e-5`
+  credits per round, i.e. under `2e-5` of a 1-credit stake (section 12).
 
 ---
 
@@ -530,8 +540,8 @@ buying.
 
 The Monte Carlo simulator exists only as a cross-check on the written rules; it
 never sources a published number. At 50,000 deterministic rounds under RUN it
-returns an empirical RTP of 0.965665 against the exact 0.95 (0.46 standard
-errors) and a mean round length of 5.8415 against the exact 5.85032978.
+returns an empirical RTP of 0.983942 against the exact 0.95 (1.00 standard
+errors) and a mean round length of 5.8351 against the exact 5.85032978.
 
 ---
 

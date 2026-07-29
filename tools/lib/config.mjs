@@ -12,6 +12,10 @@ import { rat, multiply, divide, add, power, compare, fail, ONE } from './rationa
 export const ADAPTER_ID = 'swarm-colony-v1';
 export const ADAPTER_VERSION = '1.0.0';
 export const PAYTABLE_SCHEMA = 'swarm/paytable-v1';
+/** The Reveal Engine lifecycle module this adapter targets (docs/ENGINE.md). */
+export const MODULE_API = 'reveal-engine/staged-survival-v1';
+/** Adapter-owned promise: unchanged identity means unchanged draw behaviour. */
+export const COHORT_MODEL_VERSION = 'swarm-cohort/v1';
 
 /**
  * One uniform draw per organism per generation, over a modulus of 20.

@@ -25,16 +25,23 @@ import {
   ADAPTER_ID,
   ADAPTER_VERSION,
   BLOOM_THRESHOLD,
+  COHORT_MODEL_VERSION,
   DRAW_MODULUS,
+  LADDER_BASE,
   MAX_GENERATIONS,
+  MAX_POPULATION,
+  MAX_WIN_MULTIPLE,
+  MODULE_API,
+  MU,
   OFFSPRING,
   SEED_COUNT,
+  TARGET_RTP,
   organismValue,
 } from './lib/config.mjs';
 import { POLICIES } from './lib/model.mjs';
-import { add, multiply, rat, toDecimal, toFraction, ZERO } from './lib/rational.mjs';
+import { ONE, add, divide, multiply, rat, toDecimal, toFraction, ZERO } from './lib/rational.mjs';
 
-export const COMMITMENT_VERSION = 'swarm/commit-v1';
+export const COMMITMENT_VERSION = 'reveal-engine/stage-commit-v1';
 export const DRAW_LABEL = 'swarm-organism';
 const SLOTS = BLOOM_THRESHOLD - 1;
 
@@ -66,6 +73,37 @@ export function normalizeSeed(seedHex) {
   return seedHex.toLowerCase();
 }
 
+/**
+ * Adapter fingerprint, exactly the field set docs/ENGINE.md section 2 declares:
+ * module API, adapter id and version, cohort model version, draw modulus, every
+ * outcome band in order, seed units, stage count, both thresholds, ladder base
+ * and step, target RTP, rounding mode and max-win multiple.
+ *
+ * Any change to the economics changes this value, and the value is bound into
+ * the commitment, so a transcript can only be verified against the adapter it
+ * was produced under.
+ */
+export function adapterFingerprint() {
+  const step = divide(ONE, MU);
+  const fields = [MODULE_API, ADAPTER_ID, ADAPTER_VERSION, COHORT_MODEL_VERSION, DRAW_MODULUS];
+  for (const outcome of OFFSPRING) fields.push(outcome.id, outcome.children, outcome.weight);
+  fields.push(
+    SEED_COUNT,
+    MAX_GENERATIONS,
+    BLOOM_THRESHOLD,
+    MAX_POPULATION,
+    LADDER_BASE.numerator,
+    LADDER_BASE.denominator,
+    step.numerator,
+    step.denominator,
+    TARGET_RTP.numerator,
+    TARGET_RTP.denominator,
+    'floor',
+    MAX_WIN_MULTIPLE,
+  );
+  return createHash('sha256').update(encodeFields(fields)).digest('hex');
+}
+
 /** Commitment published before the round: binds seed, round, adapter identity and grid shape. */
 export function commitment(seedHex, roundId) {
   const seed = normalizeSeed(seedHex);
@@ -77,6 +115,7 @@ export function commitment(seedHex, roundId) {
         Buffer.from(seed, 'hex'),
         ADAPTER_ID,
         ADAPTER_VERSION,
+        adapterFingerprint(),
         roundId,
         MAX_GENERATIONS,
         SLOTS,
@@ -244,6 +283,7 @@ function main() {
   console.log(`  mean generations       : ${toDecimal(result.meanGenerations, 4)}`);
   console.log(`  FULL BLOOM rounds      : ${result.bloomCount}`);
   console.log(`  elapsed                : ${elapsedMs.toFixed(0)} ms`);
+  console.log(`  adapter fingerprint    : ${adapterFingerprint()}`);
   console.log(`  commitment sample      : ${commitment(seedFor(options.seed, 0), 'sim-0')}`);
   console.log(`  exact empirical RTP    : ${toFraction(result.empiricalRtp)}`);
 }

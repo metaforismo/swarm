@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   COMMITMENT_VERSION,
   DRAW_LABEL,
+  adapterFingerprint,
   commitment,
   drawIndex,
   encodeFields,
@@ -22,6 +23,7 @@ import {
 import { compare, rat, subtract, toDecimal, toFraction } from '../tools/lib/rational.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
+const engineDoc = readFileSync(`${root}docs/ENGINE.md`, 'utf8');
 
 // ---------------------------------------------------------------------------
 // Frozen wire-format vectors. These pin the derivation: any change to the
@@ -31,18 +33,21 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const VECTOR = {
   seed: 'a'.repeat(64),
   roundId: 'swarm-vector-1',
-  commitment: 'c2322343a155613e4530c328ece9d26a39726559772cd73d7694d197b4d8ce38',
-  firstDraws: [18, 8, 7, 6, 15, 2, 17, 14, 6, 7, 2, 3, 15, 13, 9],
+  fingerprint: '0ce06d9c6d3f5d55cd7379c42c46d3efedae4d3966d103acd307038e9aa4290b',
+  commitment: 'a5274468ec919dbbd23421d4c2be400ff2d63c3e520b30b0f928d3dbcdce94e3',
+  firstDraws: [0, 8, 18, 11, 0, 9, 16, 2, 11, 5, 7, 10, 14, 11, 13],
   run: {
-    populations: [3, 3, 1, 2, 1, 1, 1, 0],
+    populations: [3, 3, 2, 3, 0],
     reason: 'EXTINCT',
     total: '0/1',
   },
   half: {
     trace: [
       { generation: 1, population: 3, harvest: 1 },
-      { generation: 2, population: 2, harvest: 1 },
-      { generation: 3, population: 0 },
+      { generation: 2, population: 3, harvest: 1 },
+      { generation: 3, population: 1 },
+      { generation: 4, population: 1 },
+      { generation: 5, population: 0 },
     ],
     reason: 'EXTINCT',
     total: '57/64',
@@ -82,9 +87,15 @@ describe('seed handling', () => {
 });
 
 describe('draw derivation', () => {
-  it('reproduces the frozen commitment', () => {
+  it('reproduces the frozen adapter fingerprint and commitment', () => {
+    // The fingerprint binds the economics; the commitment binds the seed, the
+    // fingerprint and the grid shape. docs/ENGINE.md sections 2 and 4.2.
+    expect(adapterFingerprint()).toBe(VECTOR.fingerprint);
     expect(commitment(VECTOR.seed, VECTOR.roundId)).toBe(VECTOR.commitment);
-    expect(COMMITMENT_VERSION).toBe('swarm/commit-v1');
+    expect(COMMITMENT_VERSION).toBe('reveal-engine/stage-commit-v1');
+    // The specification and the reference implementation must not drift.
+    expect(engineDoc).toContain(COMMITMENT_VERSION);
+    expect(engineDoc).toContain(VECTOR.fingerprint);
   });
 
   it('reproduces the frozen draw grid prefix', () => {
@@ -158,9 +169,9 @@ describe('round replay', () => {
     expect(result.trace).toEqual(VECTOR.half.trace);
     expect(result.reason).toBe(VECTOR.half.reason);
     expect(toFraction(result.total)).toBe(VECTOR.half.total);
-    // Harvesting really does change the future: the RUN line survived to
-    // generation 8 on the same seed, the harvested line died at generation 3.
-    expect(result.trace.length).not.toBe(VECTOR.run.populations.length);
+    // Harvesting really does change the future: on the same committed grid the
+    // harvested colony meets different draws and follows a different path.
+    expect(result.trace.map((entry) => entry.population)).not.toEqual(VECTOR.run.populations);
   });
 
   it('reproduces the frozen BANK round', () => {
@@ -202,12 +213,12 @@ describe('Monte Carlo cross-check', () => {
     const math = readFileSync(`${root}docs/MATH.md`, 'utf8');
     const rtp = toDecimal(result.empiricalRtp, 6);
     const generations = toDecimal(result.meanGenerations, 4);
-    expect(rtp).toBe('0.965665');
-    expect(generations).toBe('5.8415');
+    expect(rtp).toBe('0.983942');
+    expect(generations).toBe('5.8351');
     expect(math).toContain(rtp);
     expect(math).toContain(generations);
     // Generation-1 extinction converges on the exact 8/125 = 0.064.
-    expect(toDecimal(result.generationOneExtinctionRate, 4)).toBe('0.0639');
+    expect(toDecimal(result.generationOneExtinctionRate, 4)).toBe('0.0642');
   }, 60000);
 
   it('rejects hostile simulation parameters', () => {

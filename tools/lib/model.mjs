@@ -448,8 +448,6 @@ export function maximumRoundPayout() {
   let value = new Array(MAX_POPULATION + 1);
   for (let m = 0; m <= MAX_POPULATION; m += 1) value[m] = terminalMultiplier(G, m);
 
-  let bestState = { generation: G, population: MAX_POPULATION, harvests: [] };
-
   for (let t = G - 1; t >= 1; t -= 1) {
     const continuation = new Array(B).fill(ZERO);
     for (let j = 1; j < B; j += 1) {
@@ -465,27 +463,22 @@ export function maximumRoundPayout() {
         continue;
       }
       let best = ZERO;
-      let bestHarvest = 0;
       for (let k = 0; k <= n; k += 1) {
         const rest = n - k;
         const candidate = add(
           multiply(organismValue(t), rat(BigInt(k))),
           rest === 0 ? ZERO : continuation[rest],
         );
-        if (compare(candidate, best) > 0) {
-          best = candidate;
-          bestHarvest = k;
-        }
+        if (compare(candidate, best) > 0) best = candidate;
       }
       next[n] = best;
-      if (t === 1 && n <= 2 * SEED_COUNT) bestState = { generation: 1, population: n, harvest: bestHarvest };
     }
     value = next;
   }
 
   let best = ZERO;
   for (let m = 0; m <= 2 * SEED_COUNT; m += 1) if (compare(value[m], best) > 0) best = value[m];
-  return { multiplier: best, opening: bestState };
+  return { multiplier: best };
 }
 
 /** Exact payout distribution of the base bet under the RUN policy, grouped by multiplier. */
@@ -640,16 +633,3 @@ export function expectedGenerations() {
   return total;
 }
 
-/** The full multiplier grid: colony value for population n at generation t. */
-export function multiplierGrid() {
-  const grid = [];
-  for (let t = 1; t <= G; t += 1) {
-    const row = { generation: t, organismValue: organismValue(t), colony: [] };
-    for (let n = 1; n <= MAX_POPULATION; n += 1) {
-      if (n >= B && t < 1) continue;
-      row.colony.push({ population: n, multiplier: colonyMultiplier(t, n) });
-    }
-    grid.push(row);
-  }
-  return grid;
-}
