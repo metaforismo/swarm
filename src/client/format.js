@@ -27,10 +27,19 @@ export function credits(units, decimals = 2) {
   return `${negative ? MINUS : ''}${whole}${decimals === 0 ? '' : `.${fraction}`}`;
 }
 
-/** Signed credits, with an explicit `+` on a gain. */
+/**
+ * Signed credits, with an explicit `+` on a gain.
+ *
+ * A non-zero result never renders as `0.00`: truncation is the right direction
+ * for a multiplier, but a net result that is not zero must not read as one, so a
+ * value smaller than the display step is shown at full minor-unit precision.
+ */
 export function signedCredits(units, decimals = 2) {
   const value = typeof units === 'bigint' ? units : BigInt(units ?? 0);
-  return `${value > 0n ? '+' : ''}${credits(value, decimals)}`;
+  const sign = value > 0n ? '+' : '';
+  const text = credits(value, decimals);
+  if (value !== 0n && /^[+\u2212-]?0(\.0+)?$/u.test(text)) return `${sign}${credits(value, 6)}`;
+  return `${sign}${text}`;
 }
 
 /** Truncates a decimal string the server already truncated, e.g. `0.395833` → `0.39`. */

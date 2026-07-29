@@ -172,8 +172,10 @@ session.
 
 **What is real.** The round lifecycle of [docs/ENGINE.md §5](docs/ENGINE.md), end
 to end: the seed pre-commitment published before a stake exists, client entropy
-generated in the browser and never echoed from the server, a committed 270-draw
-grid, server-authoritative frames with a revision fence, idempotent commands,
+generated in the browser and never supplied by the server before `open()` — it is
+public afterwards, because being chosen second is its whole job — a committed
+270-draw grid, server-authoritative frames with a revision fence, idempotent
+commands,
 per-line receipts in integer minor units, one harvest commitment per stage, the
 lagged wild-line disclosure, side bets resolved only at settlement, the
 settlement body commitment over the action log, the live action chain, forced
@@ -201,10 +203,14 @@ timings and every number are the specified ones.
 | `POST /api/verify` | Runs §4.6 against a submitted proof bundle and returns the eight checks |
 | `GET /api/session` | Balance, signed session result, and the last 50 rounds |
 
-Every mutating call carries an `idempotencyKey` and the `expectedFrameRevision`
-it was fenced to. A retry replays its receipts; a changed payload under the same
-key is `IDEMPOTENCY_CONFLICT`; a stale fence is `STALE_FRAME` and mutates
-nothing.
+Every **player** command carries an `idempotencyKey` and the
+`expectedFrameRevision` it was fenced to. A retry replays its receipts; a changed
+payload under the same key — including a different client seed — is
+`IDEMPOTENCY_CONFLICT`; a stale fence is `STALE_FRAME` and mutates nothing.
+`reconcile()` is the one exception and it is the specified one: it is
+server-initiated, so it takes the round's current revision from the book and a
+reserved key derived from the round id, which is what stops it racing a player
+command ([docs/ENGINE.md §5.5](docs/ENGINE.md)).
 
 ### What the engine provides, and what it does not
 

@@ -72,7 +72,7 @@ export function wireFrame(frame: StageFrame): Record<string, unknown> {
     actionChain: frame.actionChain,
     wildUnits: frame.wildUnits,
     wildPeakUnits: frame.wildPeakUnits,
-    sideBetChips: frame.sideBetChips,
+    wildPopulations: frame.wildPopulations,
     creditedUnits: frame.creditedUnits.toString(),
     lastResolution: frame.lastResolution,
   };

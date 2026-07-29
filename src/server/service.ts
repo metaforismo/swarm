@@ -224,9 +224,13 @@ export class RoundService {
   reconcile(roundId: string): CommandResult<Settlement> {
     const record = this.record(roundId);
     const book = this.book(roundId);
-    if (!this.#isAbandoned(record))
-      fail('TOO_EARLY', 'This round is not past the abandonment timeout', '$.roundId');
     const alreadySettled = book.settlement !== null;
+    // A settled round goes straight to the book: a reconciliation that already
+    // ran replays through its reserved key, and a player-settled round answers
+    // `ROUND_SETTLED`. Checking the clock first would answer `TOO_EARLY` to a
+    // retry of the very call that stopped the clock.
+    if (!alreadySettled && !this.#isAbandoned(record))
+      fail('TOO_EARLY', 'This round is not past the abandonment timeout', '$.roundId');
     const result = book.reconcile(`reconcile:${record.roundId}`);
     if (!alreadySettled) this.#closeRound(record, result);
     return result;

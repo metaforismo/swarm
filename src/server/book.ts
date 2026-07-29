@@ -53,16 +53,6 @@ import { sealSettlement, type Receipt, type Settlement } from './settlement.ts';
 
 export type BookState = 'STAGED' | 'AWAITING_SETTLEMENT' | 'SETTLED';
 
-export type SideBetChipState = 'LIVE' | 'WON' | 'LOST';
-
-export interface SideBetChip {
-  readonly id: string;
-  readonly state: SideBetChipState;
-  /** Wild-line peak through the generation the player has resolved, for `SWARM`. */
-  readonly peak: number | null;
-  readonly target: number | null;
-}
-
 export interface StageResolution {
   readonly stage: number;
   readonly fromUnits: number;
@@ -90,7 +80,13 @@ export interface StageFrame {
   /** Wild-line population at the stage the player has just resolved. Never a later one. */
   readonly wildUnits: number;
   readonly wildPeakUnits: number;
-  readonly sideBetChips: readonly SideBetChip[];
+  /**
+   * The wild line through the stage the player has resolved, and not one
+   * generation further (§5.2). It is wild-line *state*, never a bet resolution:
+   * a frame never carries one, and a client derives a side bet's own chip from
+   * this the way `docs/DESIGN.md` §4.2 describes.
+   */
+  readonly wildPopulations: readonly number[];
   readonly creditedUnits: bigint;
   /**
    * What each organism did in the generation this frame resolved — the draws the
@@ -110,6 +106,12 @@ export interface OpenRequest {
   readonly expectedFrameRevision: number;
   readonly stakeUnits: bigint;
   readonly sideBets: readonly { readonly id: string; readonly stakeUnits: bigint }[];
+  /**
+   * The entropy this ticket was opened with. It is part of the command payload —
+   * it decides every draw — so it is bound into the idempotency fingerprint and
+   * checked against the round the book is already derived from.
+   */
+  readonly clientEntropy: string;
 }
 
 export interface AdvanceRequest {
@@ -214,9 +216,15 @@ export class StageBook {
       'open',
       request.idempotencyKey,
       request.expectedFrameRevision,
-      [request.stakeUnits, ...this.#sideBetFields(request.sideBets)],
+      [
+        request.stakeUnits,
+        String(request.clientEntropy ?? '').toLowerCase(),
+        ...this.#sideBetFields(request.sideBets),
+      ],
       () => {
         if (this.#opened) fail('INVALID_REQUEST', 'This round is already open', '$.roundId');
+        if (String(request.clientEntropy ?? '').toLowerCase() !== this.context.clientEntropy)
+          fail('INVALID_REQUEST', 'This round is bound to a different client seed', '$.clientEntropy');
         const stakeUnits = assertStake(
           request.stakeUnits,
           SWARM.risk.minStakeUnits,
@@ -394,6 +402,9 @@ export class StageBook {
   reconcile(idempotencyKey: string): CommandResult<Settlement> {
     return this.#command('reconcile', idempotencyKey, null, [], () => {
       if (!this.#opened) fail('INVALID_REQUEST', 'This round was never opened', '$.roundId');
+      // Everything from here is posted by this one call, including the forced
+      // bank: unlike a player harvest, nobody credited it on the way in.
+      const posted = this.#receipts.length;
       let guard = 0;
       while (this.#state === 'STAGED') {
         if (guard++ > SWARM.ladder.stages + 1)
@@ -406,7 +417,7 @@ export class StageBook {
       }
       const sealed = this.#seal(this.#seed, 'RECONCILED');
       this.#revision += 1;
-      return sealed;
+      return { receipts: this.#receipts.slice(posted), value: sealed.value };
     });
   }
 
@@ -650,59 +661,15 @@ export class StageBook {
       state: this.#state,
       actionChain: this.#chain[this.#chain.length - 1] as string,
       wildUnits: stage === 0 ? SWARM.seedUnits : (this.#wild.populations[stage - 1] as number),
-      wildPeakUnits: wildPeakThrough(this.#wild, stage),
-      sideBetChips: this.#chips(settled),
+      wildPeakUnits: settled ? this.#wild.peak : wildPeakThrough(this.#wild, stage),
+      wildPopulations: Object.freeze(
+        this.#wild.populations.slice(0, settled ? undefined : stage),
+      ),
       lastResolution: this.#lastResolution,
       creditedUnits: this.#receipts
         .filter((receipt) => receipt.direction === 'CREDIT')
         .reduce((total, receipt) => total + receipt.amountUnits, 0n),
     });
-  }
-
-  /**
-   * A live side bet's own state, in numerals, for the bets the player actually
-   * placed — and never one generation further than the player has resolved.
-   *
-   * `SWARM` may flip to `WON` early, because its predicate is on a peak and a peak
-   * is monotone: "it has already won" is a statement about generations already
-   * resolved. "It can no longer win" is not knowable early and is never implied.
-   */
-  #chips(settled: boolean): readonly SideBetChip[] {
-    const chips: SideBetChip[] = [];
-    const stage = this.#stage;
-    const populations = this.#wild.populations.slice(0, settled ? undefined : stage);
-    const peak = settled ? this.#wild.peak : wildPeakThrough(this.#wild, stage);
-    for (const id of SIDE_BET_IDS) {
-      if (this.#sideBetStakes[id] === undefined) continue;
-      if (id === 'FIRST_LIGHT') {
-        const first = populations[0];
-        chips.push({
-          id,
-          state: first === undefined ? 'LIVE' : first >= 4 ? 'WON' : 'LOST',
-          peak: null,
-          target: 4,
-        });
-        continue;
-      }
-      if (id === 'DARK_VENT') {
-        const extinctIndex = populations.indexOf(0);
-        const extinctBy = extinctIndex !== -1 && extinctIndex + 1 <= 3;
-        chips.push({
-          id,
-          state: extinctBy ? 'WON' : populations.length >= 3 || settled ? 'LOST' : 'LIVE',
-          peak: null,
-          target: 3,
-        });
-        continue;
-      }
-      chips.push({
-        id,
-        state: peak >= 10 ? 'WON' : settled ? 'LOST' : 'LIVE',
-        peak,
-        target: 10,
-      });
-    }
-    return Object.freeze(chips);
   }
 }
 

@@ -128,7 +128,7 @@ export function receiptSheet(config, view) {
 }
 
 /** S9 — the verify sheet: the eight checks of docs/ENGINE.md §4.6, re-derived. */
-export function verifySheet(config, view, result) {
+export function verifySheet(config, view, result, witness = []) {
   const fragment = document.createDocumentFragment();
   const proof = view.settlement.proof;
 
@@ -157,26 +157,62 @@ export function verifySheet(config, view, result) {
   }
   fragment.append(steps);
 
-  const log = panel('Action log, with the chain you were handed');
+  const log = panel('Action log, with the chain it folds into');
+  // The chain folds one RESOLVE per generation and one event per decision, in
+  // order, so the value that seals the action at generation g — the g-th
+  // resolution and the i decisions before it — is at index g + i + 1.
   log.append(
     table(
-      ['Event', 'Gen', 'Units', 'Chain'],
+      ['Event', 'Gen', 'Units', 'Chain after'],
       proof.actionLog.map((action, index) => [
         action.kind,
         action.generation,
         action.units,
-        shortHex(proof.liveChainValues[index + 1] ?? proof.actionChain, 6, 4),
+        shortHex(proof.liveChainValues[action.generation + index + 1] ?? proof.actionChain, 6, 4),
       ]),
     ),
   );
-  log.append(
-    el(
-      'p',
-      'small muted',
-      'Each value is a hash of everything you had seen up to that point, handed to you before the seed was revealed. Keeping them is what makes the log evidence against a third party.',
-    ),
-  );
   fragment.append(log);
+
+  const held = panel('What you were handed, before the seed existed');
+  if (witness.length === 0) {
+    held.append(
+      el(
+        'p',
+        'small muted',
+        'This device did not retain the chain values for this round — it was reloaded, or the round was restored after the fact. The settlement below still re-derives, but only against the list the settlement itself published: a retained witness is what makes the log evidence against a third party (docs/ENGINE.md §4.3).',
+      ),
+    );
+  } else {
+    const published = new Set(proof.liveChainValues);
+    const matched = witness.filter((entry) => published.has(entry.actionChain));
+    held.append(row('Values retained', String(witness.length)));
+    held.append(
+      row(
+        'Present in the settled chain',
+        `${matched.length} / ${witness.length}`,
+        matched.length === witness.length ? '' : 'muted',
+      ),
+    );
+    held.append(
+      table(
+        ['Command', 'Gen', 'Chain'],
+        witness.map((entry) => [
+          entry.revision,
+          entry.stage,
+          shortHex(entry.actionChain, 6, 4),
+        ]),
+      ),
+    );
+    held.append(
+      el(
+        'p',
+        'small muted',
+        'Each of these was handed to this device during the round, while the server seed was still sealed. An operator that rewrote the log afterwards could not produce a chain these are a prefix of.',
+      ),
+    );
+  }
+  fragment.append(held);
 
   const grid = panel('The grid');
   grid.append(row('Draws per round', `${config.rules.gridSize} (18 × 15)`));
@@ -368,7 +404,7 @@ export function helpSheet(config) {
   const ladder = panel('The yield ladder');
   ladder.append(
     table(
-      ['Gen', 'Per organism', 'Colony of 3', 'Organisms to beat the stake'],
+      ['Gen', 'Per organism', 'Colony of 3', 'Organisms worth more than the stake'],
       config.ladder.map((entry, index) => [
         entry.generation,
         entry.decimal,

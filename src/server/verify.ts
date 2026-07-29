@@ -72,12 +72,13 @@ const STEP_NAMES = [
 export function verifyRound(proof: ProofBundle): VerificationResult {
   const steps: VerificationStep[] = [];
   let cursor = 0;
+  const nameAt = (index: number): string => STEP_NAMES[index] ?? 'verification';
   const pass = (detail: string): void => {
-    steps.push({ step: cursor + 1, name: STEP_NAMES[cursor] as string, ok: true, detail });
+    steps.push({ step: cursor + 1, name: nameAt(cursor), ok: true, detail });
     cursor += 1;
   };
   const stop = (code: string, detail: string): VerificationResult => {
-    steps.push({ step: cursor + 1, name: STEP_NAMES[cursor] as string, ok: false, detail });
+    steps.push({ step: cursor + 1, name: nameAt(cursor), ok: false, detail });
     return { ok: false, code, detail, steps: Object.freeze(steps) };
   };
 
@@ -156,6 +157,10 @@ export function verifyRound(proof: ProofBundle): VerificationResult {
     });
     if (receipts.length !== expected.receipts.length)
       return stop('TRANSCRIPT_MISMATCH', 'receipt count does not re-derive');
+    // Every receipt field the settlement body seals is compared, not only the
+    // amount: the body is re-sealed from the recomputation, so a bundle whose
+    // displayed `resolved` or `unitsHarvested` disagrees with the round would
+    // otherwise reach a player as VERIFIED.
     const mismatch = (at: number): boolean => {
       const actual = receipts[at] as Receipt;
       const want = expected.receipts[at] as Receipt;
@@ -165,7 +170,9 @@ export function verifyRound(proof: ProofBundle): VerificationResult {
         actual.line !== want.line ||
         actual.direction !== want.direction ||
         actual.stage !== want.stage ||
-        actual.amountUnits !== want.amountUnits
+        actual.amountUnits !== want.amountUnits ||
+        (actual.unitsHarvested ?? 0) !== want.unitsHarvested ||
+        (actual.resolved ?? null) !== want.resolved
       );
     };
     for (let at = 0; at < receipts.length; at += 1) {
@@ -186,11 +193,16 @@ export function verifyRound(proof: ProofBundle): VerificationResult {
       if (mismatch(at))
         return stop('TRANSCRIPT_MISMATCH', `${receipt.line} receipt ${at + 1} does not re-derive`);
     }
-    for (const result of proof.sideBetResults ?? []) {
-      const want = expected.proof.sideBetResults.find((entry) => entry.id === result.id);
-      if (want === undefined) return stop('TRANSCRIPT_MISMATCH', `unknown side bet ${result.id}`);
-      if (result.resolved !== want.resolved)
-        return stop('TRANSCRIPT_MISMATCH', `side bet ${result.id} does not re-derive`);
+    // The body seals the whole ordered result set, so the verifier requires the
+    // whole ordered result set rather than checking whichever rows it was handed.
+    const results = proof.sideBetResults ?? [];
+    if (results.length !== expected.proof.sideBetResults.length)
+      return stop('TRANSCRIPT_MISMATCH', 'side-bet results are incomplete');
+    for (let at = 0; at < results.length; at += 1) {
+      const actual = results[at] as { id: string; resolved: string };
+      const want = expected.proof.sideBetResults[at];
+      if (want === undefined || actual.id !== want.id || actual.resolved !== want.resolved)
+        return stop('TRANSCRIPT_MISMATCH', `side bet ${actual.id} does not re-derive`);
     }
     pass(
       `wild line ${wild.populations.join(' → ')}, peak ${wild.peak}; ` +

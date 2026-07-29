@@ -140,12 +140,15 @@ describe('the worked ticket, end to end through the API', () => {
     // collected as the round runs and checked at the end against the line the
     // settlement finally reveals (§5.2).
     const disclosed: number[] = [];
-    const swarmChips: string[] = [];
+    const swarmPeaks: number[] = [];
     const observe = (payload: any): void => {
       const value = payload.frame;
       if (value.stage >= 1) disclosed[value.stage - 1] = value.wildUnits;
-      const chip = value.sideBetChips.find((entry: any) => entry.id === 'SWARM');
-      if (chip !== undefined && value.state !== 'SETTLED') swarmChips.push(chip.state);
+      // A frame carries wild-line state and never a bet resolution (§5.2), and it
+      // never carries a stage the player has not resolved.
+      expect(value.sideBetChips).toBeUndefined();
+      expect(value.wildPopulations).toHaveLength(value.state === 'SETTLED' ? 12 : value.stage);
+      swarmPeaks.push(value.wildPeakUnits);
       // A live round never carries a settlement, a revealed seed or a side-bet credit.
       if (value.state !== 'SETTLED') {
         expect(payload.settlement).toBeNull();
@@ -193,12 +196,11 @@ describe('the worked ticket, end to end through the API', () => {
     expect(frame.decisionOpen).toBe(true);
     expect(frame.terminal).toBeNull();
     expect(frame.wildUnits).toBe(4);
-    // FIRST LIGHT is a function of the wild line at generation 1 and nothing
-    // else, so it settles the instant generation 1 resolves.
-    expect(frame.sideBetChips).toEqual([
-      { id: 'FIRST_LIGHT', state: 'WON', peak: null, target: 4 },
-      { id: 'SWARM', state: 'LIVE', peak: 4, target: 10 },
-    ]);
+    // The wild line through generation 1 and no further: FIRST LIGHT is decided
+    // by it, and the client derives that chip rather than the protocol shipping a
+    // resolution (§5.2, DESIGN §4.2).
+    expect(frame.wildPopulations).toEqual([4]);
+    expect(frame.wildPeakUnits).toBe(4);
     // No side bet has been credited: they resolve at settlement and nowhere else.
     expect(g1.json.ledger.some((receipt: any) => receipt.kind === 'SIDE_BET')).toBe(false);
 
@@ -354,9 +356,9 @@ describe('the worked ticket, end to end through the API', () => {
     const wild = settled.json.settlement.wild.populations as number[];
     expect(disclosed).toEqual(wild.slice(0, disclosed.length));
     expect(disclosed.length).toBe(3);
-    // SWARM never said it could no longer win: a peak is monotone, so "already
-    // won" is knowable early and "cannot win" is not.
-    expect(swarmChips).not.toContain('LOST');
+    // The disclosed peak is monotone and never runs ahead of the wild line the
+    // player has resolved: 3 (the seeded colony) then 4, 5, 6.
+    expect(swarmPeaks).toEqual([3, 4, 4, 5, 5, 6, 6]);
 
     // A forged log, published against the honest body, is refused.
     const forged = await post(base, '/api/verify', {
@@ -540,6 +542,15 @@ describe('the frame fence, idempotency and hostile input', () => {
     expect(conflict.status).toBe(409);
     expect(conflict.json.error.code).toBe('IDEMPOTENCY_CONFLICT');
 
+    // The client seed is part of the payload — it decides every draw — so the
+    // same key with a different seed is a conflict, not a replay.
+    const otherEntropy = await post(base, `/api/rounds/${roundId}/open`, {
+      ...openBody,
+      clientEntropy: 'd'.repeat(64),
+    });
+    expect(otherEntropy.status).toBe(409);
+    expect(otherEntropy.json.error.code).toBe('IDEMPOTENCY_CONFLICT');
+
     // A stale fence mutates nothing.
     const stale = await post(base, `/api/rounds/${roundId}/advance`, {
       idempotencyKey: key(),
@@ -629,6 +640,20 @@ describe('the abandonment rule', () => {
     expect(reference.verifyRound(toReferenceBundle(reconciled.json.settlement.proof)).code).toBe(
       'VERIFIED',
     );
+
+    // The forced bank is money, and money the ledger records has to reach the
+    // wallet: 1000.00 opening, 1.00 staked, 1.583333 credited.
+    expect(reconciled.json.session.balanceUnits).toBe(String(1_000n * CREDIT - CREDIT + 1_583_333n));
+    expect(reconciled.json.session.history[0].netUnits).toBe(String(1_583_333n - CREDIT));
+
+    // The reserved key replays: a retry of the call that stopped the clock is not
+    // `TOO_EARLY`, and it credits nothing a second time.
+    const retried = await post(base, `/api/rounds/${roundId}/reconcile`);
+    expect(retried.status).toBe(200);
+    expect(retried.json.settlement.proof.bodyCommitment).toBe(
+      reconciled.json.settlement.proof.bodyCommitment,
+    );
+    expect(retried.json.session.balanceUnits).toBe(reconciled.json.session.balanceUnits);
   });
 
   it('settles a round that was staked and never advanced', async () => {

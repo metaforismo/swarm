@@ -27,6 +27,7 @@ const ENTRY_VALUE = 0.95; // 19/20: what the colony is worth the instant it is b
 const STORAGE_ROUND = 'swarm.roundId';
 const STORAGE_EXPLAINER = 'swarm.explainer-seen';
 const STORAGE_GHOST_TAUGHT = 'swarm.ghost-taught';
+const STORAGE_WITNESS = 'swarm.witness';
 
 const $ = (id) => document.getElementById(id);
 const dom = {
@@ -93,6 +94,8 @@ const state = {
   clientSeed: null,
   view: null,
   frame: null,
+  /** Every action-chain value this client was handed, in order, before the reveal. */
+  witness: [],
   stakeUnits: 1000000n,
   sideBets: new Map(),
   previousValue: null,
@@ -314,6 +317,7 @@ async function seedColony() {
       clientEntropy: state.clientSeed,
     });
     localStorage.setItem(STORAGE_ROUND, state.roundId);
+    state.witness = [];
     state.seededAt = Date.now();
     applyView(response);
     screen('round');
@@ -415,6 +419,9 @@ async function terminalFlow() {
   });
   applyView(response);
   renderSession(response.session);
+  // The strip behind the ceremony now shows the settled round: the side-bet chips
+  // carry their real resolutions, which is the first moment they exist.
+  renderFrame();
   localStorage.removeItem(STORAGE_ROUND);
   showCeremony();
 }
@@ -422,7 +429,40 @@ async function terminalFlow() {
 function applyView(view) {
   state.view = view;
   state.frame = view.frame;
+  retainWitness(view.frame);
   if (view.session !== undefined) renderSession(view.session);
+}
+
+/**
+ * The pre-reveal witness (`docs/ENGINE.md` §4.3).
+ *
+ * The chain value handed back with every frame is only evidence if the player
+ * keeps it: an operator that later rewrites the log cannot produce a chain the
+ * retained values are a prefix of. So each one is stored, in order, before the
+ * seed exists — and the verify sheet checks the settlement against what was
+ * retained rather than against the list the settlement itself supplied.
+ */
+function retainWitness(frame) {
+  if (frame === null || frame === undefined || frame.state === 'SETTLED') return;
+  if (state.witness.at(-1)?.actionChain === frame.actionChain) return;
+  state.witness.push({ revision: frame.revision, stage: frame.stage, actionChain: frame.actionChain });
+  try {
+    localStorage.setItem(
+      STORAGE_WITNESS,
+      JSON.stringify({ roundId: state.roundId, values: state.witness }),
+    );
+  } catch {
+    /* a full or blocked store costs the witness, not the round */
+  }
+}
+
+function loadWitness(roundId) {
+  try {
+    const stored = JSON.parse(localStorage.getItem(STORAGE_WITNESS) ?? 'null');
+    return stored !== null && stored.roundId === roundId ? stored.values : [];
+  } catch {
+    return [];
+  }
 }
 
 async function resyncRound() {
@@ -488,17 +528,46 @@ function renderFrame(delta) {
   renderActionBar();
 }
 
+/**
+ * A live side bet's chip, derived here from the wild-line state the frame is
+ * allowed to carry (§5.2) — the protocol never sends a resolution, and the
+ * settled state comes from the settlement like every other credited fact.
+ *
+ * `docs/DESIGN.md` §4.2 is the table: FIRST LIGHT is decided by the wild line at
+ * generation 1; DARK VENT is LIVE until the wild line is extinct or generation 3
+ * has passed; SWARM shows its peak against the target and may flip to WON early,
+ * because a peak is monotone — but "it can no longer win" is never knowable
+ * early and is never implied.
+ */
+function chipFor(id, frame, settled) {
+  const populations = frame.wildPopulations ?? [];
+  if (id === 'FIRST_LIGHT') {
+    const first = populations[0];
+    return { state: first === undefined ? 'LIVE' : first >= 4 ? 'WON' : 'LOST', text: null };
+  }
+  if (id === 'DARK_VENT') {
+    const extinct = populations.indexOf(0);
+    if (extinct !== -1 && extinct + 1 <= 3) return { state: 'WON', text: null };
+    return { state: populations.length >= 3 || settled ? 'LOST' : 'LIVE', text: null };
+  }
+  const peak = frame.wildPeakUnits;
+  if (peak >= 10) return { state: 'WON', text: null };
+  return { state: settled ? 'LOST' : 'LIVE', text: `PEAK ${peak} / 10` };
+}
+
 function renderChips() {
   dom.chips.replaceChildren();
-  for (const chip of state.frame.sideBetChips ?? []) {
-    const bet = state.config.sideBets.find((entry) => entry.id === chip.id);
+  const frame = state.frame;
+  const settled = frame.state === 'SETTLED';
+  for (const [id] of state.sideBets) {
+    const bet = state.config.sideBets.find((entry) => entry.id === id);
+    if (bet === undefined) continue;
+    const chip = chipFor(id, frame, settled);
     const node = document.createElement('span');
     node.className = 'chip';
     node.dataset.state = chip.state;
-    node.textContent =
-      chip.id === 'SWARM' && chip.state === 'LIVE'
-        ? `${bet.label} · PEAK ${chip.peak} / ${chip.target}`
-        : `${bet.label} · ${chip.state}`;
+    node.dataset.settled = String(settled);
+    node.textContent = `${bet.label} · ${chip.text ?? chip.state}`;
     dom.chips.append(node);
   }
 }
@@ -598,9 +667,14 @@ function showCeremony() {
     settlement.proof.terminal === 'RECONCILED'
       ? 'Closed by the 72-hour rule'
       : `Terminal · ${settlement.proof.terminal}`;
-  dom.settlementHeadline.textContent =
-    tier === 'T-nil' ? credits(0) : `${credits(credited)}`;
-  dom.settlementNet.textContent = `RETURNED ${credits(credited)} · NET ${signedCredits(net)}`;
+  // Below the stake, the signed net *is* the headline: §7.1 requires it to be at
+  // least as prominent as the credited amount, and a player must never have to do
+  // subtraction to find out they lost.
+  const down = tier === 'T-nil' || tier === 'T0-loss';
+  dom.settlementHeadline.textContent = down ? signedCredits(net) : credits(credited);
+  dom.settlementNet.textContent = down
+    ? `RETURNED ${credits(credited)} OF ${credits(staked)} STAKED`
+    : `RETURNED ${credits(credited)} · NET ${signedCredits(net)}`;
   dom.settlementCopy.textContent =
     tier === 'T-nil'
       ? 'Colony extinct. Whatever was not harvested is gone.'
@@ -656,7 +730,7 @@ async function openVerify() {
   const view = state.view;
   if (view?.settlement == null) return;
   const result = await api.verify(view.settlement.proof);
-  openSheet('Verify', verifySheet(state.config, view, result));
+  openSheet('Verify', verifySheet(state.config, view, result, state.witness));
 }
 
 // ------------------------------------------------------------------ wiring
@@ -843,6 +917,7 @@ async function boot() {
           Object.entries(view.sideBetStakes).map(([id, units]) => [id, BigInt(units)]),
         );
         state.seededAt = Date.now() - state.config.pacing.roundCycleMs;
+        state.witness = loadWitness(stored);
         applyView(view);
         stage.render(state.frame.units);
         stage.setValue(valueOf(state.frame));

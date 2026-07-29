@@ -458,7 +458,15 @@ button {
   white-space: nowrap;
 }
 
+/* A live bet that has met its condition is not banked money, so it is not AMBER:
+   AMBER means "yours, banked, safe" and appears nowhere else (§6.1). It turns
+   amber only once the settlement has actually credited it. */
 .chip[data-state='WON'] {
+  color: var(--lumen);
+  border-color: color-mix(in srgb, var(--lumen) 45%, transparent);
+}
+
+.chip[data-state='WON'][data-settled='true'] {
   color: var(--amber);
   border-color: color-mix(in srgb, var(--amber) 50%, transparent);
 }
@@ -780,11 +788,18 @@ table.data td.num {
   margin: 4px 0;
 }
 
+/* Below the stake the headline is the signed net result, and it is the largest
+   figure on the screen: §7.1 requires it to be at least as prominent as the
+   credited amount, in MIST, with no count-up and no amber. */
 .ceremony[data-tier='T0-loss'] .headline,
 .ceremony[data-tier='T-nil'] .headline {
   color: var(--mist);
-  font-size: 40px;
-  line-height: 44px;
+}
+
+.ceremony[data-tier='T0-loss'] .net,
+.ceremony[data-tier='T-nil'] .net {
+  font-size: 15px;
+  color: var(--mist);
 }
 
 .ceremony[data-tier='T0-win'] .headline,
