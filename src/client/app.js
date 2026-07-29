@@ -14,7 +14,7 @@
  * exposure, which is a pure function of the colony value the server sent.
  */
 import { ApiError, api, commandKey, generateClientSeed, isClientSeed } from './api.js';
-import { credits, multiple, percent, ratio, shortHex, signedCredits, truncate } from './format.js';
+import { credits, multiple, percent, shortHex, signedCredits, truncate } from './format.js';
 import { helpSheet, historySheet, receiptSheet, verifySheet, wildSheet } from './sheets.js';
 import { Stage } from './stage.js';
 
@@ -576,9 +576,22 @@ function showCeremony() {
   const credited = BigInt(settlement.creditedUnits);
   const staked = BigInt(settlement.stakedUnits);
   const net = BigInt(settlement.netUnits);
-  const x = ratio(credited, staked);
+  // The tiers compare integers, never floats: `X` is the round's credited
+  // multiple of what the ticket cost, and the first thing it splits on is whether
+  // the player is up or down (§7.1).
+  const atLeast = (multipleOfStake) => credited >= staked * BigInt(multipleOfStake);
   const tier =
-    credited === 0n ? 'T-nil' : x < 1 ? 'T0-loss' : x < 2 ? 'T0-win' : x < 10 ? 'T1' : x < 50 ? 'T2' : 'T3';
+    credited === 0n
+      ? 'T-nil'
+      : !atLeast(1)
+        ? 'T0-loss'
+        : !atLeast(2)
+          ? 'T0-win'
+          : !atLeast(10)
+            ? 'T1'
+            : !atLeast(50)
+              ? 'T2'
+              : 'T3';
 
   dom.settlement.dataset.tier = tier;
   dom.settlementTerminal.textContent =

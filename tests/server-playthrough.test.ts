@@ -136,8 +136,27 @@ describe('the worked ticket, end to end through the API', () => {
     expect(opened.json.session.balanceUnits).toBe('998300000');
     expect(opened.json.exposureUnits).toBe(String(1_000_000n * 906n + 500_000n * 5n + 200_000n * 249n));
 
+    // Every wild-line value the round ever discloses, and every SWARM chip state,
+    // collected as the round runs and checked at the end against the line the
+    // settlement finally reveals (§5.2).
+    const disclosed: number[] = [];
+    const swarmChips: string[] = [];
+    const observe = (payload: any): void => {
+      const value = payload.frame;
+      if (value.stage >= 1) disclosed[value.stage - 1] = value.wildUnits;
+      const chip = value.sideBetChips.find((entry: any) => entry.id === 'SWARM');
+      if (chip !== undefined && value.state !== 'SETTLED') swarmChips.push(chip.state);
+      // A live round never carries a settlement, a revealed seed or a side-bet credit.
+      if (value.state !== 'SETTLED') {
+        expect(payload.settlement).toBeNull();
+        expect(JSON.stringify(payload)).not.toContain('revealedSeed');
+        expect(payload.ledger.every((receipt: any) => receipt.kind !== 'SIDE_BET')).toBe(true);
+      }
+    };
+
     // Stage 0: three organisms, no ladder value, no decision, chain = phase 1.
     let frame = opened.json.frame;
+    observe(opened.json);
     expect(frame.stage).toBe(0);
     expect(frame.units).toBe(3);
     expect(frame.unitValue).toBeNull();
@@ -162,6 +181,7 @@ describe('the worked ticket, end to end through the API', () => {
       idempotencyKey: key(),
       expectedFrameRevision: frame.revision,
     });
+    observe(g1.json);
     frame = g1.json.frame;
     expect(frame.stage).toBe(1);
     expect(frame.units).toBe(4);
@@ -202,6 +222,7 @@ describe('the worked ticket, end to end through the API', () => {
     // floored one: 1000000 * 19/12 = 2375000/3 = 791666.666..., credited 791666.
     expect(h1.json.receipts[0].theoretical.fraction).toBe('2375000/3');
     expect(h1.json.receipts[0].theoretical.decimal).toBe('791666.666666');
+    observe(h1.json);
     frame = h1.json.frame;
     expect(frame.units).toBe(2);
     expect(frame.decisionOpen).toBe(false);
@@ -223,6 +244,7 @@ describe('the worked ticket, end to end through the API', () => {
       idempotencyKey: key(),
       expectedFrameRevision: frame.revision,
     });
+    observe(g2.json);
     frame = g2.json.frame;
     expect(frame.stage).toBe(2);
     expect(frame.units).toBe(3);
@@ -237,6 +259,7 @@ describe('the worked ticket, end to end through the API', () => {
       units: 1,
     });
     expect(h2.json.receipts[0].amountUnits).toBe('494791');
+    observe(h2.json);
     frame = h2.json.frame;
     expect(frame.units).toBe(2);
 
@@ -244,6 +267,7 @@ describe('the worked ticket, end to end through the API', () => {
       idempotencyKey: key(),
       expectedFrameRevision: frame.revision,
     });
+    observe(g3.json);
     frame = g3.json.frame;
     expect(frame.stage).toBe(3);
     expect(frame.units).toBe(3);
@@ -258,6 +282,7 @@ describe('the worked ticket, end to end through the API', () => {
       units: 3,
     });
     expect(banked.json.receipts[0].amountUnits).toBe('1855468');
+    observe(banked.json);
     frame = banked.json.frame;
     expect(frame.terminal).toBe('BANKED');
     expect(frame.state).toBe('AWAITING_SETTLEMENT');
@@ -321,6 +346,17 @@ describe('the worked ticket, end to end through the API', () => {
     // The whole wild line is disclosed only now, after the round (screen S8a).
     expect(settled.json.settlement.wild.populations).toEqual([4, 5, 6, 3, 2, 3, 4, 2, 1, 1, 1, 0]);
     expect(settled.json.settlement.wild.peak).toBe(6);
+
+    // §5.2, checked against the line the round only revealed at settlement: every
+    // frame carried the wild population for the stage the player had resolved and
+    // never one generation further. The player harvested twice here, so their own
+    // colony and the wild line had already diverged when this was disclosed.
+    const wild = settled.json.settlement.wild.populations as number[];
+    expect(disclosed).toEqual(wild.slice(0, disclosed.length));
+    expect(disclosed.length).toBe(3);
+    // SWARM never said it could no longer win: a peak is monotone, so "already
+    // won" is knowable early and "cannot win" is not.
+    expect(swarmChips).not.toContain('LOST');
 
     // A forged log, published against the honest body, is refused.
     const forged = await post(base, '/api/verify', {

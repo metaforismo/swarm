@@ -12,6 +12,9 @@
 
 const UNITS_PER_CREDIT = 1000000n;
 
+/** The typographic minus, so a signed number keeps tabular alignment. */
+const MINUS = '\u2212';
+
 /** Truncating credits from minor units: `1855468` → `1.85`. */
 export function credits(units, decimals = 2) {
   const value = typeof units === 'bigint' ? units : BigInt(units ?? 0);
@@ -21,7 +24,7 @@ export function credits(units, decimals = 2) {
   const scaled = (magnitude * scale) / UNITS_PER_CREDIT;
   const whole = scaled / scale;
   const fraction = (scaled % scale).toString().padStart(decimals, '0');
-  return `${negative ? '-' : ''}${whole}${decimals === 0 ? '' : `.${fraction}`}`;
+  return `${negative ? MINUS : ''}${whole}${decimals === 0 ? '' : `.${fraction}`}`;
 }
 
 /** Signed credits, with an explicit `+` on a gain. */
@@ -58,13 +61,6 @@ export function signedMultiple(value, decimals = 2) {
 export function toNumber(wire) {
   if (wire === null || wire === undefined) return 0;
   return Number(wire.decimal);
-}
-
-/** Units as a multiple of a stake, as a float, for the ceremony tiers only. */
-export function ratio(unitsA, unitsB) {
-  const a = Number(BigInt(unitsA ?? 0));
-  const b = Number(BigInt(unitsB ?? 0));
-  return b === 0 ? 0 : a / b;
 }
 
 /**
