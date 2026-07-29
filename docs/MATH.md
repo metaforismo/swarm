@@ -638,9 +638,10 @@ The base bet is a *volatility dial*, not a fixed profile:
 <!-- /generated:volatility -->
 
 Every row returns exactly `19/20` (section 6): the player chooses variance, never
-expectation. Note how far the profit rate and the hit rate can diverge — `BANK_FIRST` returns something 93.60% of the time and profits 45.60%
-of the time, while `RUN`'s two numbers coincide because its smallest non-zero
-payout is already above the stake.
+expectation. Note how far the profit rate and the hit rate can diverge —
+`BANK_FIRST` returns something 93.60% of the time and profits 45.60% of the
+time, while `RUN`'s two numbers coincide because its smallest non-zero payout is
+already above the stake.
 
 **The published range is a proven interval, not a sample.** Maximising the
 variance is a maximisation of the second moment, and because the expected

@@ -367,10 +367,16 @@ Pillar 1 is only true if it is specified, so here it is specified.
   18 (17.58x) is genuinely brighter than twelve organisms at generation 3
   (7.42x), because it is worth more — it is one very bright body rather than
   twelve dim ones.
-- **The stake line is a brightness landmark.** `E(1.00x) ≈ 0.146`. The value
-  strip draws a 1 px MIST tick at that level, so "am I above what I paid" is
-  answerable from the frame as well as from the number. It is a static reference,
-  never an animated target (§9.2).
+- **When the two beats change the light.** Linear radiance changes *during* the
+  outcome beat, as bodies split and die and their point lights appear and go
+  out. The exposure `E(V)` then settles to its new value across the 380 ms
+  verdict beat. There is one exposure animation per generation, not one per
+  organism.
+- **The stake line.** `E(1.00x) ≈ 0.146` is the exposure of a position worth
+  exactly what the player paid. The value strip marks 1.00x with a 1 px MIST
+  tick so the comparison is legible as a number, and because exposure is
+  monotone the frame agrees with the tick rather than contradicting it. The tick
+  is a static reference, never an animated target (§9.2).
 - **Extinction.** `V = 0`, so the colony contributes nothing: over 400 ms the
   scene falls to the vent's fixed 8% EMBER rim light and a 2% PLANKTON ambient.
   Do not fade to a bright screen; the dark is the point.
@@ -467,19 +473,37 @@ no amount of aesthetic justification makes it something else.
   regardless of how they got there, and a larger `Δ` never gets less emphasis
   than a smaller one.
 
+**The range `Δ` can actually take.** Every organism produces at most two
+children, so `m ≤ 2n` and
+
+```
+V(t+1) / V(t) = 5m / 4n  ≤  5/2      →   Δ ∈ [−100%, +150%]
+```
+
+`Δ = +150%` happens exactly when **every** organism splits, and `Δ = −100%` is
+extinction. The bands and the escalation below are scaled to that real interval,
+not to an imagined one — a hook whose top note can never sound is not a hook.
+
 **The verdict bands.**
 
 | `Δ` | Frame | Value strip | Audio |
 | --- | --- | --- | --- |
-| `Δ ≤ −50%` | Exposure falls to the new `E(V)` over 380 ms | Count-down, signed delta chip in MIST | One short low mark, −18 dB. No descending "fail" motif |
+| `Δ = −100%` | Terminal: extinction takes over (screen S6), no verdict beat | Final value 0.00x | The extinction fall, not a verdict mark |
+| `−100% < Δ ≤ −50%` | Exposure falls to the new `E(V)` over 380 ms | Count-down, signed delta chip in MIST | One short low mark, −18 dB. No descending "fail" motif |
 | `−50% < Δ < 0` | Same, smaller step | Same | Same mark, −22 dB |
 | `Δ = 0` | No change | Neutral tick | Soft membrane tick |
 | `0 < Δ ≤ +50%` | Exposure rises | Count-up, delta chip in FOAM | Two-note rise |
-| `Δ > +50%` | Exposure rises; MEDUSA rim on every body for 240 ms | Count-up, delta chip in FOAM | Rising chord, +1 semitone per additional 100% of `Δ`, capped at +7 |
+| `+50% < Δ ≤ +150%` | Exposure rises; MEDUSA rim on every body for 240 ms | Count-up, delta chip in FOAM | Rising chord, `round(7 * (Δ − 50%) / 100%)` semitones above the root |
 
-The escalating chime — still the audio hook of the game — is now keyed to how
-much money the position gained, which is what the player actually cares about,
-and is exactly as rare as large gains are.
+So the chord climbs from +0 semitones at a 50% gain to **+7 at the top of the
+scale, which sounds only when every organism in the colony splits at once** —
+`(1/5)^n`, a genuinely rare and genuinely large event. That is the hook, and
+every note of it now corresponds to money the player actually made.
+
+`Δ = 0` is reachable only when `5m = 4n`, i.e. when `n` is a multiple of 5: it
+has probability 23.04% at `n = 5` and 13.61% at `n = 15`, and probability zero
+at `n = 3`, `8` and `12`. A generation that ends the round (extinction, FULL
+BLOOM, generation 18) skips the verdict beat and goes to its terminal screen.
 
 ### 6.6 Type direction
 
@@ -588,7 +612,7 @@ with a long tail and no early reflections.
 | SPLIT mark | Short wet glass tick, 880 Hz, 8 ms attack, 180 ms decay, −18 dB | Informational only. It does **not** escalate and it does **not** grow with the number of splits (§6.5 R1) |
 | HOLD mark | 30 ms filtered tick, −22 dB | Barely present |
 | DIE mark | 90 Hz thud with fast low-pass, −18 dB | The same level as the split mark. Felt and heard, with no "fail" motif and no descending pitch (§6.5 R3) |
-| Verdict, gain | Two-note rise; above +50% a rising chord, **+1 semitone per additional 100% of value gained, capped at +7** | This is the hook, and it is keyed to money |
+| Verdict, gain | Two-note rise; above +50% a rising chord at `round(7 * (Δ − 50%) / 100%)` semitones | This is the hook, it is keyed to money, and its top note sounds only when every organism splits (§6.5) |
 | Verdict, loss | One short low mark, −18 dB, no pitch movement | Present, never punishing |
 | HARVEST | Granular amber pour, 400 ms, ending in a soft click | The click is the "banked" confirmation |
 | Settlement | Per tier (§7.1); T2 and T3 open with silence | The silence does the work |
@@ -659,15 +683,20 @@ The rules that follow are binding.
   invisible.
 - **Show where you stand; never show the way back.** The value strip always
   carries the stake line (§6.3) and the exact colony value, so the player can
-  always see whether they are up or down. The client may **not** compute or
-  display the population needed to return to the stake, and may not surface any
-  target, progress bar, or "distance to even" of any kind.
+  always see whether they are up or down. The play surface may **not** render
+  the population or the number of generations needed to return to the stake, and
+  may not surface any target, progress bar, countdown or "distance to even"
+  affordance, at any point in a round.
+- **Where the break-even ladder is allowed to live.** The table above is part of
+  the paytable and belongs in the help screen: identical for every player,
+  identical in every round state, reachable before, during and after a round,
+  and never pushed, highlighted, contextualised to the current colony, or
+  surfaced by anything the round does. A fact a player chooses to look up is not
+  the same object as a prompt fired at the moment they are losing, and the line
+  between them is whether the game brought it up.
 - **Banned copy**, in the UI and in notifications: "break even", "get back to",
   "back to even", "you need", "only N more", "almost there", "one more
-  generation", "don't stop now", "your colony can still". The break-even ladder
-  above may appear in the help screen as a static reference table, because a
-  fact the player can look up is not the same as a prompt fired at the moment
-  they are losing.
+  generation", "don't stop now", "your colony can still".
 - **No mid-round bets.** Side bets cannot be added after `SEED` (§3), so no bet
   is ever offered to a player who has just watched a bad generation.
 - **Nothing escalates as the round goes on.** No copy, sound or animation
