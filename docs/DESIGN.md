@@ -47,12 +47,13 @@ clock running anywhere.
 
 Partial cash-out is **not** new and this document does not claim it is. Evolution
 Gaming's live title *Cash or Crash* offers collect / collect-half / continue at
-every step, which is the same three-action decision set; several crash titles,
-Spribe's *Aviator* among them, give functional partial exit through a dual-bet
-panel and configurable auto-cash-out. Mathematically the claim would be weak
-anyway: [MATH.md §3](MATH.md) *forces* `m(n) = c * n`, so harvesting `k` of `n`
-is exactly "bank `k/n` of the position and let the rest ride" — a partial
-cash-out, not a new primitive.
+every step, which is essentially SWARM's decision set with a coarser quantum;
+several crash titles, Spribe's *Aviator* among them, give functional partial exit
+through a dual-bet panel and configurable auto-cash-out. SWARM's stepper reaches
+every `k` rather than only half, which is a finer dial and not a new idea.
+Mathematically the claim would be weak anyway: [MATH.md §3](MATH.md) *forces*
+`m(n) = c * n`, so harvesting `k` of `n` is exactly "bank `k/n` of the position
+and let the rest ride" — a partial cash-out, not a new primitive.
 
 What is defensible, stated narrowly:
 
