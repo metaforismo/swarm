@@ -1356,6 +1356,18 @@ copies of the same three values so that the *screen* is paced rather than the
 network, which is why `/api/config` publishes them: one set of numbers, two
 places that honour them, and neither able to drift from the other.
 
+**A floor is charged for cycling a round, so a refused command pays none.** A
+command the service rejects — a malformed payload, a stake a session limit refuses,
+a command fenced to a stale frame — has not cycled a round, and it hands its floor
+slot back rather than spending it. Without that, ten malformed requests cost 25
+seconds of held connections and queued the next honest stake behind ten cycle
+floors, which would make the game slower to argue with than to play. The converse
+is the load-bearing half: handing a slot back may never *shorten* a floor, so a
+release restores a live round's dead period rather than clearing it and can never
+roll back past a settlement hold — otherwise "get one command refused" would be a
+way to clear the floor on the next one. A command that succeeds keeps its slot,
+which is the whole of the floor. See [DECISIONS.md D8](DECISIONS.md).
+
 ### 9.8 The wild line is a bet's state, not a colony you could have had
 
 Round 3 shipped a **live wild-line ghost**: a dimmed trace of "the colony as it

@@ -248,8 +248,48 @@ that play dozens of rounds set the floors to zero through the documented service
 option, and the floors themselves are asserted with the defaults and real elapsed
 time.
 
+**Amended: a refused command pays no floor.** The first build charged every command
+that arrived, accepted or not. Ten malformed opens therefore cost 25 s of held
+connections and pushed the next honest stake behind all ten cycle floors — so
+arguing with the API was slower than playing it, and a client could buy a held
+connection with a piece of garbage. It was also the wrong reading of the rule: a
+floor is charged for *cycling a round*, and a rejected payload, a stake a session
+limit refused, or a command fenced to a stale frame has not cycled one. A refused
+command now hands its slot back (`Admission.release()` in `src/server/pacing.ts`);
+one that succeeds keeps it, which is what makes the floor a floor.
+
+**Two things a release must never do, both of which the first release did.** This is
+the dangerous half of the mechanism, because a rollback that returns one
+millisecond too many turns a floor into something a client can clear on demand by
+getting a command refused.
+
+  - *It must restore a round's dead period, not clear it.* A round that is already
+    open can be `open`ed again — a retry, a stale fence — so a **refused** open can
+    land on a **live** round. Deleting that round's dead period let a client take
+    its next decision immediately by getting one command deliberately refused
+    first: measured over HTTP at 4 ms against a 350 ms floor.
+  - *It must not roll back past a settlement hold.* A release returns the open gate
+    to where the released command found it, which is *before* any hold that landed
+    while it was waiting. The hold therefore lives on its own monotonic floor that
+    no release lowers, or a client with a refused open queued behind a real round
+    could settle that round and open the next one inside the 600 ms hold.
+
+Both are pinned by `tests/pacing.test.ts` against an injected clock, and both of
+those tests fail against the first release. The general rule the code implements: a
+release may only return time the released command itself was holding, and a write
+is skipped entirely if anything reserved after it.
+
+**What the release does not fix.** A refusal that arrives while a floor is
+*genuinely* running still waits it out, because a single high-water gate cannot
+return an out-of-order slot: six refusals fired concurrently inside a live cycle
+floor still take 15 s of held connections. That is the conservative direction — it
+never admits a command early — and the fix covers the case that actually happens,
+a refusal when no floor is in force. Returning out-of-order slots needs the queue
+this decision already says real scale needs.
+
 **Reopen if.** Real-scale deployment. The mechanism changes; the property that a
-floor is never a refusal does not.
+floor is never a refusal does not, and neither does the rule that a release may
+never shorten a floor it did not create.
 
 ---
 

@@ -860,6 +860,109 @@ describe('the speed-of-play floors', () => {
     expect(paced).toBeGreaterThanOrEqual(700);
     expect(paced - unpaced).toBeGreaterThanOrEqual(500);
   }, 20000);
+
+  /*
+   * A floor is charged for cycling a round, and a refused command has not cycled
+   * one. Without the release, ten pieces of garbage cost 25 s of held connections
+   * and pushed the next honest stake behind all ten cycle floors — so arguing with
+   * the API was slower than playing it, and a client could hold a connection per
+   * malformed request it chose to send.
+   */
+  it('charges no floor for a command it refuses', async () => {
+    const { base } = await start(FIXTURE_A, spread(FIXTURE_A));
+
+    // Ten opens that cannot succeed: the client entropy is not 32 bytes of hex.
+    const refusedAt = Date.now();
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const roundId = (await post(base, '/api/rounds')).json.roundId as string;
+      const refused = await post(base, `/api/rounds/${roundId}/open`, {
+        idempotencyKey: key(),
+        expectedFrameRevision: 0,
+        stakeUnits: '1000000',
+        sideBets: [],
+        clientEntropy: 'not-thirty-two-bytes-of-hex',
+      });
+      expect(refused.status).toBe(400);
+      expect(refused.json.error.code).toBe('INVALID_REQUEST');
+    }
+    const refusalCost = Date.now() - refusedAt;
+    // Ten refusals are answered promptly rather than each waiting out a cycle.
+    expect(refusalCost).toBeLessThan(2500);
+
+    // And the first honest stake after them is not queued behind ten floors.
+    const roundId = (await post(base, '/api/rounds')).json.roundId as string;
+    const honestAt = Date.now();
+    const opened = await stake(base, roundId);
+    expect(opened.status).toBe(200);
+    expect(Date.now() - honestAt).toBeLessThan(2500);
+  }, 30000);
+
+  /*
+   * The release must give a slot back without ever *shortening* a floor, and the
+   * first implementation of it did both. A round already open can be `open`ed
+   * again — a retry, or a stale fence — so a refused `open` can land on a live
+   * round, and deleting that round's dead period instead of restoring it let a
+   * client take its next decision immediately by getting one command deliberately
+   * refused first. Measured before the fix: 4 ms against a 350 ms floor.
+   *
+   * The cycle gate is allowed to fall into the past first, so the refused `open`
+   * is admitted with no wait of its own and cannot pay the floor it is clearing.
+   */
+  it('cannot be cleared by getting a command deliberately refused', async () => {
+    const { base } = await start(FIXTURE_B, spread(FIXTURE_B));
+    const roundId = (await post(base, '/api/rounds')).json.roundId as string;
+    const opened = await stake(base, roundId);
+    expect(opened.status).toBe(200);
+
+    // Let the 2,500 ms cycle gate expire, so nothing below waits on it.
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+
+    const advanced = await post(base, `/api/rounds/${roundId}/advance`, {
+      idempotencyKey: key(),
+      expectedFrameRevision: opened.json.frame.revision,
+    });
+    expect(advanced.status).toBe(200);
+
+    // A refused `open` on this live round: it must not clear the dead period the
+    // accepted `advance` above just established.
+    const startedAt = Date.now();
+    const refused = await post(base, `/api/rounds/${roundId}/open`, {
+      idempotencyKey: key(),
+      expectedFrameRevision: 999,
+      stakeUnits: '1000000',
+      sideBets: [],
+      clientEntropy: ENTROPY,
+    });
+    expect(refused.json.error.code).toBe('STALE_FRAME');
+
+    const next = await post(base, `/api/rounds/${roundId}/advance`, {
+      idempotencyKey: key(),
+      expectedFrameRevision: advanced.json.frame.revision,
+    });
+    expect(next.status).toBe(200);
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(350);
+  }, 30000);
+
+  it('still charges the floor for a command it accepts', async () => {
+    const { base } = await start(FIXTURE_A, spread(FIXTURE_A));
+    const first = (await post(base, '/api/rounds')).json.roundId as string;
+    const second = (await post(base, '/api/rounds')).json.roundId as string;
+
+    // A refusal between two accepted stakes releases only its own slot: the floor
+    // between the two real ones is untouched.
+    const startedAt = Date.now();
+    expect((await stake(base, first)).status).toBe(200);
+    const refused = await post(base, `/api/rounds/${second}/open`, {
+      idempotencyKey: key(),
+      expectedFrameRevision: 0,
+      stakeUnits: 'not-a-number',
+      sideBets: [],
+      clientEntropy: ENTROPY,
+    });
+    expect(refused.json.error.code).toBe('INVALID_REQUEST');
+    expect((await stake(base, second)).status).toBe(200);
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(2500);
+  }, 20000);
 });
 
 /**
