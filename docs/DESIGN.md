@@ -10,6 +10,10 @@ quoted here are the exact ones from [MATH.md](MATH.md); the enumeration in
 `<!-- generated:... -->` markers are written by `npm run docs:sync`, and the test
 suite fails if this document disagrees with the model.
 
+Where a rule here replaced something that had to be cut, the decision is recorded
+in [DECISIONS.md](DECISIONS.md) — what was rejected, what the rejection costs, and
+what would reopen it.
+
 ---
 
 ## 1. What the game is
@@ -98,6 +102,14 @@ Organisms never resolve one at a time — a 14-organism generation must not take
 14 seconds. The **verdict** beat is where all emphasis lives, and §6.5 is the
 rule that decides how loud it is.
 
+**Skipping ends an animation, not a beat.** There is no minimum time on any
+*decision* — that is the whole point of an untimed game — and there is a minimum
+time on the *cycle*: a 350 ms dead period between a resolved state and the action
+bar accepting input, a 600 ms hold before `NEW ROUND` is live, and a 2,500 ms
+floor on a whole round. §9.7 is the rule and the reason; without it, tap-to-skip
+makes a `BANK_FIRST` round about a second long, which is a speed-of-play decision
+made by accident.
+
 **Round length.** 5.85 generations on average under the never-bank policy;
 6.4% of rounds die in generation 1; 35% are extinct by generation 3; 2.2%
 survive all 18 generations.
@@ -116,7 +128,7 @@ distribution of outcomes in a way we can state exactly, or it does not exist.
 | **Client seed** | Before generation 1 **only**, after the server has published its commitment | Changes the whole 270-draw grid. It is the player's half of the fairness handshake: the server sealed its seed first, so it cannot pick a grid to suit the entropy you choose ([ENGINE.md §4.5](ENGINE.md)) | The distribution of anything. Every client seed gives the same 95% and the same odds |
 | `SEED` | Before generation 1 | Sends the client seed and starts the round | Nothing about the outcome — the grid is fixed the moment both halves exist |
 | `CONTINUE` | After every resolved generation (`t < 18`) | Colony consumes `n` more draws; value moves up the ladder or to zero | Expected return |
-| `HARVEST k` | Same, when `n >= 2` | Credits any `k` from 1 to `n - 1` organisms **now** at the current yield; the rest keep climbing. Because a smaller colony consumes fewer draws, this genuinely changes which draws you meet next generation | Expected return |
+| `HARVEST k` | Same, when `n >= 2`; once per generation | Credits any `k` from 1 to `n - 1` organisms **now** at the current yield; the rest keep climbing. Because a smaller colony consumes fewer draws, this genuinely changes which draws you meet next generation. It also caps how large the colony can become, which is why FULL BLOOM frequencies are published per play pattern ([MATH.md §8.2](MATH.md)) | Expected return |
 | `BANK` | Same | Ends the round at the exact current value (`k = n`) | Expected return |
 
 **Information available at a decision.** The player knows: the generation index,
@@ -190,10 +202,13 @@ was one generation stricter than the mathematics requires. The exact boundary
 > resolved and every earlier one. It may never show, or hint at through timing,
 > the wild line for a generation the player has not resolved.
 
-So the round ships a **wild-line ghost**: a dimmed, desaturated PLANKTON trace of
-the counterfactual colony drawn behind the player's own bodies, one ghost per
-wild organism, updating on the same 900 ms beat and never ahead of it. Above it,
-one chip per live side bet:
+That is the *fairness* boundary. It says what the client may show without
+breaking the invariance theorem; it does not say what the client *should* show,
+and §9.8 is where that second question is answered — because a live counterfactual
+colony is a responsible-design object as well as a fairness one, and round 3
+shipped one without ever putting it in front of §9.
+
+What the round ships is one chip per live side bet, in the value strip:
 
 | Bet | In-round state | When the chip settles |
 | --- | --- | --- |
@@ -201,21 +216,28 @@ one chip per live side bet:
 | **DARK VENT** | `LIVE` until the wild line is extinct or generation 3 passes, then `WON` / `LOST` | generation 3 |
 | **SWARM** | `LIVE`, with the wild line's peak so far against the target: `PEAK 7 / 10`. Flips to `WON` the moment the peak reaches 10 and never flips back | when it wins, or at settlement |
 
-`SWARM` is the one that needs care and the one where the care is cheap. Its
-predicate is on the **peak**, which is monotone, so "it has already won" is a
-statement about generations the player has resolved and is free to show. "It can
-no longer win" is *not* knowable early and the client must never imply it — no
-greying out, no struck-through chip, no "needs 3 more" copy. The chip reads
-`LIVE` until it reads `WON`, or until settlement says `LOST`.
+The chip is the bet's own state, in numerals, and it is shown only for a bet the
+player actually placed. `SWARM` is the one that needs care and the one where the
+care is cheap. Its predicate is on the **peak**, which is monotone, so "it has
+already won" is a statement about generations the player has resolved and is free
+to show. "It can no longer win" is *not* knowable early and the client must never
+imply it — no greying out, no struck-through chip, no "needs 3 more" copy. The
+chip reads `LIVE` until it reads `WON`, or until settlement says `LOST`.
 
-**Why the ghost is a design requirement and not a nicety.** Side bets resolve on
-a colony that visibly diverges from the one the player is watching the moment
-they harvest. Without the ghost, a player at 9 organisms who harvests four and
-then loses SWARM will reasonably believe they killed their own bet. The ghost
-makes the divergence the first thing they see: the moment you harvest, your
-bodies drop and the ghosts do not. Copy on the first harvest of a round with a
-live side bet, once per session: *"Side bets follow the colony that never gets
-harvested. Harvesting cannot lose you one."*
+**The divergence still has to be taught, once, at the moment it happens.** Side
+bets resolve on a colony that visibly separates from the one the player is
+watching the instant they harvest. Without something, a player at 9 organisms who
+harvests four and then loses SWARM will reasonably believe they killed their own
+bet. So the harvest beat — and only the harvest beat — draws the **wild-line
+ghost**: a dimmed PLANKTON trace of the unharvested colony, over the 400 ms of
+the harvest animation, fading out with it. Your bodies drop; the ghosts do not;
+then they are gone. Copy on the first harvest of a round with a live side bet,
+once per session: *"Side bets follow the colony that never gets harvested.
+Harvesting cannot lose you one."* The completed wild line is shown after the
+round, on S8a, where it can no longer sit next to a decision.
+
+**What the ghost is not, any more.** Round 3 drew it continuously, behind the
+player's own bodies, for the whole round. §9.8 is the analysis that removed it.
 
 **DARK VENT is not insurance and may not be dressed as insurance.** See §9.4.
 
@@ -235,6 +257,32 @@ harvesting exactly one organism at a population of 15; shipping only
 `floor(n / 2)` would publish a range no player could reach. Either the number
 comes off the marketing sheet or the button goes in the client, and the button is
 cheaper and more honest.
+
+**The control commits once per generation, and the panel says so by changing.**
+A generation's decision is a single choice of `k` on the continuum from
+`CONTINUE` (`k = 0`) through `HARVEST` to `BANK` (`k = n`); committing it closes
+that generation ([ENGINE.md §5.3](ENGINE.md)). So after a partial harvest the
+action bar collapses to `NEXT` alone, with the remaining colony and its value
+still printed. Nothing is taken away that the protocol would have accepted: a
+second harvest at the same generation credits the same organisms at the same
+yield as one harvest of their sum, and floors twice instead of once, so it is
+worth at most the same and usually one minor unit less
+([MATH.md §13](MATH.md)). What it *is* is a control that would have been refused,
+and a control that would be refused must not be on screen. §5 (S4, S5) is the
+screen behaviour and §9.8 is the input guard that stops a stray tap committing
+one.
+
+**What harvesting costs, stated where it belongs.** Harvesting caps how large the
+colony can get — halve it every generation and the survivor count can never grow,
+so FULL BLOOM becomes unreachable rather than rare
+([MATH.md §8.2](MATH.md)). That is a real property of a real choice and the
+player is entitled to know it. It belongs in the **help screen**, with the
+per-policy table, identical for every player and every round state, and it may
+never be surfaced at the moment of a harvest — a message that says "harvesting
+costs you the jackpot" fired at a decision is a nudge to continue, which is
+exactly what §9.2 forbids. A fact a player looks up is not the same object as a
+prompt fired at them, and the line between them is whether the game brought it
+up.
 
 **There is no harvest plan and no in-round auto-play.** Round 2 specified four
 pre-commit presets, one of which (`RIDE TO 18`) resolved an entire round with no
@@ -277,9 +325,34 @@ portrait-native.
 └──────────────────────────────┘  ladder chip + generation dots
 ```
 
+**S0 — First round only.** A three-panel explainer, shown once, before the first
+`SEED` a device ever sends, skippable at any point and repeatable from help. It
+exists because the comprehension load is real and specifying zero onboarding for
+the single largest product risk is a gap: colony value is a product of two
+numbers, the first yield is the unintuitive `0.395833`, and the player's very
+first frame is a mandatory generation that leaves them below their stake 54.40%
+of the time.
+
+| Panel | Says | Shows |
+| --- | --- | --- |
+| 1 | *"Every generation, each organism dies, holds, or splits."* | The three outcomes on one organism, at the real 900 ms beat, with the permanent `DIE 40% · HOLD 40% · SPLIT 20%` legend already in place |
+| 2 | *"Your colony is worth its size times a yield that climbs 25% a generation. It can go down."* | A three-organism colony resolving to two, with the value strip falling and the stake line held |
+| 3 | *"Bank it whenever you like, or harvest part and let the rest run. Every way of playing returns the same 95% on average, before rounding."* | The action bar, with the harvest stepper opening once |
+
+Binding rules, so this cannot become a different object later: it is shown before
+a round, never during one and never after a loss; it is identical for every
+player; it never mentions a jackpot, a frequency or a "best" way to play; and the
+`SEED` control is reachable from every panel. It is not a demo round — a free
+round would put a resolved outcome in front of a player before their first stake,
+which is a different product decision and is not made here.
+
 **S1 — Stake & seed.** Vent idle in darkness, stake stepper centred, side-bet
 row collapsed by default behind a single `+ SIDE BETS` control. Opening it shows
-three independent stake steppers and a running **total at risk**.
+three independent stake steppers and a running **total at risk**. Beside the
+total, the per-line profit rates and — when the stakes are equal — the ticket
+figure from [MATH.md §7.4](MATH.md); when they are not equal, the per-line rates
+alone, because a combined figure for an arbitrary stake ratio is a number nobody
+has computed (§9.3).
 
 Below that, a `FAIRNESS` row, collapsed by default, containing both halves of the
 handshake:
@@ -302,9 +375,11 @@ SPLIT 20%`) — it is never hidden, at any point in the round.
 
 **S3 — Generation resolve.** Draw flash, simultaneous outcomes, verdict. The
 generation dot row at the bottom advances one dot. Tapping skips to the resolved
-state. If any side bet is live, the **wild-line ghost** (§4.2) resolves on the
-same beat, one frame behind nothing — it shows the generation that just
-resolved and never the next one.
+state — and skipping ends the animation, not the beat: the decision controls stay
+inert for the dead period in §9.8, and the tap that skipped is consumed by the
+stage surface, which does not overlap the action bar. Any live side-bet chip
+updates on the same beat, for the generation that just resolved and never the
+next one.
 
 **S4 — Decision.** The three controls appear. `BANK` is always the visually
 primary action (filled, LUMEN). `HARVEST` is secondary (outlined) and shows
@@ -312,17 +387,30 @@ exactly what a tap will pay: `HARVEST 2 → 1.23`; pressing and dragging it open
 the `1 … n-1` stepper (§4.3) with the credit updating live. `NEXT` is tertiary
 (ghost). No timer, no countdown ring, no pulsing "hurry" animation. The panel
 states the next generation's yield so the trade-off is explicit: *"Next
-generation: 0.77x per organism."*
+generation: 0.77x per organism."* That is a per-organism ladder constant and it
+is the only forward-looking number on the play surface; §9.2 sets the exact rules
+that keep it a price rather than a target.
 
 **The panel is identical whether the player is above or below their stake.**
 Same layout, same hierarchy, same copy, same colours — only the numbers differ.
 §9.2 is the full rule and it is the single most important constraint on this
 screen.
 
-**S5 — Harvest.** Inline, no modal. The harvested bodies brighten, detach,
-spiral into the balance chip as amber particles; the remaining organisms close
-ranks; the balance chip counts up. The wild-line ghosts **do not move** — this is
-the frame that teaches the player what a side bet resolves on. 600 ms, skippable.
+**S5 — Harvest.** Inline, no modal. The harvested bodies take on AMBER, detach
+and travel to the balance chip; the remaining organisms close ranks; the balance
+chip updates. For these 400 ms only, the **wild-line ghost** (§4.2) is drawn at
+22% PLANKTON behind the colony and does not move — this is the frame that teaches
+the player what a side bet resolves on — and it fades with the beat. Then the
+action bar collapses to `NEXT`: this generation's decision is committed
+(§4.3, [ENGINE.md §5.3](ENGINE.md)).
+
+The beat is deliberately not a reward beat. A harvest moves money from at risk to
+banked and changes the player's wealth by exactly zero
+([MATH.md §6](MATH.md) step 2), so §6.5 R6 gives it transfer treatment rather than
+win treatment: no swell, no particle shower, no count-up flourish, and an audio
+mark at the same level as any other informational mark. It is the loudest thing
+in the game only if the design is willing to celebrate an event that pays
+nothing, and it is not.
 
 **S6 — Extinction.** The last organism's core dims and collapses; the screen
 falls to the vent ember alone. Copy is flat and non-escalating: *"Colony
@@ -337,12 +425,13 @@ and `k`, terminal reason, each side bet's result, total credited per line, exact
 multipliers, round ID, revealed server seed, client seed, seed pre-commitment,
 settlement body commitment, and a `VERIFY` button.
 
-**S8a — Wild line, completed.** The ghost the player has been watching runs on
-from where their own round stopped, to its own terminal, from the revealed seed.
-If they banked at generation 2, generations 3 onward appear here for the first
-time — the ghost stopped when their round stopped, exactly as §4.2 requires. Each
-side bet resolves against the completed line. This screen appears only if at
-least one side bet was placed.
+**S8a — Wild line, completed.** The line the side bets resolve on, drawn in full
+for the first time, from the revealed seed: generation by generation to its own
+terminal, including every generation after the player's own round stopped. This
+is the only screen that draws the whole counterfactual colony, and it is after
+the round, where it cannot sit beside a decision (§9.8). Each side bet resolves
+against the completed line. The screen appears only if at least one side bet was
+placed.
 
 **S9 — Verify.** Shows both seeds, the derivation rule, the first draws of the
 grid with their generation/slot indices, the **action log** with its chain
@@ -358,11 +447,15 @@ session elapsed time and net result; limits and reality-check settings one tap
 from the menu.
 
 **Reconnect.** Dropping mid-round returns you to the exact decision state with
-the same frame revision. Nothing resolves while you are away — the round only
+the same frame revision — including whether this generation's decision is still
+open, which the frame carries rather than the client inferring it
+([ENGINE.md §5](ENGINE.md)). Nothing resolves while you are away: the round only
 advances on your tap. A round abandoned for 72 hours is reconciled by a forced
 bank at its exact current value and appears in history with the reason
-`RECONCILED` ([ENGINE.md §5.4](ENGINE.md)); the help screen states this plainly
-rather than burying it in terms.
+`RECONCILED` ([ENGINE.md §5.5](ENGINE.md)). A round abandoned *before its first
+tap* is reconciled too — the mandatory generation 1 resolves and whatever
+survives is banked, which is exactly what a returning player would have got — and
+the help screen states both plainly rather than burying them in terms.
 
 ---
 
@@ -403,8 +496,12 @@ old "violet on every split" rule nor the ratio bands that replaced it could keep
 
 ### 6.2 Materials
 
-- **Organism.** A translucent gel bell, 40–70 px on a 390 pt screen at small
-  colony sizes, with a brighter nucleus at ~25% of body radius. Subsurface
+- **Organism.** A translucent gel bell **24 to 68 pt across** — the diameter of
+  `r(n)` in the §6.4 layout table, which runs from the 34 pt ceiling at three
+  organisms or fewer to the 12 pt floor from seventeen upward — with a brighter
+  nucleus at ~25% of body radius. Points, not pixels: every other size in this
+  document is in points on the 390 × 844 pt reference frame, and the one figure
+  an artist reads first is not the place to change unit. Subsurface
   scattering: the body transmits LUMEN outward with a soft quadratic falloff;
   membrane is a 1.5 px Fresnel rim in LUMEN HIGH. Slight background refraction
   (2–3 px displacement) so the water behind it warps. Never a flat sprite; never
@@ -465,13 +562,20 @@ Pillar 1 is only true if it is specified, so here it is specified.
 - **Extinction.** `V = 0`, so the colony contributes nothing: over 400 ms the
   scene falls to the vent's fixed 8% EMBER rim light and a 2% PLANKTON ambient.
   Do not fade to a bright screen; the dark is the point.
+- **The environment threshold.** `E(V)` is what decides when anything that is not
+  an organism rises above the black floor, so that moment is a *value* and
+  nothing else. It is set at `475/48 = 9.895833x`, the smallest colony value a
+  FULL BLOOM can have, which makes every bloom light the environment and every
+  frame worth as much light it too. §7.2 specifies the transition and publishes
+  how often it fires, per policy.
 - There is no fill light and no sun. Nothing is lit that the colony does not
   light. The one thing on screen that emits without being money is the wild-line
-  ghost (§4.2, §6.4): it is an unlit overlay at fixed opacity, contributes no
-  radiance to `V`, and therefore cannot make a poorer frame brighter than a
-  richer one. That exemption is stated here rather than left to the renderer to
-  discover, because pillar 1 is a promise about `E(V)` and an emitter outside the
-  formula would quietly break it.
+  ghost (§4.2, §6.4), and it exists only for the 400 ms of a harvest beat: it is
+  an unlit overlay at fixed opacity, contributes no radiance to `V`, and
+  therefore cannot make a poorer frame brighter than a richer one. That exemption
+  is stated here rather than left to the renderer to discover, because pillar 1 is
+  a promise about `E(V)` and an emitter outside the formula would quietly break
+  it.
 
 ### 6.4 Motion language
 
@@ -487,7 +591,8 @@ curve, because "everything eases" is not an animation contract.
 | DIE | Core dims to zero, membrane collapses inward, remnant drifts down and out; the body's light leaves the scene | 400 ms | `cubic-bezier(0.4, 0.0, 1, 1)` |
 | Verdict count | Tabular digits roll to the new value; never rounds up, always truncates | 380 ms | `cubic-bezier(0.22, 1, 0.36, 1)` |
 | Exposure change | Scene luminance moves to the new `E(V)` | 380 ms | `cubic-bezier(0.4, 0.0, 0.2, 1)` |
-| HARVEST | Half the bodies brighten to AMBER, detach, spiral to the balance chip, dissolve; survivors close ranks | 600 ms | `cubic-bezier(0.2, 0.0, 0.0, 1)` |
+| HARVEST | The harvested bodies take AMBER at their existing intensity, detach, travel to the balance chip and dissolve; survivors close ranks. No brightening, no shower, no swell (§6.5 R6) | 400 ms | `cubic-bezier(0.2, 0.0, 0.0, 1)` |
+| Environment reveal | Silt, rock and plankton fade up as the colony crosses `9.895833x`; once per round | 1,000 ms | See §7.2 |
 | Settlement ceremony | See §7 | 600–2,400 ms | per tier |
 
 **Colony choreography, resolved.** Bodies sit on a golden-angle phyllotaxis
@@ -534,7 +639,8 @@ to design later.
 **Wild-line ghosts** (§4.2) use the same spiral with the same `R(n)` for the
 wild population, drawn at 22% opacity in PLANKTON with no halation, no specular
 and no point light — they contribute nothing to the exposure, because they are
-not money.
+not money. They appear only during the 400 ms harvest beat and fade with it
+(§5, S5; the reasoning is §9.8).
 
 **Budget.** Target 60 fps on iPhone 12 / Snapdragon 7-series and above: ≤ 30 draw
 calls, one full-screen blur pass, ≤ 3 render targets, ≤ 2.5 ms GPU frame at
@@ -594,6 +700,36 @@ no amount of aesthetic justification makes it something else.
 - **R5 — Reachable.** Every band and every note the game can play must be
   producible by the model, and the enumeration proves it. A treatment no state
   can reach is a specification bug, not a rare event.
+- **R6 — A transfer is not a gain.** Moving value between the colony and the
+  balance is not a value change and gets no reward treatment. A harvest of `k`
+  moves `c(t)k` from the colony term into the banked term and leaves the player's
+  wealth *pathwise* identical ([MATH.md §6](MATH.md) step 2): `D = 0`. It
+  therefore gets the `D = 0` treatment — the transfer is shown clearly, because
+  the player must be able to see where their money went, and it is not
+  celebrated.
+
+**Why R6 exists, and what it costs to leave it out.** Round 3 gave the harvest
+the strongest reward signal in the game: bodies brightening to AMBER, spiralling
+into the balance chip as particles, a 400 ms "granular amber pour" ending in a
+click, against a two-note rise for a genuine `+0.9x` generation. That is the
+loudest beat in the product attached to the one event that pays nothing, and R1
+was never applied to it because R1 was scoped to the verdict beat. Two things
+follow from fixing it:
+
+- **The doctrine has no exception any more.** R1 says emphasis is a function of
+  the signed value change and of nothing else; a harvest's signed value change is
+  exactly zero, so it sits at the neutral baseline with the `D = 0` verdict.
+- **It removes a perverse incentive.** Every credit is floored, so harvesting is
+  the one action that is measurably — very slightly — worse in payable terms:
+  at most one minor unit per harvest and 18 per round
+  ([MATH.md §13](MATH.md)). Rewarding the only action that costs the player
+  anything, however little, is exactly the shape §6.5 exists to prevent.
+
+What R6 does *not* do is make the harvest silent. The player has to be able to
+see and hear that money moved: AMBER is the colour of banked value (§6.1), the
+bodies travel to the chip, the chip updates, and there is one soft mark at the
+informational level. R3's principle applies in both directions — quiet is not
+absent — and §9.6 requires the amount to be announced as text as well.
 
 **Why `D` is in stake multiples and not a percentage.** The round-2 rule banded
 the *ratio* `V(t+1) / V(t)`, and R5 is in this list because that rule failed R5
@@ -701,7 +837,7 @@ error to treat the two as the same thing. What blooms actually pay:
 | Share paying under 50x | 61.60% |
 | Share paying under 100x | 84.24% |
 | Share paying less than the smallest generation-18 settlement (17.578531x) | 10.36% |
-| Frequency | 1 in 22217.97 |
+| Frequency, never-harvest play (`RUN`) | 1 in 22217.97 — the figure belongs to a policy; see the per-policy table |
 <!-- /generated:bloom -->
 
 The smallest bloom pays 9.89x. 61.60% of blooms pay under 50x. 10.36% of them
@@ -775,30 +911,76 @@ T0-loss, however dramatic the extinction was. The loudest moment in the game is
 now the biggest win in the game, and the quietest is a loss, which was the
 intention all along.
 
-### 7.2 FULL BLOOM: the environment reveal, specified
+### 7.2 The environment reveal, specified — and it is not a bloom effect
 
 This is the clip the marketing case rests on, so it gets numbers like everything
-else in §6. It is unique and stays unique, independent of tier, and it happens
-whether the bloom pays 9.89x or 527.35x. What scales with the money is the
-ceremony *around* it (§7.1): the silence, the count-up length, and whether a
-share card is pushed.
+else in §6. Round 3 called it "a physical consequence of §6.3, not a bespoke
+effect" and then fired it on a *population* event, which §6.3 cannot express: the
+tone map is strictly increasing in colony **value**, so it cannot tell sixteen
+organisms at generation 3 (`9.895833x`, `E = 0.406`) from three organisms at
+generation 18 (`52.735593x`, `E = 0.650`) except by saying the second is
+brighter. Either the environment lights on both, or the reveal is keyed to
+population and the justification is false — and a population-keyed spectacle is
+the error §7.1 and §8.1 spend two pages removing everywhere else, and §6.5 R1
+forbids outright.
 
-**What actually happens, and why.** It is a physical consequence of §6.3, not a
-bespoke effect. Sixteen bodies at generation `t` put `16 * R_ref * c(t)/c(1)`
-into the scene; at the smallest possible bloom (generation 3) that is
-`E(9.895833x) = 0.406` against the `E(1.00x) = 0.146` of a break-even frame, and
-at the largest it is `E(527.355936x) = 1.000`, the top of the curve. Somewhere
-around `E ≈ 0.4` is the first time in a round the exposure is high enough for
-anything that is not an organism to sit above the black floor. Nothing is
-switched on. The environment was always there and was always unlit.
+**So it lights on both, and the threshold is a value.** The environment rises
+above the black floor when the colony is worth at least `475/48 = 9.895833x`,
+which is exactly the smallest value a FULL BLOOM can have. Nothing is switched
+on: the environment was always there and was always unlit, and this is the
+exposure at which it stops being below the floor. Consequences, stated rather
+than left to be noticed:
 
-**The reveal, beat by beat** (the whole thing is 1,000 ms and runs *before* the
-tier's count-up):
+- **Every bloom lights it**, because every bloom is at least this rich. The
+  marquee moment keeps its picture.
+- **So does every frame worth as much**, bloom or not — a surviving colony at
+  generation 12 with three organisms is `13.82x` and lights the same world.
+- It is therefore **not unique, and it is not a tier**. What is unique about a
+  bloom is that it force-settles; what scales with the money is the ceremony
+  around it (§7.1).
+
+How often it actually happens, against how often a bloom does — both exact, both
+per policy, because both depend on how the round is played
+([MATH.md §8.2](MATH.md)):
+
+<!-- generated:bloom-by-policy -->
+| Policy | P(FULL BLOOM) | One in | P(a frame worth 9.895833x or more) | One in |
+| --- | --- | --- | --- | --- |
+| `BANK_FIRST` | 0 | **never** | 0 | **never** |
+| `RUN` | 4.50086e-05 | 1 in 22217.97 | 7.29125e-02 | 1 in 13.71 |
+| `HALF_EVERY` | 0 | **never** | 1.57043e-03 | 1 in 636.76 |
+| `STOP_AT_2X` | 0 | **never** | 0 | **never** |
+| `STOP_AT_10X` | 3.73905e-06 | 1 in 267447.36 | 7.29125e-02 | 1 in 13.71 |
+| `HALF_AT_2X` | 0 | **never** | 4.82655e-03 | 1 in 207.18 |
+| `BANK_AT_GEN_5` | 4.80285e-06 | 1 in 208209.38 | 3.53580e-04 | 1 in 2828.20 |
+| `PANIC` | 3.40556e-05 | 1 in 29363.68 | 1.31093e-02 | 1 in 76.28 |
+<!-- /generated:bloom-by-policy -->
+
+Read the `RUN` row: the environment lights on one round in 13.71 and a bloom
+happens on one in 22,217.97, so the reveal is about 1,620 times more common than
+the event round 3 attached it to. Read the `HALF_EVERY` row for the other half of
+the correction: a player using the one-tap default lights the world once in
+636.76 rounds and **never** blooms at all (`floor(n/2)` caps the colony below the
+threshold — [MATH.md §8.2](MATH.md)). A reveal keyed to blooms would be a reveal
+that player never sees; a reveal keyed to value is one they can reach by riding a
+colony, which is the decision the game is actually about.
+
+**The marketing case, scoped.** The clip is the world appearing, and it is
+reachable: about 7% of never-harvest rounds produce one. FULL BLOOM is a rarer,
+different event — a terminal — and any claim that rests on *it* is a claim about
+1 in 22,218 rounds for a player who never harvests and 1 in never for a player
+who taps the default. §1.1's rule applies here too: before any of this reaches
+marketing, the number has to travel with the policy it belongs to.
+
+**The reveal, beat by beat** (1,000 ms, fired at most once per round, at the
+moment the colony first crosses the threshold — which is usually mid-round and
+has nothing to do with settlement; it replaces that generation's verdict beat and
+the round continues):
 
 | Beat | ms | What moves |
 | --- | --- | --- |
-| Threshold | 0 | The sixteenth body finishes its split. Audio drops to the bed alone |
-| Bloom rise | 0–420 | Exposure ramps from its pre-bloom value to `E(V)` on `cubic-bezier(0.2, 0.0, 0.0, 1)`. Halation radius scales 32 → 96 px, opacity 12% → 26% |
+| Threshold | 0 | The generation that carried the colony to `9.895833x` finishes resolving. Audio drops to the bed alone |
+| Exposure rise | 0–420 | Exposure ramps from its previous value to `E(V)` on `cubic-bezier(0.2, 0.0, 0.0, 1)`. Halation radius scales 32 → 96 px, opacity 12% → 26% |
 | Environment | 180–700 | Silt, rock and plankton fade up from 0% to full lit value, staggered by depth: near silt at 180 ms, chimney wall at 300 ms, far rock at 520 ms, drifting plankton last at 700 ms |
 | Settle | 700–1,000 | Exposure eases to steady state; the colony's drift resumes at half amplitude |
 
@@ -807,7 +989,7 @@ zoom. It dollies back **8%** over the full 1,000 ms on the same easing as the
 exposure ramp, and that is the only camera move in the game. The colony stays on
 the vent-plume centroid at 38% screen height; the widening `R(n)` (§6.4) plus the
 dolly keeps the mass at a constant 62% of frame width, so the clip is
-compositionally identical whether it blooms at 16 bodies or 30.
+compositionally identical whether the frame holds three late organisms or thirty.
 
 **Materials, so a lookdev artist can start.**
 
@@ -827,7 +1009,9 @@ lighting doing what it already does.
 
 **Reduced motion and low tier.** Under `prefers-reduced-motion` the dolly and the
 staggered fade become a single 400 ms cross-fade to the lit frame; the reveal
-still happens, because it carries information about the size of the win. On the
+still happens, because it carries information — it is the exposure curve at a
+value the player is holding, and §6.4 keeps the exposure change under reduced
+motion for the same reason. On the
 low tier the far-rock cards drop to one, plankton drops to 90 sprites and the
 shafts are cut; the silt, the chimney and the exposure ramp stay, because they
 are the reveal.
@@ -835,9 +1019,9 @@ are the reveal.
 **Why it is clippable.** The illumination is one second, needs no context, and
 the payoff is visual rather than numeric: the screen literally fills with light
 and a world appears. It reads on a muted phone in a feed. The ceremony that
-follows is 600 to 2,400 ms depending on the tier, so a big bloom is a
-three-second clip and a small one is a short one — which is correct, because they
-are not the same win. A bloom at generation 10 pays at least 47.18x and at
+follows is 600 to 2,400 ms depending on the tier, so a rich round is a
+three-second clip and a bare crossing is a short one — which is correct, because
+they are not the same win. A bloom at generation 10 pays at least 47.18x and at
 generation 18 at least 281.25x, so at the top of the range the biggest clips and
 the biggest wins do coincide; they simply are not the same event.
 
@@ -845,8 +1029,11 @@ the biggest wins do coincide; they simply are not the same event.
 1,223 rounds. It needs no special handling — the frame is already almost fully
 lit and then goes dark. That is affecting because it is real.
 
-**What we do not do.** No fake bloom animation for non-bloom outcomes. No "so
-close" overlay. No tier promotion for a near miss.
+**What we do not do.** No fake reveal for a frame that is not worth the
+threshold. No second reveal in a round that already lit — the environment stays
+lit once it is lit, and dims with the exposure like everything else, because a
+re-reveal would be a spectacle keyed to crossing a line rather than to money. No
+"so close" overlay. No tier promotion for a near miss.
 
 ---
 
@@ -864,8 +1051,8 @@ with a long tail and no early reflections.
 | DIE mark | 90 Hz thud with fast low-pass, −18 dB | The same level as the split mark. Felt and heard, with no "fail" motif and no descending pitch (§6.5 R3) |
 | Verdict, gain | Two-note rise below one stake gained; at or above it a rising chord at `min(7, floor(log_1.5 D))` semitones | This is the hook. It is keyed to money in stake multiples, every note is proved reachable by the enumerator, and the top note sounds on 1 in 333.88 verdict beats ([MATH.md §9.3](MATH.md)) |
 | Verdict, loss | One short low mark, −18 dB, no pitch movement | Present, never punishing |
-| HARVEST | Granular amber pour, 400 ms, ending in a soft click | The click is the "banked" confirmation |
-| FULL BLOOM reveal | Bed only for 180 ms, then a single sub-bass swell (28 Hz, 900 ms) under a wide reverse-reverb bloom | Carries the environment fade (§7.2). No stinger, no fanfare |
+| HARVEST | One soft "banked" click, −22 dB, at the moment the value lands in the chip | Informational, not a reward: a harvest is a transfer and its signed value change is zero (§6.5 R6). No pour, no swell, no rising figure |
+| Environment reveal | Bed only for 180 ms, then a single sub-bass swell (28 Hz, 900 ms) under a wide reverse-reverb bloom | Carries the environment fade (§7.2), which is keyed to colony value. No stinger, no fanfare |
 | Settlement, at or above the stake | Per tier (§7.1); T2 and T3 open with silence | The silence does the work |
 | Settlement, below the stake | The soft click of the value settling, and nothing else. No pour, no swell, no chime | T0-loss (§7.1). A round that returned less than it cost does not get a win sound, and a muted phone must not be the only thing that tells the player so |
 | UI | Soft membrane taps, no clicks | 8 ms attack |
@@ -945,7 +1132,23 @@ The rules that follow are binding.
   and never pushed, highlighted, contextualised to the current colony, or
   surfaced by anything the round does. A fact a player chooses to look up is not
   the same object as a prompt fired at the moment they are losing, and the line
-  between them is whether the game brought it up.
+  between them is whether the game brought it up. **The same rule governs the
+  FULL BLOOM frequencies and the harvest's effect on them** ([MATH.md §8.2](MATH.md)):
+  help screen, pull, never push, and never at a decision.
+- **The one forward-looking number, and why it is allowed.** S4 states the next
+  generation's yield — *"Next generation: 0.77x per organism"* — and it is the
+  only number on the play surface about a generation that has not happened. It
+  stays, under four conditions that keep it a price rather than a route back:
+  it is a **per-organism ladder constant**, identical for every player at that
+  generation and independent of the colony, the stake and the history; it is
+  **never multiplied by the current population**, because "your colony would be
+  worth X next generation" is a projection and a target; it is **never
+  accompanied by a comparison to the stake**, a delta, an arrow or a "needed to
+  break even"; and it never changes emphasis with the sign of the position. It
+  is the price of the decision the player is being asked to make, which §3's
+  zero-fake-agency rule requires them to know — while "how far to even" is a
+  route, and §9.2 bans routes. The ladder it comes from is public, printed in the
+  help screen in full, and the same for everyone.
 - **Banned copy**, in the UI and in notifications: "break even", "get back to",
   "back to even", "you need", "only N more", "almost there", "one more
   generation", "don't stop now", "your colony can still".
@@ -955,8 +1158,14 @@ The rules that follow are binding.
   changes because the player has been in the round longer or is further down.
 - **Say it plainly in help**, in this order: *"About half of all rounds are worth
   less than your stake after the first generation. Continuing is not a way back:
-  every choice you can make has the same expected return. Bank whenever you
-  want."*
+  every choice you can make has the same expected return, before rounding. Bank
+  whenever you want."* The qualifier is not hedging and it is not optional:
+  [MATH.md §6](MATH.md) is a theorem about the exact rational value the paytable
+  owes, and what a wallet credits is that value floored at each credit event, so
+  a player who harvests often is behind a player who banks once by up to 18 minor
+  units a round — `0.000018` credits, `0.018` percentage points at the minimum
+  stake ([MATH.md §13](MATH.md)). The help screen states the size in the same
+  breath as the claim, which is the only way to say both true things at once.
 
 ### 9.3 No misleading numbers
 
@@ -965,6 +1174,17 @@ The rules that follow are binding.
   labelled, never instead of it. Banking at the first decision returns something
   93.60% of the time and returns more than the stake 45.60% of the time; quoting
   only the first number would be presenting a 0.396x return as a win.
+- **A ticket's profit rate is not its lines' profit rates.** The colony bet and
+  the side bets are drawn from the same rows, so a ticket has a profit rate of
+  its own and it moves a long way: at equal stakes, adding DARK VENT to a
+  `BANK_FIRST` colony bet takes the chance of finishing the round ahead from
+  45.60% to 36.09%, and adding it to a `RUN` colony bet takes it from 2.25% to
+  37.57% ([MATH.md §7.4](MATH.md)). Binding rules: a combined figure may be shown
+  **only when the stakes on every selected line are equal**, because the number
+  depends on the ratio and no other ratio has been enumerated; it must name the
+  play pattern it belongs to, because it depends on that too; and where it cannot
+  be shown, the per-line profit rates are shown instead. "Total at risk" (§5, S1)
+  may never appear without them.
 - **A return below the stake is never presented as a win, anywhere.** This rule
   governs published figures, the settlement ceremony (§7.1, tier T0-loss), the
   history list, the session summary and any notification. In every one of those
@@ -976,17 +1196,33 @@ The rules that follow are binding.
   damage.
 - The game never uses the words "skill", "strategy pays", "outplay" or "beat".
 - The help screen states plainly: *"Every way of playing SWARM returns the same
-  95% on average. Your choices change how often you win and how much — never how
-  much you get back over time."*
+  95% on average, before rounding. Every credit is rounded down to the nearest
+  0.000001, so harvesting often costs a fraction of a penny more than banking
+  once — at most 0.000018 a round. Your choices change how often you win and how
+  much."* The rounding sentence is mandatory. Dropping it makes the claim false,
+  and [MATH.md §6](MATH.md) is careful about exactly this distinction — "every
+  way of playing returns the same" is true of the theoretical value and false of
+  the payable one, by a small, disclosed, computed amount.
 - The harvest stepper carries the same disclaimer at the point of use: choosing
-  `k` changes the shape of the round, never its expected return.
+  `k` changes the shape of the round, not its expected return — and, in the same
+  string, that each credit is rounded down. It may not claim the two are
+  identical.
+- **The FULL BLOOM frequency never appears without the play pattern it belongs
+  to.** `1 in 22,218` is the never-harvest figure; harvesting lowers it, and
+  halving the colony every generation — the one-tap default — makes it exactly
+  zero ([MATH.md §8.2](MATH.md)). The help screen carries the per-policy table,
+  and no surface anywhere may print the frequency bare. This is the rule this
+  subsection exists for: a jackpot frequency shown to a player for whom the event
+  is impossible is the worst kind of misleading number, because it is arithmetically
+  correct about somebody else.
 - Displayed values truncate toward zero, so the credited amount is never below
   what was shown.
 - The stake and the current bankable value are both on screen at every decision.
 - The offspring probabilities are on screen for the whole round, not buried in a
   paytable.
-- The RTP, the max win, the profit rates and the FULL BLOOM frequency and payout
-  *range* are in the help screen in plain language, with the same numbers as
+- The RTP, the max win, the profit rates, the ticket-pairing profit rates, and
+  the FULL BLOOM frequencies **per play pattern** with their payout range are in
+  the help screen in plain language, with the same numbers as
   [MATH.md](MATH.md).
 
 ### 9.4 DARK VENT is a bet, not a safety net
@@ -995,9 +1231,27 @@ The rules that follow are binding.
 loses, so it will feel protective whether or not it is sold that way. Insurance-
 shaped side bets are a recognised responsible-gambling concern — blackjack
 insurance is the canonical example — because they increase total stake per round
-while feeling like risk reduction. The arithmetic here is honest (two 95% bets
-combine to 95%), but honest arithmetic on a larger total stake is still a larger
-total stake. So:
+while feeling like risk reduction.
+
+Round 3 defended the pairing with "two 95% bets combine to 95% of the total
+staked, on a larger total". That is true, and it is the wrong statistic: §9.3
+makes the **profit rate** the binding figure, and the profit rate of a ticket is
+not the average of its lines'. Enumerated exactly at equal stakes
+([MATH.md §7.4](MATH.md)):
+
+| Ticket | Ticket RTP | `P(ticket returns more than the ticket stake)` |
+| --- | --- | --- |
+| COLONY alone, `BANK_FIRST` | `19/20` | 0.4560000000 |
+| COLONY + DARK VENT, `BANK_FIRST` | `19/20` | **0.3608881499** |
+| COLONY alone, `RUN` | `19/20` | 0.0224631637 |
+| COLONY + DARK VENT, `RUN` | `19/20` | **0.3756956796** |
+
+So for the player most likely to place it — the one who banks early — the
+protective-feeling bet **cuts** the chance of finishing the round ahead by 9.5
+percentage points while doubling the amount staked, and it can never return
+nothing. For the player who never harvests it does the opposite. Neither of those
+is visible in an RTP, both are large, and a design that had only published the
+RTP would have been telling the truth and saying nothing. So:
 
 - **Presentation.** `DARK VENT` appears only inside the collapsed side-bet
   drawer, before `SEED`, in exactly the same visual treatment as the other two
@@ -1008,18 +1262,23 @@ total stake. So:
   "cover", "covered", "hedge", "safety net", "just in case".
 - **Required copy** in its help text: *"A separate bet with its own stake. It
   does not reduce the cost of your colony bet — it adds a second bet at the same
-  95%. Placing both means staking more this round."*
+  95%. Placing both means staking more this round, and it changes how often you
+  finish a round ahead."*
 - **Total at risk** is displayed before `SEED` whenever any side bet is selected
-  (§5, S1), so the larger total is visible at the moment of the decision.
+  (§5, S1), never without the profit rates beside it (§9.3), so both the larger
+  total and what it does to the odds are visible at the moment of the decision.
 
 ### 9.5 No latency-sensitive money decisions
 
 - Nothing is timed. There is no countdown, no auto-continue, no "decide before
-  the vent closes". A player can put the phone down mid-round.
+  the vent closes". A player can put the phone down mid-round. §9.7's floors are
+  the opposite object and do not weaken this: a floor is a minimum time before
+  the game will accept the *next* action, never a deadline on the current one,
+  and no floor can ever cost a payout.
 - Because the round only advances on the player's tap, a slow or dropped
   connection cannot cost a payout. Reconnect restores the exact decision state.
 - The one server-initiated transition is abandonment reconciliation after 72
-  hours ([ENGINE.md §5.4](ENGINE.md)): a forced bank at the exact current value,
+  hours ([ENGINE.md §5.5](ENGINE.md)): a forced bank at the exact current value,
   which is EV-neutral because every action ties. 72 hours is four orders of
   magnitude above any decision latency, so it does not make any decision
   time-sensitive. It is disclosed in help, not buried in terms.
@@ -1032,8 +1291,11 @@ total stake. So:
   below the stake is a signed number and the absence of a count-up, not a colour
   swap (§7.1). A player who cannot distinguish MIST from FOAM must still be able
   to tell a losing round from a winning one.
-- The wild-line ghost is distinguished from the colony by opacity, by the absence
-  of halation and by a separate screen-reader group, never by hue alone.
+- The wild-line ghost, where it appears (the harvest beat and S8a), is
+  distinguished from the colony by opacity, by the absence of halation and by a
+  separate screen-reader group, never by hue alone. A side-bet chip's state is
+  announced as text, so a player who cannot see the ghost at all loses nothing
+  the bet depends on.
 - Text contrast ≥ 4.5:1 against ABYSS; controls ≥ 44 pt.
 - `prefers-reduced-motion` behaviour is specified in §6.4.
 - One-handed portrait play, no gesture required beyond a tap.
@@ -1043,7 +1305,84 @@ total stake. So:
   and each available action with its exact consequence — including, for
   `HARVEST`, the exact credit each `k` on the stepper would pay.
 
-### 9.7 Player protection surfaces
+### 9.7 Speed of play
+
+"Nothing is timed" is a statement about *minimum* time — no decision can expire —
+and round 3 never made the other statement. Every beat in §2 is skippable by
+tapping, so a `BANK_FIRST` round is `SEED` → skip 700 ms → skip 900 ms → `BANK` →
+skip 600 ms: comfortably under a second of enforced time, with a money decision
+at each end. Tap-to-skip that shortens the cycle is functionally slam-stop, which
+GB removed from online slots alongside the autoplay affordance §4.3 point 1
+already refuses to ship. SWARM is not a slot and this is a free-play prototype, so
+the 2.5 s spin-cycle rule is not binding on it — and a §9 that runs to eight
+subsections and never mentions session velocity is incomplete under any
+responsible-design mindset. The floors:
+
+| Floor | Value | What it governs |
+| --- | --- | --- |
+| Round cycle | **2,500 ms** from `SEED` to the next `SEED` becoming live | A whole round cannot be chained faster than this, however much is skipped |
+| Decision dead period | **350 ms** between a generation reaching its resolved state — by animation or by skip — and the action bar accepting input | The gap between watching and deciding |
+| Settlement hold | **600 ms** minimum before `NEW ROUND` accepts input, at every tier including T-nil and T0-loss | A loss cannot be skipped into the next stake |
+| Skip | Ends the current animation only | Skipping never shortens any floor above |
+
+Three rules go with them, and they are the point rather than the numbers:
+
+- **Skipping buys the resolved state, not the next decision.** The tap that skips
+  a resolution is consumed by the stage surface, and the action bar is inert for
+  the dead period afterwards. This is also the input guard §5 (S3, S4) needs: the
+  second tap of a double-tap cannot land on a money control, because for 350 ms
+  there is no money control listening, and the action bar's hit area never
+  overlaps the stage's.
+- **The floors do not vary.** Not with the sign of the position, not with the
+  size of the win, not with how long the session has run, and not with anything
+  the round did. A cycle floor that shortened after a loss would be the same
+  defect as a `NEW ROUND` button that grew after one (§9.1).
+- **No turbo, no quick-spin, no speed setting.** There is nothing to sell here:
+  the game's own pitch is that it has no clock, and a control that makes rounds
+  faster is a control that makes them more frequent.
+
+### 9.8 The wild line is a bet's state, not a colony you could have had
+
+Round 3 shipped a **live wild-line ghost**: a dimmed trace of "the colony as it
+would have grown had it never been harvested", drawn behind the player's own
+bodies, updating every generation for the whole round, whenever a side bet was
+live. §9 never evaluated it. It should have, and the evaluation does not survive
+contact with §9.2.
+
+- **It is a permanent counterfactual.** [MATH.md §7.3](MATH.md) proves
+  containment: the wild line is never smaller than the player's colony and is
+  strictly larger after any harvest. A continuously drawn ghost is therefore a
+  standing, on-screen monument to the position the player gave up — updated every
+  900 ms, never in their favour. §9.2's rule is *show where you stand; never show
+  the way back*, and §7.2's is *no "so close" overlay, no near-miss promotion*. A
+  permanent rival colony is both.
+- **It reads worst exactly where the design is most exposed.** A player using the
+  one-tap default watches their own colony capped at six organisms
+  ([MATH.md §8.2](MATH.md)) beside a ghost that can reach ten, twelve or sixteen.
+  The mechanic the game recommends produces the picture the game should least want
+  to draw.
+- **It made the richest visual an inducement to add lines.** The ghost rendered
+  only when a side bet was live, so the most interesting thing on screen was
+  behind a second stake — which sits badly beside §9.4's care over DARK VENT.
+
+**Decision: the persistent ghost is cut.** What replaces it is scoped to what the
+bet actually needs, which was §4.2's real argument all along:
+
+- a **chip per live side bet**, carrying that bet's own state in numerals, shown
+  only for a bet the player placed (§4.2);
+- the ghost as a **400 ms teaching beat at the harvest**, where the divergence
+  physically happens and where the player has just acted — not a standing
+  comparison, a caption on their own decision (§5, S5);
+- the **completed wild line after the round**, on S8a, where a counterfactual can
+  no longer sit next to a live decision.
+
+The line this draws is worth stating in one sentence, because a future feature
+will test it: **the wild line may be shown as the state of a bet the player has
+placed, and never as an alternative colony they could have had.** A number that
+says "your SWARM bet has reached 7 of 10" is the first; a colony drawn beside
+theirs that is always bigger is the second.
+
+### 9.9 Player protection surfaces
 
 Session timer and net result in the top bar menu, reality check every 30 minutes,
 deposit/loss/time limits reachable in two taps, and a visible link to help
@@ -1059,11 +1398,13 @@ resources. No bonus buy, no jackpot teaser, no "almost" messaging.
    Whether a *multi-round* auto-play ships at all is still open, and it is a
    responsible-design decision rather than a technical one; if it ships it is
    fixed-stake, capped in rounds, and cancellable in one tap (§9.1).
-3. **Side-bet onboarding.** Off by default is right, and the wild-line ghost
-   (§4.2) now gives a live side bet a visible presence for the whole round, which
-   was the real gap. What is still open is whether `FIRST LIGHT` deserves a
-   one-time explainer on top of that — an onboarding test, not a design
-   argument. `DARK VENT` gets no explainer under any circumstances (§9.4).
+3. **Side-bet onboarding.** Off by default is right, and the side-bet chip plus
+   the harvest-beat ghost (§4.2, §9.8) give a live bet a visible state without
+   drawing a colony the player could have had. What is still open is whether
+   `FIRST LIGHT` deserves a one-time explainer on top of that — an onboarding
+   test, not a design argument. `DARK VENT` gets no explainer under any
+   circumstances (§9.4). The first-round explainer (§5, S0) is decided and in;
+   what it should *say* is worth testing, what it may not do is in §5.
 4. **Verdict band and chord thresholds.** `±1.00x` and the `3/2` chord ratio are
    proposals, chosen so that every note is reachable with room to spare
    ([MATH.md §9.3](MATH.md)). Both are tuning parameters and both are enumerated,

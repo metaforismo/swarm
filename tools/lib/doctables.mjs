@@ -10,8 +10,10 @@
  *
  * Long exact values (the SWARM side bet probability is a 200-digit fraction)
  * are published as a SHA-256 digest of the canonical `numerator/denominator`
- * string plus a truncated decimal. The full exact value is in
- * `spec/paytable.v2.json`.
+ * string plus a truncated decimal. The full exact value is in the frozen
+ * fixture, whose path is `FIXTURE_PATH` below and nowhere else in this
+ * repository: the previous text named a file that does not exist, which is the
+ * one pointer a reader has for the two values it elides.
  */
 
 import { canonicalJson, digest } from './canonical.mjs';
@@ -70,6 +72,11 @@ function table(header, rows) {
 
 export function renderBlocks(paytable = buildPaytable()) {
   const blocks = {};
+  const policyRow = (id) => {
+    const row = paytable.policies.find((entry) => entry.id === id);
+    if (!row) throw new Error(`Unknown policy: ${id}`);
+    return row;
+  };
 
   blocks.identity = table(
     ['Identity', 'Value'],
@@ -222,7 +229,98 @@ export function renderBlocks(paytable = buildPaytable()) {
         `Share paying less than the smallest generation-18 settlement (${paytable.bloom.smallestFinal}x)`,
         `${percent(paytable.bloom.shareBelowSmallestFinal)}%`,
       ],
-      ['Frequency', `1 in ${paytable.bloom.oneIn}`],
+      [
+        'Frequency, never-harvest play (`RUN`)',
+        `1 in ${paytable.bloom.oneIn} — the figure belongs to a policy; see the per-policy table`,
+      ],
+    ],
+  );
+
+  /**
+   * FULL BLOOM is a terminal of the *player's* colony, so its frequency is a
+   * property of how the colony is played and not of the grid. The one-tap
+   * default harvest makes it exactly unreachable, which is why this table
+   * exists and why no document may publish the frequency without it.
+   */
+  const environmentByPolicy = new Map(
+    paytable.presentation.environment.policies.map((row) => [row.policy, row]),
+  );
+  blocks['bloom-by-policy'] = table(
+    [
+      'Policy',
+      'P(FULL BLOOM)',
+      'One in',
+      `P(a frame worth ${paytable.presentation.environment.thresholdDecimal}x or more)`,
+      'One in',
+    ],
+    paytable.policies.map((row) => {
+      const environment = environmentByPolicy.get(row.id);
+      // `toOneIn` renders an impossible event as "never"; a "1 in never" cell
+      // would be worse than the number it replaces.
+      const odds = (oneIn) => (oneIn === 'never' ? '**never**' : `1 in ${oneIn}`);
+      return [
+        `\`${row.id}\``,
+        row.bloomScientific,
+        odds(row.bloomOneIn),
+        environment.reachScientific,
+        odds(environment.reachOneIn),
+      ];
+    }),
+  );
+
+  /**
+   * What a second line does to the one figure docs/DESIGN.md §9.3 makes binding.
+   * Ticket RTP is exactly 19/20 on every row by linearity; the profit rate is
+   * not linear and moves by tens of percentage points in both directions.
+   */
+  blocks['ticket-pairings'] = table(
+    [
+      'Policy',
+      'Ticket',
+      'Ticket profit rate',
+      'COLONY alone',
+      'Change',
+      'Ticket returns nothing',
+    ],
+    paytable.ticketPairings.map((row) => [
+      `\`${row.policy}\``,
+      `COLONY + ${row.sideBet.replace(/_/gu, ' ')}`,
+      row.ticketProfitRate,
+      row.colonyOnlyProfitRate,
+      `${row.profitRateChange.startsWith('-') ? '' : '+'}${row.profitRateChange}`,
+      row.ticketNothingRate,
+    ]),
+  );
+
+  /** The payable boundary: every number docs/MATH.md §13 used to assert by hand. */
+  blocks['rounding-bound'] = table(
+    ['Quantity', 'Value'],
+    [
+      [
+        'Harvest commitments a stage accepts',
+        `${paytable.roundingBound.harvestCommitsPerStage}`,
+      ],
+      [
+        'Maximum COLONY credit events in a round, over every grid and every policy',
+        `${paytable.roundingBound.maximumCreditEvents}`,
+      ],
+      [
+        'The same bound if a stage accepted repeated harvests (rejected)',
+        `${paytable.roundingBound.maximumCreditEventsIfStagesAcceptedRepeatedHarvests}`,
+      ],
+      [
+        'Maximum credit events on each selected side-bet line',
+        `${paytable.roundingBound.maximumCreditEventsPerSideBetLine}`,
+      ],
+      [
+        'Absolute floor loss on the COLONY line, whatever the stake',
+        `${paytable.roundingBound.maximumLossUnits} units = ${paytable.roundingBound.maximumLossCredits} credits`,
+      ],
+      [
+        'Relative, at the minimum stake',
+        `${paytable.roundingBound.relativeAtMinimumStake} = ${paytable.roundingBound.relativeAtMinimumStakePercentagePoints} percentage points`,
+      ],
+      ['Relative, at the maximum stake', paytable.roundingBound.relativeAtMaximumStake],
     ],
   );
 
@@ -390,7 +488,16 @@ export function renderBlocks(paytable = buildPaytable()) {
         'Worst-case ticket liability at the stake bounds',
         `${grouped(paytable.risk.ticket.worstCaseExposureCredits)} credits, admitted below ${grouped(paytable.risk.ticket.admissionLimitCredits)}`,
       ],
-      ['FULL BLOOM frequency', `1 in ${paytable.terminalCategories.BLOOM.oneIn}`],
+      [
+        'FULL BLOOM frequency, never-harvest play (`RUN`)',
+        `1 in ${policyRow('RUN').bloomOneIn}`,
+      ],
+      [
+        'FULL BLOOM frequency, the one-tap default harvest (`HALF_EVERY`)',
+        policyRow('HALF_EVERY').bloomOneIn === 'never'
+          ? '**never** — halving the colony caps it below the threshold'
+          : `1 in ${policyRow('HALF_EVERY').bloomOneIn}`,
+      ],
       [
         'FULL BLOOM payout range',
         `${paytable.bloom.smallest}x to ${paytable.bloom.largest}x, median ${paytable.bloom.median}x`,

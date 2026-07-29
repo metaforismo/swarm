@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -16,6 +17,7 @@ import {
   normalizeSeed,
   playRound,
   proofBundle,
+  reconcileTicket,
   resolveDraw,
   resolveSideBets,
   roundContext,
@@ -34,9 +36,19 @@ import {
   MAX_STAKE_UNITS,
   OFFSPRING,
   SIDE_BET_MAX_WIN_MULTIPLES,
+  organismValue,
 } from '../tools/lib/config.mjs';
-import { POLICIES } from '../tools/lib/model.mjs';
-import { compare, rat, subtract, toDecimal, toFraction } from '../tools/lib/rational.mjs';
+import { POLICIES, payableUnits, sideBets } from '../tools/lib/model.mjs';
+import {
+  ONE,
+  add,
+  compare,
+  multiply,
+  rat,
+  subtract,
+  toDecimal,
+  toFraction,
+} from '../tools/lib/rational.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const engineDoc = readFileSync(`${root}docs/ENGINE.md`, 'utf8');
@@ -48,28 +60,29 @@ const engineDoc = readFileSync(`${root}docs/ENGINE.md`, 'utf8');
 // point.
 // ---------------------------------------------------------------------------
 const VECTOR = {
-  seed: '8aab6a6a82cf229e5ae45a72dc909c902dae5fbd145153625eeefa5195d03b6f',
+  seed: '9387b2fdbe0d7ad0f49de357d1dcfad38a27e1839434ea88cac30bb1d92df7e9',
   clientEntropy: 'b'.repeat(64),
   roundId: 'swarm-vector-1',
-  fingerprint: 'e0bd79dff89e025d62a41bf611c2f456f6e6375fa8201af40c6ee0d988e34ecc',
-  seedCommitment: 'd138a171d7652c1ccd98e9407478f7e4b19aee5f911950fbb1f1aa8ac6102d74',
-  firstDraws: [12, 1, 10, 19, 6, 13, 10, 18, 9, 7, 19, 8, 6, 6, 9],
+  fingerprint: '3fc7b96ea3546f14169032d070aa48f103de7db048cc8a306cf99227d33d36cf',
+  seedCommitment: 'b12e1b1f5441ac7a21434705272b14cac6c5f81a751e8ff5a004670473b2afd1',
+  firstDraws: [6, 11, 15, 8, 15, 16, 17, 3, 6, 10, 15, 12, 19, 17, 18],
   run: {
-    populations: [2, 2, 3, 2, 3, 0],
+    populations: [2, 4, 6, 6, 4, 5, 3, 2, 4, 4, 0],
     reason: 'EXTINCT',
     total: '0/1',
   },
   half: {
     actions: [
       { generation: 1, kind: 'HARVEST', units: 1 },
-      { generation: 2, kind: 'CONTINUE', units: 0 },
-      { generation: 3, kind: 'HARVEST', units: 1 },
-      { generation: 4, kind: 'CONTINUE', units: 0 },
+      { generation: 2, kind: 'HARVEST', units: 1 },
+      { generation: 3, kind: 'CONTINUE', units: 0 },
+      { generation: 4, kind: 'HARVEST', units: 1 },
       { generation: 5, kind: 'HARVEST', units: 1 },
+      { generation: 6, kind: 'CONTINUE', units: 0 },
     ],
-    populations: [2, 1, 2, 1, 2, 0],
+    populations: [2, 2, 1, 2, 2, 1, 0],
     reason: 'EXTINCT',
-    total: '8113/4096',
+    total: '10773/4096',
   },
   bank: { reason: 'BANKED', total: '19/24', actions: [{ generation: 1, kind: 'BANK', units: 2 }] },
 };
@@ -80,13 +93,13 @@ const VECTOR = {
  * cap on the colony stake would have short-paid.
  */
 const TICKET = {
-  seed: 'a1053cf9d4e7158153247cb389f5879ed90ff85a6dc0fa12a88249dd9a8df595',
+  seed: 'dc33ba04fda908c673650e88419ab5378c52c21333103f7a90717be45909f981',
   clientEntropy: 'c'.repeat(64),
   roundId: 'swarm-vector-side',
-  wildPopulations: [4, 4, 7, 6, 7, 8, 11, 12, 13, 9, 11, 7, 6, 4, 1, 2, 3, 0],
-  seedCommitment: 'b00b982f4460d7d6a7d86bab61695248eba600e02106279ce0a0a785dec662d4',
-  bodyCommitment: '880a22fc1cdf1118ea921f47384d669ef459a65205ac0d9d72369dacd194e5f6',
-  actionChain: '0a8e3db9f2be7637168f8e39ace0e6d3b47f778f2fee5e82d4c46bcaa17c1e1d',
+  wildPopulations: [5, 4, 5, 7, 10, 10, 11, 6, 4, 3, 4, 3, 3, 1, 0],
+  seedCommitment: '702fdfbbb25c370a540720ba72e9623501bb4aec0f6badca46a4225912a899fc',
+  bodyCommitment: '549c68887111ef4cca56bc6025c5fe01aef2cd0d78901cae90047064788a68a2',
+  actionChain: 'eb946f5ba63bb67c99e079457f35db0e06ed86e326c42a714269838ab3069615',
   ledger: [
     [1, 'OPEN', 'COLONY', 'DEBIT', 1000000n, null],
     [2, 'OPEN', 'FIRST_LIGHT', 'DEBIT', 500000n, null],
@@ -172,7 +185,7 @@ describe('draw derivation', () => {
     expect(adapterFingerprint()).toBe(VECTOR.fingerprint);
     expect(seedCommitment(VECTOR.seed, VECTOR.roundId)).toBe(VECTOR.seedCommitment);
     expect(SEED_COMMITMENT_VERSION).toBe('reveal-engine/stage-seed-commit-v1');
-    expect(BODY_COMMITMENT_VERSION).toBe('reveal-engine/stage-body-commit-v1');
+    expect(BODY_COMMITMENT_VERSION).toBe('reveal-engine/stage-body-commit-v2');
     expect(SAMPLER_DOMAIN).toBe('reveal-engine/stage-draw-v2');
     // The specification and the reference implementation must not drift.
     for (const value of [
@@ -345,9 +358,9 @@ describe('wild line and side-bet resolution', () => {
   it('reproduces the frozen wild line', () => {
     const line = wildLine(TICKET.seed, ticketContext());
     expect(line.populations).toEqual(TICKET.wildPopulations);
-    expect(line.peak).toBe(13);
+    expect(line.peak).toBe(11);
     expect(line.terminal).toBe('EXTINCT');
-    expect(line.extinctGeneration).toBe(18);
+    expect(line.extinctGeneration).toBe(15);
   });
 
   it('is exactly the RUN replay of the same committed grid', () => {
@@ -598,6 +611,163 @@ describe('two-phase commitment and verification', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Round-4 findings. A legal command sequence produced a round the published
+// verifier could not verify, and a round abandoned at stage 0 had no defined
+// settlement at all. Both are protocol rules now, and both get a test that
+// would have caught the gap.
+// ---------------------------------------------------------------------------
+describe('one harvest commitment per stage', () => {
+  it('logs exactly one entry per resolved non-terminal stage', () => {
+    const round = playRound(VECTOR.seed, vectorContext(), (_t, n) => Math.floor(n / 2));
+    const stages = round.actions.map((action) => action.generation);
+    expect(new Set(stages).size).toBe(stages.length);
+    for (let index = 1; index < stages.length; index += 1)
+      expect(stages[index]).toBeGreaterThan(stages[index - 1]);
+    // Generation 18 force-settles, so it can never carry a decision.
+    expect(round.actions.length).toBeLessThanOrEqual(MAX_GENERATIONS - 1);
+    expect(stages.every((stage) => stage < MAX_GENERATIONS)).toBe(true);
+  });
+
+  it('refuses a transcript that commits one stage twice', () => {
+    // The exact sequence round 3 allowed at the command surface and rejected at
+    // the verifier: HARVEST, then HARVEST again at the same stage.
+    const settlement = settleVector({ policy: POLICIES.HALF_EVERY.fn, sideBetStakes: {} });
+    const bundle = proofBundle(settlement);
+    const first = bundle.actionLog.find((entry) => entry.kind === 'HARVEST');
+    expect(first).toBeDefined();
+    const result = verifyRound({
+      ...bundle,
+      actionLog: [{ ...first, units: 1, kind: 'HARVEST' }, ...bundle.actionLog],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.detail).toMatch(/commits a stage more than once/u);
+  });
+
+  it('bounds the action log at one entry per decidable stage', () => {
+    const bundle = proofBundle(settleVector());
+    expect(verifyRound({ ...bundle, actionLog: new Array(MAX_GENERATIONS).fill({}) }).code).toBe(
+      'INVALID_TRANSCRIPT',
+    );
+  });
+
+  it('is weakly better for the player than splitting the same harvest', () => {
+    // Why the rule costs nothing: two credits at one ladder value are never
+    // worth more than one credit of their sum, because floor(x) + floor(y) <=
+    // floor(x + y). This is the whole argument for refusing the second commit.
+    const stake = 100000n; // the minimum stake, where floor crumbs are largest
+    for (let generation = 1; generation <= MAX_GENERATIONS; generation += 1)
+      for (let k = 2; k <= 8; k += 1)
+        for (let split = 1; split < k; split += 1) {
+          const whole = payableUnits(stake, multiply(organismValue(generation), rat(BigInt(k))));
+          const first = payableUnits(stake, multiply(organismValue(generation), rat(BigInt(split))));
+          const second = payableUnits(
+            stake,
+            multiply(organismValue(generation), rat(BigInt(k - split))),
+            first.credited,
+          );
+          expect(first.credited + second.credited).toBeLessThanOrEqual(whole.credited);
+        }
+  });
+});
+
+describe('abandonment, including the stage nothing had resolved at', () => {
+  const abandon = (overrides = {}) =>
+    reconcileTicket({
+      seedHex: TICKET.seed,
+      roundId: TICKET.roundId,
+      clientEntropy: TICKET.clientEntropy,
+      stakeUnits: 1000000n,
+      sideBetStakes: { FIRST_LIGHT: 500000n },
+      abandonedAtStage: 0,
+      ...overrides,
+    });
+
+  it('settles a round that was staked and never advanced', () => {
+    // docs/ENGINE.md §5.5: at stage 0 the only legal command is advance(), and
+    // the mandatory generation carries no decision, so reconciliation performs
+    // it and then forces the bank. No ladder value at stage 0 is ever needed.
+    const settlement = abandon();
+    expect(settlement.proof.terminal).toBe('RECONCILED');
+    expect(settlement.proof.settlementMode).toBe('RECONCILED');
+    expect(settlement.proof.actionLog).toEqual([
+      { generation: 1, kind: 'BANK', units: TICKET.wildPopulations[0] },
+    ]);
+    expect(settlement.creditedUnits).toBeGreaterThan(0n);
+    expect(verifyRound(proofBundle(settlement))).toMatchObject({ ok: true, code: 'VERIFIED' });
+  });
+
+  it('produces the transcript a returning player would have produced', () => {
+    // The point of the rule: nothing new has to be defined for stage 0, because
+    // the forced settlement is the one a player who tapped once and banked would
+    // have produced. Only the settlement mode, and therefore the terminal
+    // reason, distinguishes them.
+    const forced = abandon();
+    const played = settleVector({
+      policy: POLICIES.BANK_FIRST.fn,
+      sideBetStakes: { FIRST_LIGHT: 500000n },
+    });
+    expect(forced.proof.actionLog).toEqual(played.proof.actionLog);
+    expect(forced.proof.populations).toEqual(played.proof.populations);
+    expect(forced.creditedUnits).toBe(played.creditedUnits);
+    expect(played.proof.terminal).toBe('BANKED');
+    expect(forced.proof.terminal).toBe('RECONCILED');
+    // Same money, different sealed body: the mode is inside the commitment.
+    expect(forced.proof.bodyCommitment).not.toBe(played.proof.bodyCommitment);
+  });
+
+  it('reveals the seed and publishes a body on the abandoned path too', () => {
+    const settlement = abandon();
+    expect(settlement.proof.revealedSeed).toBe(TICKET.seed);
+    expect(settlement.proof.seedCommitment).toBe(TICKET.seedCommitment);
+    expect(typeof settlement.proof.bodyCommitment).toBe('string');
+    // Side bets resolve on the wild line exactly as they would have.
+    expect(settlement.proof.sideBetResults.find((entry) => entry.id === 'FIRST_LIGHT').resolved).toBe(
+      'WON',
+    );
+  });
+
+  it('forces the bank at the stage the round was abandoned at, not before', () => {
+    const settlement = abandon({ abandonedAtStage: 3, policy: () => 0, sideBetStakes: {} });
+    const log = settlement.proof.actionLog;
+    expect(log.slice(0, 2)).toEqual([
+      { generation: 1, kind: 'CONTINUE', units: 0 },
+      { generation: 2, kind: 'CONTINUE', units: 0 },
+    ]);
+    expect(log.at(-1).kind).toBe('BANK');
+    expect(log.at(-1).generation).toBe(3);
+    expect(verifyRound(proofBundle(settlement)).ok).toBe(true);
+  });
+
+  it('refuses a settlement whose mode was relabelled after publication', () => {
+    const settlement = abandon();
+    const bundle = proofBundle(settlement);
+    expect(verifyRound({ ...bundle, settlementMode: 'PLAYER' }).ok).toBe(false);
+    expect(verifyRound({ ...bundle, settlementMode: 'WHATEVER' }).code).toBe('INVALID_TRANSCRIPT');
+    expect(verifyRound({ ...bundle, settlementMode: undefined }).code).toBe('INVALID_TRANSCRIPT');
+    // ...and a player settlement cannot be dressed as an abandoned one either.
+    const played = proofBundle(settleVector({ policy: POLICIES.BANK_FIRST.fn }));
+    expect(verifyRound({ ...played, settlementMode: 'RECONCILED' }).ok).toBe(false);
+  });
+
+  it('rejects an abandonment stage a round cannot be staged at', () => {
+    expect(() => abandon({ abandonedAtStage: -1 })).toThrow(/Abandoned stage/u);
+    expect(() => abandon({ abandonedAtStage: MAX_GENERATIONS })).toThrow(/Abandoned stage/u);
+  });
+
+  it('publishes only the terminal reasons the engine contract declares', () => {
+    const declared = ['EXTINCT', 'THRESHOLD', 'FINAL', 'BANKED', 'RECONCILED'];
+    for (const reason of declared) expect(engineDoc).toContain(reason);
+    const reasons = new Set();
+    for (let index = 0; index < 60; index += 1) {
+      const seed = `${index.toString(16).padStart(2, '0')}`.repeat(32);
+      for (const policy of [POLICIES.RUN.fn, POLICIES.HALF_EVERY.fn, POLICIES.BANK_FIRST.fn])
+        reasons.add(playRound(seed, vectorContext(), policy).reason);
+    }
+    for (const reason of reasons) expect(declared).toContain(reason);
+  });
+});
+
 describe('Monte Carlo cross-check', () => {
   // Sanity only: the enumeration is the proof. Seeded, so a failure reproduces.
   const seed = '00'.repeat(31) + '2a';
@@ -630,6 +800,39 @@ describe('Monte Carlo cross-check', () => {
     // Generation-1 extinction converges on the exact 8/125 = 0.064.
     expect(Number(toDecimal(result.generationOneExtinctionRate, 4))).toBeCloseTo(0.064, 2);
   }, 120000);
+
+  it('agrees with the enumerated ticket profit rate for a flagged pairing', () => {
+    // The ticket enumeration in `model.mjs` walks a *joint* law over the player's
+    // colony and the wild line it sits inside. This is the independent check on
+    // it: play the real grid, resolve DARK VENT on the real wild line, and count
+    // how often the two-line ticket beats the two-line stake.
+    const wins = { ticket: 0, colony: 0 };
+    const rounds = 20000;
+    const darkVent = sideBets().find((bet) => bet.id === 'DARK_VENT');
+    const stake = rat(2n); // one colony stake plus one equal side-bet stake
+    for (let index = 0; index < rounds; index += 1) {
+      const roundSeed = createHash('sha256').update(`ticket-cross-check-${index}`).digest('hex');
+      const context = roundContext(`x-${index}`, 'e'.repeat(64));
+      const line = wildLine(roundSeed, context);
+      const round = playRound(roundSeed, context, POLICIES.HALF_EVERY.fn);
+      const won = line.extinctGeneration !== null && line.extinctGeneration <= 3;
+      const total = won ? add(round.total, darkVent.multiplier) : round.total;
+      if (compare(total, stake) > 0) wins.ticket += 1;
+      if (compare(round.total, ONE) > 0) wins.colony += 1;
+    }
+    const ticketRate = rat(BigInt(wins.ticket), BigInt(rounds));
+    const colonyRate = rat(BigInt(wins.colony), BigInt(rounds));
+    // Exact: 0.4568749671 for the ticket, 0.3075713875 for the colony alone.
+    // 5 standard errors at 20,000 rounds is under 0.018 for either.
+    const near = (value, target) =>
+      compare(subtract(value, target), rat(18n, 1000n)) <= 0 &&
+      compare(subtract(target, value), rat(18n, 1000n)) <= 0;
+    expect(near(ticketRate, rat(4568749671n, 10000000000n))).toBe(true);
+    expect(near(colonyRate, rat(3075713875n, 10000000000n))).toBe(true);
+    // And the direction the enumeration reports: the pairing raises the profit
+    // rate for this policy while doubling the amount staked.
+    expect(compare(ticketRate, colonyRate)).toBe(1);
+  }, 180000);
 
   it('rejects hostile simulation parameters', () => {
     expect(() => simulate({ rounds: 1, seed, policy: 'NOPE' })).toThrow(/Unknown policy/u);

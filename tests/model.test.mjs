@@ -37,10 +37,12 @@ import {
   extinctionByGeneration,
   extremalRoundVariance,
   feedbackHonesty,
+  maximumCreditEvents,
   maximumRoundPayout,
   payableUnits,
   peakBand,
   policyOutcomeSplit,
+  policyTerminalProfile,
   populationDistribution,
   proveStrategyInvariance,
   reachProbability,
@@ -49,11 +51,14 @@ import {
   sideBets,
   survivalCurve,
   terminalCategories,
+  ticketProfile,
   transitionProbability,
   underwaterAfterFirstGeneration,
+  valuePeakReachProbability,
 } from '../tools/lib/model.mjs';
 import {
   CHORD_STEPS,
+  ENVIRONMENT_THRESHOLD,
   MEDUSA_THRESHOLD,
   bodyRadius,
   chordLadder,
@@ -718,6 +723,197 @@ describe('the shared-ticket-ceiling counterfactual', () => {
     expect(toFraction(shared.bound)).toBe(toFraction(reachProbability(shared.minimumPeak)));
     // Orders of magnitude away from the 1-in-261.89 the round-2 text quoted.
     expect(compare(shared.bound, reachProbability(10))).toBe(-1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round-4 findings. Three published numbers depended on how the round is played
+// and were published as if they did not: the FULL BLOOM frequency, the
+// floor-rounding bound, and the profit rate of a multi-line ticket.
+// ---------------------------------------------------------------------------
+describe('FULL BLOOM is a terminal of the colony, not a property of the grid', () => {
+  it('splits every policy into terminals that sum to one', () => {
+    for (const policy of Object.values(POLICIES)) {
+      const terminals = policyTerminalProfile(policy.fn);
+      const total = add(
+        add(terminals.EXTINCT, terminals.BLOOM),
+        add(terminals.FINAL, terminals.BANKED),
+      );
+      expect(toFraction(total), policy.id).toBe('1/1');
+    }
+  });
+
+  it('agrees with the wild-line enumeration for the policy that never harvests', () => {
+    // RUN *is* the wild line, so an independent enumeration of the outcome space
+    // has to produce the same three terminals and no banked mass at all.
+    const categories = terminalCategories();
+    const terminals = policyTerminalProfile(POLICIES.RUN.fn);
+    expect(toFraction(terminals.EXTINCT)).toBe(toFraction(categories.EXTINCT));
+    expect(toFraction(terminals.BLOOM)).toBe(toFraction(categories.BLOOM));
+    expect(toFraction(terminals.FINAL)).toBe(toFraction(categories.FINAL));
+    expect(toFraction(terminals.BANKED)).toBe('0/1');
+  });
+
+  it('agrees with the closed form for the policy that banks immediately', () => {
+    const terminals = policyTerminalProfile(POLICIES.BANK_FIRST.fn);
+    // Generation 1 kills the colony with probability (2/5)^3 = 8/125, and every
+    // other outcome is banked on the spot.
+    expect(toFraction(terminals.EXTINCT)).toBe('8/125');
+    expect(toFraction(terminals.BANKED)).toBe('117/125');
+    expect(toFraction(terminals.BLOOM)).toBe('0/1');
+  });
+
+  it('is exactly unreachable under the client s one-tap default harvest', () => {
+    // BLOCKER: `floor(n/2)` leaves ceil(m/2) survivors and m <= 2j, so the
+    // survivor count is non-increasing from its generation-1 value of at most 3.
+    // The resolved population can never exceed 6, against a threshold of 16.
+    expect(toFraction(policyTerminalProfile(POLICIES.HALF_EVERY.fn).BLOOM)).toBe('0/1');
+    // The structural argument, checked directly rather than inferred from the
+    // enumeration: with j survivors the next population is at most 2j, and
+    // halving it leaves ceil(m/2) <= j. The survivor count can never grow.
+    for (let survivors = 1; survivors < BLOOM_THRESHOLD; survivors += 1)
+      for (let resolved = 0; resolved <= 2 * survivors; resolved += 1)
+        expect(
+          resolved - Math.floor(resolved / 2),
+          `${survivors} survivors resolving to ${resolved}`,
+        ).toBeLessThanOrEqual(survivors);
+    // Four of the eight published policies never bloom, and the one the headline
+    // number belongs to is the one that never harvests.
+    const zeros = Object.values(POLICIES).filter(
+      (policy) => policyTerminalProfile(policy.fn).BLOOM.numerator === 0n,
+    );
+    expect(zeros.map((policy) => policy.id).sort()).toEqual(
+      ['BANK_FIRST', 'HALF_AT_2X', 'HALF_EVERY', 'STOP_AT_2X'].sort(),
+    );
+  });
+
+  it('prices the environment reveal on value, and agrees with a second code path', () => {
+    // MAJOR: the reveal is keyed to colony value, so it has to be enumerated on
+    // value. Independent check: under STOP_AT_10X a round pays something exactly
+    // when it ever displays a colony worth at least the smallest bloom — every
+    // crossing above 10x banks, the one value in [9.895833, 10) is the smallest
+    // bloom itself, which force-settles, and every generation-18 survivor is
+    // worth 17.578531x. So the profit rate of that policy and this reach
+    // probability are the same number, computed two completely different ways.
+    const reach = valuePeakReachProbability(POLICIES.STOP_AT_10X.fn, ENVIRONMENT_THRESHOLD);
+    const split = policyOutcomeSplit(POLICIES.STOP_AT_10X.fn);
+    expect(toFraction(reach)).toBe(toFraction(split.profit));
+    // Every bloom is at least as rich as the threshold, so the reveal can never
+    // be rarer than the bloom under any policy.
+    for (const policy of Object.values(POLICIES))
+      expect(
+        compare(
+          valuePeakReachProbability(policy.fn, ENVIRONMENT_THRESHOLD),
+          policyTerminalProfile(policy.fn).BLOOM,
+        ),
+        policy.id,
+      ).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('the floor-rounding bound is derived, not asserted', () => {
+  it('is 18 credit events under the shipped one-commit-per-stage protocol', () => {
+    expect(maximumCreditEvents(1)).toBe(18);
+    // The witness, constructed rather than trusted: hold two organisms, harvest
+    // one at each of generations 1 to 17, and settle one at generation 18.
+    const harvests = MAX_GENERATIONS - 1;
+    expect(harvests + 1).toBe(maximumCreditEvents(1));
+  });
+
+  it('would be 117 if a stage accepted repeated harvests', () => {
+    // BLOCKER: §13's "absolute bound" was true only under the one-action model,
+    // and the command surface did not enforce it. The rejected alternative is
+    // costed exactly: climb to 6, trim to 7 survivors, then shed 7 one at a time
+    // for fourteen generations and bank the last fourteen one at a time.
+    expect(maximumCreditEvents(Infinity)).toBe(117);
+    expect(5 + 14 * 7 + 14).toBe(117);
+  });
+
+  it('rejects a commit budget that is not a positive integer', () => {
+    expect(() => maximumCreditEvents(0)).toThrow(SwarmMathError);
+    expect(() => maximumCreditEvents(1.5)).toThrow(SwarmMathError);
+  });
+
+  it('is why one commit per stage costs the player nothing', () => {
+    // floor(x) + floor(y) <= floor(x + y): splitting a harvest at one ladder
+    // value is never worth more, and is usually worth one unit less.
+    let strictlyWorse = 0;
+    for (let generation = 1; generation <= MAX_GENERATIONS; generation += 1)
+      for (let k = 2; k <= 10; k += 1)
+        for (let split = 1; split < k; split += 1) {
+          const whole = payableUnits(MIN_STAKE_UNITS, colonyMultiplier(generation, k));
+          const first = payableUnits(MIN_STAKE_UNITS, colonyMultiplier(generation, split));
+          const second = payableUnits(
+            MIN_STAKE_UNITS,
+            colonyMultiplier(generation, k - split),
+            first.credited,
+          );
+          expect(first.credited + second.credited).toBeLessThanOrEqual(whole.credited);
+          if (first.credited + second.credited < whole.credited) strictlyWorse += 1;
+        }
+    expect(strictlyWorse).toBeGreaterThan(0);
+  });
+});
+
+describe('a ticket is not the average of its lines', () => {
+  it('keeps the ticket outcome classes exhaustive', () => {
+    for (const policyId of ['BANK_FIRST', 'HALF_EVERY', 'RUN'])
+      for (const bet of sideBets()) {
+        const ticket = ticketProfile(POLICIES[policyId].fn, bet.id);
+        const total = add(add(ticket.nothing, ticket.belowStake), ticket.profit);
+        expect(toFraction(total), `${policyId}/${bet.id}`).toBe('1/1');
+      }
+  });
+
+  it('never reports a smaller profit rate than the side bet wins on its own', () => {
+    // Every side-bet multiplier exceeds a two-line ticket stake, so a won side
+    // bet is a profitable ticket whatever the colony did.
+    for (const bet of sideBets()) {
+      expect(compare(bet.multiplier, rat(2n)), bet.id).toBe(1);
+      for (const policyId of ['BANK_FIRST', 'HALF_EVERY', 'RUN']) {
+        const ticket = ticketProfile(POLICIES[policyId].fn, bet.id);
+        expect(compare(ticket.profit, bet.probability), `${policyId}/${bet.id}`).toBeGreaterThanOrEqual(
+          0,
+        );
+      }
+    }
+  });
+
+  it('reproduces the closed form where one exists', () => {
+    // FIRST LIGHT wins exactly when generation 1 leaves 4 or more organisms, and
+    // under BANK_FIRST the colony pays c(1) * n <= 2.375. A ticket profits when
+    // the side bet wins (4.75 > 2) or when the colony alone clears 2, and
+    // c(1) * 6 = 2.375 is the only colony total that does — but that needs 6
+    // organisms, which also wins FIRST LIGHT. So the ticket profit rate is
+    // exactly P(FIRST LIGHT) = 1/5.
+    const ticket = ticketProfile(POLICIES.BANK_FIRST.fn, 'FIRST_LIGHT');
+    expect(toFraction(ticket.profit)).toBe('1/5');
+    expect(toFraction(ticket.nothing)).toBe('8/125');
+    // DARK VENT pays 2.689x, so it profits the ticket alone; the only other way
+    // to profit under BANK_FIRST is six organisms at generation 1.
+    const darkVent = ticketProfile(POLICIES.BANK_FIRST.fn, 'DARK_VENT');
+    expect(compare(darkVent.profit, darkVent.sideProbability)).toBe(1);
+    // DARK VENT pays exactly when the colony died early, so nothing is impossible.
+    expect(toFraction(darkVent.nothing)).toBe('0/1');
+  });
+
+  it('moves the profit rate materially, and in both directions', () => {
+    // MAJOR: §9.4 defended the pairing on RTP, which is exactly 19/20 by
+    // linearity on every row and therefore says nothing about this.
+    const banked = ticketProfile(POLICIES.BANK_FIRST.fn, 'DARK_VENT');
+    const run = ticketProfile(POLICIES.RUN.fn, 'DARK_VENT');
+    const bankedAlone = policyOutcomeSplit(POLICIES.BANK_FIRST.fn);
+    const runAlone = policyOutcomeSplit(POLICIES.RUN.fn);
+    expect(compare(banked.profit, bankedAlone.profit)).toBe(-1);
+    expect(compare(run.profit, runAlone.profit)).toBe(1);
+    // Nine percentage points down for a player who banks at once.
+    const drop = subtract(bankedAlone.profit, banked.profit);
+    expect(compare(drop, rat(9n, 100n))).toBe(1);
+    expect(compare(drop, rat(10n, 100n))).toBe(-1);
+  });
+
+  it('refuses a side bet it cannot price a ticket for', () => {
+    expect(() => ticketProfile(POLICIES.RUN.fn, 'NOPE')).toThrow(SwarmMathError);
   });
 });
 

@@ -787,6 +787,435 @@ export function policyOutcomeSplit(policy, threshold = ONE) {
 }
 
 /**
+ * How a round *ends*, per policy, as exact probabilities.
+ *
+ * The four terminals partition the outcome space: `EXTINCT`, `BLOOM` (the
+ * population reached the FULL BLOOM threshold and force-settled), `FINAL`
+ * (survived to the last generation) and `BANKED` (the player took the whole
+ * colony). Forward enumeration over `(generation, population)`; the policy is a
+ * function of that pair alone, so the chain is Markov and the walk is exact.
+ *
+ * This exists because FULL BLOOM is a *terminal of the player's own colony*, not
+ * a property of the grid, and harvesting changes how often the player reaches
+ * it — to exactly zero for any policy that halves the colony every generation.
+ * The published bloom frequency therefore belongs to a policy, and this is the
+ * function that says which.
+ */
+export function policyTerminalProfile(policy) {
+  assertPolicy(policy);
+  let live = new Array(B).fill(ZERO);
+  live[SEED_COUNT] = ONE;
+  const totals = { EXTINCT: ZERO, BLOOM: ZERO, FINAL: ZERO, BANKED: ZERO };
+
+  for (let t = 1; t <= G; t += 1) {
+    const next = new Array(B).fill(ZERO);
+    for (let n = 1; n < B; n += 1) {
+      const mass = live[n];
+      if (mass.numerator === 0n) continue;
+      const row = KERNEL[n];
+      for (let m = 0; m < row.length; m += 1) {
+        if (row[m] === 0n) continue;
+        const probability = multiply(mass, rat(row[m], POWERS[n]));
+        if (m === 0) {
+          totals.EXTINCT = add(totals.EXTINCT, probability);
+          continue;
+        }
+        if (m >= B) {
+          totals.BLOOM = add(totals.BLOOM, probability);
+          continue;
+        }
+        if (t === G) {
+          totals.FINAL = add(totals.FINAL, probability);
+          continue;
+        }
+        const k = policy(t, m);
+        if (!Number.isSafeInteger(k) || k < 0 || k > m)
+          fail('INVALID_POLICY', `Policy returned an out-of-range harvest at (${t}, ${m})`);
+        const rest = m - k;
+        if (rest === 0) {
+          totals.BANKED = add(totals.BANKED, probability);
+          continue;
+        }
+        next[rest] = add(next[rest], probability);
+      }
+    }
+    live = next;
+  }
+
+  for (let n = 1; n < B; n += 1)
+    if (live[n].numerator !== 0n) fail('INVALID_MODEL', 'Rounds survived past the last generation');
+  let mass = ZERO;
+  for (const value of Object.values(totals)) mass = add(mass, value);
+  if (!equal(mass, ONE)) fail('INVALID_MODEL', 'Terminal profile does not sum to one');
+  return totals;
+}
+
+/**
+ * Exact probability that a round under `policy` ever *shows* a colony worth at
+ * least `threshold` stake multiples.
+ *
+ * A frame is displayed at every resolution, so the quantity is the peak of
+ * `c(t) * m` over the resolutions the round actually reaches. Crossing is
+ * absorbing, which keeps the walk over `(generation, population)` exact and
+ * finite. docs/DESIGN.md §7.2 keys the environment reveal to a colony *value*
+ * rather than to a population, so this is the function that prices it.
+ */
+export function valuePeakReachProbability(policy, threshold) {
+  assertPolicy(policy);
+  let live = new Array(B).fill(ZERO);
+  live[SEED_COUNT] = ONE;
+  let reached = ZERO;
+
+  for (let t = 1; t <= G; t += 1) {
+    const next = new Array(B).fill(ZERO);
+    for (let n = 1; n < B; n += 1) {
+      const mass = live[n];
+      if (mass.numerator === 0n) continue;
+      const row = KERNEL[n];
+      for (let m = 0; m < row.length; m += 1) {
+        if (row[m] === 0n) continue;
+        const probability = multiply(mass, rat(row[m], POWERS[n]));
+        if (m === 0) continue;
+        if (compare(colonyMultiplier(t, m), threshold) >= 0) {
+          reached = add(reached, probability);
+          continue;
+        }
+        if (m >= B || t === G) continue;
+        const k = policy(t, m);
+        if (!Number.isSafeInteger(k) || k < 0 || k > m)
+          fail('INVALID_POLICY', `Policy returned an out-of-range harvest at (${t}, ${m})`);
+        const rest = m - k;
+        if (rest === 0) continue;
+        next[rest] = add(next[rest], probability);
+      }
+    }
+    live = next;
+  }
+  return reached;
+}
+
+/**
+ * The largest number of COLONY credit events one round can produce, over every
+ * draw grid and every policy — the exact quantity docs/MATH.md §13 bounds the
+ * floor-rounding loss with.
+ *
+ * Each credit event floors an exact rational to integer minor units and so
+ * costs strictly less than one unit, which makes "how many can there be" the
+ * whole of the payable-boundary claim. It used to be asserted by hand as
+ * `MAX_GENERATIONS`; it is now a deterministic dynamic program, because a
+ * hand-asserted bound on a money path is exactly the kind of number that is
+ * wrong without anything noticing.
+ *
+ * `commitsPerStage = 1` is the shipped protocol (docs/ENGINE.md §5.3): a stage
+ * accepts one harvest commitment, so a stage produces at most one credit.
+ * `Infinity` prices the rejected alternative, in which a stage accepts an
+ * unbounded sequence of harvests and the player can farm floor crumbs by
+ * shedding organisms one at a time.
+ */
+function maximumCreditEventsUncached(commitsPerStage = 1) {
+  const unlimited = commitsPerStage === Infinity;
+  if (!unlimited && (!Number.isSafeInteger(commitsPerStage) || commitsPerStage < 1))
+    fail('INVALID_ARGUMENT', 'commitsPerStage must be a positive integer or Infinity');
+
+  // best[r] = maximum credit events from generation t onward, given r organisms
+  // entering generation t. Folded backwards from the last generation.
+  let best = new Array(B).fill(0);
+  // Generation G resolves and force-settles: one credit event whenever a single
+  // organism survives, and a settlement of an extinct colony credits nothing.
+  for (let r = 1; r < B; r += 1) best[r] = 1;
+
+  for (let t = G - 1; t >= 1; t -= 1) {
+    const next = new Array(B).fill(0);
+    for (let r = 1; r < B; r += 1) {
+      let top = 0;
+      for (let m = 0; m <= 2 * r; m += 1) {
+        if (m === 0) continue;
+        // FULL BLOOM force-settles: exactly one credit event, no decision.
+        if (m >= B) {
+          if (top < 1) top = 1;
+          continue;
+        }
+        for (let k = 0; k <= m; k += 1) {
+          // Under the shipped protocol a stage commits once, so a harvest of k
+          // is one event. Under the rejected alternative the same k can be taken
+          // one organism at a time, which is k events.
+          const events = k === 0 ? 0 : unlimited ? k : 1;
+          const rest = m - k;
+          const total = events + (rest === 0 ? 0 : best[rest]);
+          if (total > top) top = total;
+        }
+      }
+      next[r] = top;
+    }
+    best = next;
+  }
+  return best[SEED_COUNT];
+}
+
+/**
+ * The joint offspring kernel of the player's colony and the wild line it sits
+ * inside: `occupied` slots carry the player's whole colony and `spare` slots
+ * carry the rest of the wild line, so one row produces `a` children for the
+ * player and `a + b` for the wild line. Memoized because the ticket walk hits
+ * the same (occupied, spare) pair thousands of times.
+ */
+const jointKernelRow = memoize((occupied, spare) => {
+  const playerRow = KERNEL[occupied];
+  const spareRow = KERNEL[spare];
+  // Weights are integers over DRAW_MODULUS^(occupied + spare); the walk scales
+  // every row up to the same power, so one denominator serves a generation.
+  const scale = POWERS[B - 1 - occupied - spare];
+  const entries = [];
+  for (let a = 0; a < playerRow.length; a += 1) {
+    if (playerRow[a] === 0n) continue;
+    for (let b = 0; b < spareRow.length; b += 1) {
+      if (spareRow[b] === 0n) continue;
+      entries.push({ player: a, wild: a + b, weight: playerRow[a] * spareRow[b] * scale });
+    }
+  }
+  return entries;
+});
+
+/**
+ * The exact joint law of a two-line ticket: one COLONY bet and one side bet, at
+ * equal stakes.
+ *
+ * docs/DESIGN.md §9.3 makes the profit rate `P(return > stake)` the binding
+ * "how often do I win" figure, and §9.4 defends pairing DARK VENT with the base
+ * bet on an RTP argument. RTP is the wrong statistic for that claim and it was
+ * the only one published: a ticket's profit rate is not the average of its
+ * lines' profit rates, because the wild line and the player's colony are drawn
+ * from the *same* rows — the player's organisms occupy a prefix of the wild
+ * line's slots (docs/MATH.md §7.3), so the two lines are strongly dependent.
+ *
+ * The joint kernel is exactly that containment: with `n` of the wild line's `w`
+ * slots occupied, the first `n` slots produce `a` children — which is the
+ * player's whole next population — and the remaining `w - n` produce `b`, so the
+ * wild line's next population is `a + b`. Both factors are the offspring kernel,
+ * so the walk is exact.
+ *
+ * Every side-bet multiplier exceeds the two-line ticket stake, so a won side bet
+ * is a profitable ticket whatever the colony did; the function asserts that
+ * rather than assuming it, and refuses to answer if a future price broke it.
+ *
+ * Ticket RTP needs no enumeration: expectation is linear and every line returns
+ * exactly `19/20` of its own stake, so any ticket returns exactly `19/20` of the
+ * total staked. What is *not* linear, and is what this function computes, is
+ * `P(the ticket returns more than the ticket stake)`.
+ */
+export function ticketProfile(policy, sideBetId) {
+  assertPolicy(policy);
+  const bet = sideBets().find((entry) => entry.id === sideBetId);
+  if (bet === undefined) fail('INVALID_ARGUMENT', `No such side bet: ${sideBetId}`);
+  const LINES = 2;
+  const threshold = rat(BigInt(LINES));
+  if (compare(bet.multiplier, threshold) <= 0)
+    fail(
+      'INVALID_MODEL',
+      `Side bet ${sideBetId} pays less than a ${LINES}-line ticket stake, so a win is not a profit`,
+    );
+
+  /** Where the side bet stands once generation `t` of the wild line has resolved. */
+  const decideSide = (generation, wildPopulation, wildTerminated) => {
+    if (sideBetId === 'FIRST_LIGHT')
+      return generation === 1 ? (wildPopulation >= 4 ? 'WON' : 'LOST') : 'PENDING';
+    if (sideBetId === 'DARK_VENT') {
+      if (wildPopulation === 0 && generation <= 3) return 'WON';
+      return generation >= 3 || wildTerminated ? 'LOST' : 'PENDING';
+    }
+    if (sideBetId === 'SWARM') {
+      if (wildPopulation >= 10) return 'WON';
+      return wildTerminated ? 'LOST' : 'PENDING';
+    }
+    return fail('INVALID_ARGUMENT', `No predicate for side bet ${sideBetId}`);
+  };
+
+  let nothing = ZERO;
+  let below = ZERO;
+  let profit = ZERO;
+  let peakStates = 1;
+
+  // Probabilities are carried as BigInt numerators over one common denominator
+  // per generation. Every transition consumes at most `B - 1` slots, so scaling
+  // each kernel row up to `DRAW_MODULUS^(B-1)` gives the whole generation one
+  // denominator and turns state merging into integer addition. Exactly the
+  // accumulator `enumerateWildLine()` uses, for exactly the same reason: without
+  // it every merge is a gcd over a denominator hundreds of digits long.
+  const SLOT_POWER = POWERS[B - 1];
+  let denominator = 1n;
+  let live = new Map([
+    ['B|3|3|0/1', { kind: 'BOTH', n: SEED_COUNT, w: SEED_COUNT, banked: ZERO, numerator: 1n }],
+  ]);
+
+  for (let t = 1; t <= G; t += 1) {
+    const nextDenominator = denominator * SLOT_POWER;
+    const next = new Map();
+    let nothingWeight = 0n;
+    let belowWeight = 0n;
+    let profitWeight = 0n;
+
+    /** Classify a finished ticket whose side bet lost: the colony total is all of it. */
+    const settleLost = (total, weight) => {
+      if (total.numerator === 0n) nothingWeight += weight;
+      else if (compare(total, threshold) <= 0) belowWeight += weight;
+      else profitWeight += weight;
+    };
+    const push = (state) => {
+      const key =
+        state.kind === 'BOTH'
+          ? `B|${state.n}|${state.w}|${toFraction(state.banked)}`
+          : state.kind === 'PLAYER'
+            ? `P|${state.n}|${toFraction(state.banked)}`
+            : `W|${state.w}|${state.colony}`;
+      const existing = next.get(key);
+      if (existing) existing.numerator += state.numerator;
+      else next.set(key, state);
+    };
+
+    for (const state of live.values()) {
+      if (state.kind === 'WILD') {
+        // The player's line is finished and the side bet is still open. The wild
+        // line is autonomous — it consumes slots 1 .. w of each row — so it walks
+        // on alone.
+        const row = KERNEL[state.w];
+        const scale = POWERS[B - 1 - state.w];
+        for (let m = 0; m < row.length; m += 1) {
+          if (row[m] === 0n) continue;
+          const weight = state.numerator * row[m] * scale;
+          const terminated = m === 0 || m >= B || t === G;
+          const side = decideSide(t, m, terminated);
+          if (side === 'WON') profitWeight += weight;
+          else if (side === 'LOST') {
+            if (state.colony === 'ZERO') nothingWeight += weight;
+            else belowWeight += weight;
+          } else push({ kind: 'WILD', w: m, colony: state.colony, numerator: weight });
+        }
+        continue;
+      }
+
+      if (state.kind === 'PLAYER') {
+        // The side bet has lost, so the ticket is decided by the colony alone.
+        const row = KERNEL[state.n];
+        const scale = POWERS[B - 1 - state.n];
+        for (let m = 0; m < row.length; m += 1) {
+          if (row[m] === 0n) continue;
+          const weight = state.numerator * row[m] * scale;
+          if (m === 0) {
+            settleLost(state.banked, weight);
+            continue;
+          }
+          if (m >= B || t === G) {
+            settleLost(add(state.banked, colonyMultiplier(t, m)), weight);
+            continue;
+          }
+          const k = policy(t, m);
+          if (!Number.isSafeInteger(k) || k < 0 || k > m)
+            fail('INVALID_POLICY', `Policy returned an out-of-range harvest at (${t}, ${m})`);
+          const banked = add(state.banked, multiply(organismValue(t), rat(BigInt(k))));
+          const rest = m - k;
+          if (rest === 0) {
+            settleLost(banked, weight);
+            continue;
+          }
+          if (compare(banked, threshold) > 0) {
+            profitWeight += weight;
+            continue;
+          }
+          push({ kind: 'PLAYER', n: rest, banked, numerator: weight });
+        }
+        continue;
+      }
+
+      // BOTH lines live. The joint kernel is the containment: the player's
+      // organisms are the first `n` of the wild line's `w` slots.
+      for (const entry of jointKernelRow(state.n, state.w - state.n)) {
+        const weight = state.numerator * entry.weight;
+        const wildPopulation = entry.wild;
+        const wildTerminated = wildPopulation === 0 || wildPopulation >= B || t === G;
+        const side = decideSide(t, wildPopulation, wildTerminated);
+        if (side === 'WON') {
+          profitWeight += weight;
+          continue;
+        }
+        if (side === 'PENDING' && wildTerminated)
+          fail('INVALID_MODEL', 'The wild line ended with its side bet undecided');
+
+        // Now the player's own line, from the same draws.
+        const resolved = entry.player;
+        let banked = state.banked;
+        let alive = false;
+        let rest = 0;
+        if (resolved === 0) {
+          // The player's colony is extinct and keeps whatever it banked. The
+          // wild line can still be alive: containment runs the other way.
+        } else if (resolved >= B || t === G) {
+          banked = add(banked, colonyMultiplier(t, resolved));
+        } else {
+          const k = policy(t, resolved);
+          if (!Number.isSafeInteger(k) || k < 0 || k > resolved)
+            fail('INVALID_POLICY', `Policy returned an out-of-range harvest at (${t}, ${resolved})`);
+          banked = add(banked, multiply(organismValue(t), rat(BigInt(k))));
+          rest = resolved - k;
+          alive = rest > 0;
+        }
+
+        if (compare(banked, threshold) > 0) {
+          // The colony alone already beats the whole ticket stake, and future
+          // credits are never negative.
+          profitWeight += weight;
+          continue;
+        }
+        if (side === 'LOST') {
+          if (alive) push({ kind: 'PLAYER', n: rest, banked, numerator: weight });
+          else settleLost(banked, weight);
+          continue;
+        }
+        if (alive) {
+          push({ kind: 'BOTH', n: rest, w: wildPopulation, banked, numerator: weight });
+          continue;
+        }
+        push({
+          kind: 'WILD',
+          w: wildPopulation,
+          colony: banked.numerator === 0n ? 'ZERO' : 'SUB',
+          numerator: weight,
+        });
+      }
+    }
+
+    if (nothingWeight !== 0n) nothing = add(nothing, rat(nothingWeight, nextDenominator));
+    if (belowWeight !== 0n) below = add(below, rat(belowWeight, nextDenominator));
+    if (profitWeight !== 0n) profit = add(profit, rat(profitWeight, nextDenominator));
+
+    // Keep the common denominator as small as the exact value allows.
+    let divisor = nextDenominator;
+    for (const state of next.values()) divisor = gcd(divisor, state.numerator);
+    if (divisor > 1n) {
+      for (const state of next.values()) state.numerator /= divisor;
+      denominator = nextDenominator / divisor;
+    } else {
+      denominator = nextDenominator;
+    }
+
+    live = next;
+    if (live.size > peakStates) peakStates = live.size;
+  }
+
+  if (live.size !== 0) fail('INVALID_MODEL', 'A ticket survived past the last generation');
+  const mass = add(add(nothing, below), profit);
+  if (!equal(mass, ONE)) fail('INVALID_MODEL', 'Ticket outcome split does not sum to one');
+  return {
+    lines: LINES,
+    sideBetId,
+    nothing,
+    belowStake: below,
+    profit,
+    sideProbability: bet.probability,
+    peakStates,
+  };
+}
+
+/**
  * The exact extremes of round variance over *every* adapted decision policy.
  *
  * The published volatility range must be a proven interval, not the spread of a
@@ -1210,3 +1639,4 @@ export const maximumRoundPayout = memoize(maximumRoundPayoutUncached);
 export const sideBets = memoize(sideBetsUncached);
 export const maximumRoundPayoutBelowPeak = memoize(maximumRoundPayoutBelowPeakUncached);
 export const aliveOccupancy = memoize(aliveOccupancyUncached);
+export const maximumCreditEvents = memoize(maximumCreditEventsUncached);

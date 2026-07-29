@@ -58,7 +58,7 @@ describe('frozen paytable fixture', () => {
     const fixture = parseFixture(frozen);
     expect(fixture.schema).toBe('swarm/paytable-v3');
     expect(fixture.adapterId).toBe('swarm-colony-v1');
-    expect(fixture.adapterVersion).toBe('1.2.0');
+    expect(fixture.adapterVersion).toBe('1.3.0');
     expect(fixture.totals.rtp).toBe('19/20');
     expect(fixture.totals.probabilityMass).toBe('1/1');
     expect(fixture.proof.ok).toBe(true);
@@ -104,11 +104,89 @@ describe('frozen paytable fixture', () => {
     const fixture = parseFixture(frozen);
     expect(fixture.proofSurface).toEqual({
       seedCommitmentVersion: 'reveal-engine/stage-seed-commit-v1',
-      bodyCommitmentVersion: 'reveal-engine/stage-body-commit-v1',
+      bodyCommitmentVersion: 'reveal-engine/stage-body-commit-v2',
       samplerDomain: 'reveal-engine/stage-draw-v2',
       clientEntropyBytes: 32,
       harvestQuantum: 'any',
+      harvestCommitsPerStage: 1,
+      maximumActionLogEntries: 17,
     });
+  });
+
+  it('publishes a FULL BLOOM frequency for every policy, including the zeros', () => {
+    // BLOCKER: the bloom frequency was published unqualified, and it is exactly
+    // zero for the harvest the client makes the one-tap default.
+    const fixture = parseFixture(frozen);
+    for (const policy of fixture.policies) {
+      expect(policy.terminals, policy.id).toBeDefined();
+      const mass = ['EXTINCT', 'BLOOM', 'FINAL', 'BANKED'].map((key) => policy.terminals[key]);
+      expect(mass.every((value) => /^\d+\/\d+$/u.test(value)), policy.id).toBe(true);
+      expect(policy.bloomOneIn, policy.id).toBeDefined();
+    }
+    const half = fixture.policies.find((policy) => policy.id === 'HALF_EVERY');
+    const run = fixture.policies.find((policy) => policy.id === 'RUN');
+    expect(half.terminals.BLOOM).toBe('0/1');
+    expect(half.bloomOneIn).toBe('never');
+    expect(run.terminals.BLOOM).not.toBe('0/1');
+    expect(run.bloomOneIn).toBe('22217.97');
+  });
+
+  it('publishes a ticket-level profit rate for every flagged pairing', () => {
+    // MAJOR: §9.3 makes the profit rate the binding figure and no profit rate
+    // existed for a ticket with more than one line.
+    const fixture = parseFixture(frozen);
+    expect(fixture.ticketPairings).toHaveLength(9);
+    for (const row of fixture.ticketPairings) {
+      expect(row.lines).toBe(2);
+      expect(row.ticketRtp, `${row.policy}/${row.sideBet}`).toBe('19/20');
+      expect(row.ticketProfitRate).toMatch(/^\d\.\d+$/u);
+      expect(Number(row.ticketProfitRate)).toBeGreaterThan(0);
+      expect(Number(row.ticketProfitRate)).toBeLessThan(1);
+    }
+    // The pairing the design flags, in both directions: DARK VENT cuts the
+    // profit rate for a player who banks at once and raises it for one who runs.
+    const banked = fixture.ticketPairings.find(
+      (row) => row.policy === 'BANK_FIRST' && row.sideBet === 'DARK_VENT',
+    );
+    const run = fixture.ticketPairings.find(
+      (row) => row.policy === 'RUN' && row.sideBet === 'DARK_VENT',
+    );
+    expect(banked.ticketProfitRate).toBe('0.3608881499');
+    expect(banked.colonyOnlyProfitRate).toBe('0.4560000000');
+    expect(banked.profitRateChange.startsWith('-')).toBe(true);
+    expect(run.ticketProfitRate).toBe('0.3756956796');
+    expect(run.profitRateChange.startsWith('-')).toBe(false);
+  });
+
+  it('derives the floor-rounding bound instead of asserting it', () => {
+    // BLOCKER: §13's "absolute bound" was the generation count, hard-coded, and
+    // it was only true because of a protocol rule nothing enforced.
+    const fixture = parseFixture(frozen);
+    const bound = fixture.roundingBound;
+    expect(bound.harvestCommitsPerStage).toBe(1);
+    expect(bound.maximumCreditEvents).toBe(18);
+    expect(bound.maximumCreditEventsIfStagesAcceptedRepeatedHarvests).toBe(117);
+    expect(bound.maximumCreditEventsIfStagesAcceptedRepeatedHarvests).toBeGreaterThan(
+      bound.maximumCreditEvents,
+    );
+    expect(bound.maximumLossUnits).toBe('18');
+    expect(bound.relativeAtMinimumStakePercentagePoints).toBe('0.018000');
+  });
+
+  it('prices the environment reveal on value, and says how often it fires', () => {
+    // MAJOR: the reveal was sold as a consequence of the exposure curve and
+    // keyed to a population event, which the exposure curve cannot distinguish.
+    const fixture = parseFixture(frozen);
+    const environment = fixture.presentation.environment;
+    expect(environment.threshold).toBe('475/48');
+    expect(environment.thresholdPopulation).toBe(16);
+    const run = environment.policies.find((row) => row.policy === 'RUN');
+    const bloom = fixture.policies.find((policy) => policy.id === 'RUN');
+    // Every bloom is at least this rich, so the reveal can never be rarer.
+    expect(Number(run.reach)).toBeGreaterThan(Number(bloom.bloomProbability));
+    expect(Number(run.timesMoreCommonThanBloom)).toBeGreaterThan(100);
+    for (const row of environment.policies)
+      expect(Number(row.reach), row.policy).toBeGreaterThanOrEqual(Number(row.bloom));
   });
 });
 

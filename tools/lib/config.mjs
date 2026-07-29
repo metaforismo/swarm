@@ -21,8 +21,17 @@ export const ADAPTER_ID = 'swarm-colony-v1';
  * `floor-half` to any legal `k`. All of that is replay-visible, so it takes a
  * new adapter version, a new fingerprint and a re-frozen fixture, exactly as
  * docs/ENGINE.md §2 requires.
+ *
+ * 1.3.0 closed the protocol against the transcript: a stage now accepts exactly
+ * one harvest commitment (`HARVEST_COMMITS_PER_STAGE`), which is what the
+ * verifier, the action-log bound and docs/MATH.md §1.1 always assumed and the
+ * command surface did not enforce; the settlement body gained the settlement
+ * mode, so a reconciled round is distinguishable from a player-settled one
+ * inside the commitment rather than only beside it; and stage-0 abandonment got
+ * a defined settlement. All three constrain which transcripts are legal, so
+ * again: new adapter version, new fingerprint, re-frozen fixture.
  */
-export const ADAPTER_VERSION = '1.2.0';
+export const ADAPTER_VERSION = '1.3.0';
 /**
  * v2 added the risk, bloom, feedback, break-even and variance-bound sections.
  * v3 added the presentation contracts (verdict bands, chord ladder, settlement
@@ -44,7 +53,14 @@ export const COHORT_MODEL_VERSION = 'swarm-cohort/v1';
  * choice-timed module; see docs/ENGINE.md §4.
  */
 export const SEED_COMMITMENT_VERSION = 'reveal-engine/stage-seed-commit-v1';
-export const BODY_COMMITMENT_VERSION = 'reveal-engine/stage-body-commit-v1';
+/**
+ * v2 adds the settlement mode to the sealed body, so "the player settled this"
+ * and "the abandonment rule settled this" are two different digests rather than
+ * two readings of one. Bumped rather than amended in place, because a body field
+ * set is a wire format and an older transcript must stay verifiable as what it
+ * was (docs/ENGINE.md §2).
+ */
+export const BODY_COMMITMENT_VERSION = 'reveal-engine/stage-body-commit-v2';
 /** Domain tag of the draw sampler. Bumped with 1.2.0 because client entropy joined the payload. */
 export const SAMPLER_DOMAIN = 'reveal-engine/stage-draw-v2';
 /** Domain tag of the live action chain the client accumulates during the round. */
@@ -59,6 +75,24 @@ export const CLIENT_ENTROPY_BYTES = 32;
  * express it would be publishing a range it could not sell.
  */
 export const HARVEST_QUANTUM = 'any';
+/**
+ * How many harvest commitments one stage accepts. One: the decision at a stage
+ * is a single choice of `k` in `[0, n]` — `k = 0` is CONTINUE, `k = n` is BANK,
+ * anything between is a partial harvest — and committing it closes that stage's
+ * decision (docs/ENGINE.md §5.3).
+ *
+ * This costs the player nothing and buys three things. Splitting a harvest is
+ * never worth more, because `floor(x) + floor(y) <= floor(x + y)` and the two
+ * pieces are credited at the same ladder value, so the shipped rule is weakly
+ * better for the player at every state. The action log stays one entry per
+ * stage, which is what the verifier, the transcript bound and docs/MATH.md §1.1
+ * already assumed. And the floor-rounding bound stays at 18 credit events per
+ * round instead of 117 (`maximumCreditEvents()` computes both).
+ *
+ * It is replay-visible — it decides which action logs are legal — so it is bound
+ * into the adapter fingerprint.
+ */
+export const HARVEST_COMMITS_PER_STAGE = 1;
 
 /**
  * One uniform draw per organism per generation, over a modulus of 20.
@@ -258,6 +292,7 @@ export const CONFIG = Object.freeze({
   actionChainDomain: ACTION_CHAIN_DOMAIN,
   clientEntropyBytes: CLIENT_ENTROPY_BYTES,
   harvestQuantum: HARVEST_QUANTUM,
+  harvestCommitsPerStage: HARVEST_COMMITS_PER_STAGE,
   drawModulus: DRAW_MODULUS,
   offspring: OFFSPRING,
   seedCount: SEED_COUNT,

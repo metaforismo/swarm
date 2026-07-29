@@ -1,7 +1,7 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { extractBlock, renderBlocks } from '../tools/lib/doctables.mjs';
+import { FIXTURE_PATH, extractBlock, renderBlocks } from '../tools/lib/doctables.mjs';
 import { DOCUMENTS, applyBlocks } from '../tools/syncdocs.mjs';
 import { buildPaytable } from '../tools/lib/report.mjs';
 import {
@@ -29,7 +29,8 @@ const math = read('docs/MATH.md');
 const design = read('docs/DESIGN.md');
 const engine = read('docs/ENGINE.md');
 const readme = read('README.md');
-const documents = { readme, math, design, engine };
+const decisions = read('docs/DECISIONS.md');
+const documents = { readme, math, design, engine, decisions };
 /** Markdown hard-wraps sentences, so prose assertions run on a single line. */
 const flat = (text) => text.replace(/\s+/gu, ' ');
 const paytable = buildPaytable();
@@ -270,8 +271,8 @@ describe('documentation discipline', () => {
     // BLOCKER: a choice-timed round shipped a single-phase commitment, so the
     // action log was an unverified input to its own verifier.
     expect(flat(engine)).toMatch(/two-phase/iu);
-    expect(engine).toContain('stage-seed-commit-v1');
-    expect(engine).toContain('stage-body-commit-v1');
+    expect(engine).toContain(paytable.proofSurface.seedCommitmentVersion);
+    expect(engine).toContain(paytable.proofSurface.bodyCommitmentVersion);
     expect(flat(engine)).toMatch(/settlement body commitment/iu);
     // The verifier must re-derive the body, not accept it.
     expect(flat(engine)).toMatch(/Re-seal the \*\*settlement body commitment\*\*/u);
@@ -366,6 +367,179 @@ describe('documentation discipline', () => {
     // Beat table, camera note and a bounded asset count, not two sentences.
     expect(flat(design)).toMatch(/Camera and composition/u);
     expect(flat(design)).toMatch(/dollies back \*\*8%\*\*/u);
+  });
+
+  // -------------------------------------------------------------------------
+  // Regression guards for the round-4 findings. Same discipline as above: each
+  // was a real defect nothing could see, so each gets a test that can.
+  // -------------------------------------------------------------------------
+
+  it('never publishes the FULL BLOOM frequency without the play pattern it belongs to', () => {
+    // BLOCKER: the headline frequency is the never-harvest one, and it is
+    // exactly zero under the client's own one-tap default harvest.
+    const run = paytable.policies.find((policy) => policy.id === 'RUN');
+    const grouped = Math.round(Number(run.bloomOneIn)).toLocaleString('en-US');
+    const qualifier = /RUN|never[- ]harvest|play pattern|wild line|policy/iu;
+    for (const [name, text] of Object.entries(documents)) {
+      const flattened = flat(text);
+      for (const needle of [run.bloomOneIn, grouped]) {
+        let cursor = flattened.indexOf(needle);
+        while (cursor !== -1) {
+          const window = flattened.slice(Math.max(0, cursor - 320), cursor + 320);
+          expect(qualifier.test(window), `${name}: unqualified "${needle}" near ...${window}...`).toBe(
+            true,
+          );
+          cursor = flattened.indexOf(needle, cursor + 1);
+        }
+      }
+    }
+    // And the zero is published, not merely implied.
+    expect(paytable.policies.find((policy) => policy.id === 'HALF_EVERY').bloomOneIn).toBe('never');
+    expect(flat(math)).toMatch(/unreachable — not rare, unreachable|not rare, unreachable/u);
+    expect(flat(design)).toMatch(/never appears without the play pattern/iu);
+  });
+
+  it('makes one harvest commitment per stage a rule in all three documents', () => {
+    // BLOCKER: a legal command sequence produced a round the verifier refused.
+    expect(engine).toContain('commitsPerStage');
+    expect(flat(engine)).toMatch(/One harvest commitment per stage/u);
+    expect(flat(engine)).toMatch(/decisionOpen/u);
+    expect(flat(math)).toMatch(/One `k` per generation/u);
+    // The client may not offer a control the protocol would refuse.
+    expect(flat(design)).toMatch(/collapses to `NEXT`/u);
+    // And the reason it costs nothing has to be stated, not assumed.
+    expect(flat(math)).toMatch(/floor\(x\) \+ floor\(y\)/u);
+    expect(flat(engine)).toMatch(/floor\(x\) \+ floor\(y\)/u);
+  });
+
+  it('derives the floor-rounding bound and prices the alternative', () => {
+    // BLOCKER: "absolute bound: 18" was true only under a rule nothing enforced.
+    const bound = paytable.roundingBound;
+    expect(math).toContain(String(bound.maximumCreditEvents));
+    expect(math).toContain(String(bound.maximumCreditEventsIfStagesAcceptedRepeatedHarvests));
+    expect(flat(math)).toMatch(/computed, not asserted|dynamic program/iu);
+    // The old sentence claimed an absolute bound with no protocol behind it.
+    expect(flat(math)).not.toMatch(/\*\*Absolute bound:\*\* `18` units/u);
+    expect(readme).toContain(String(bound.maximumCreditEvents));
+  });
+
+  it('defines a settlement for a round abandoned before anything resolved', () => {
+    // BLOCKER: stage 0 is a STAGED state the 72-hour trigger covers, and the
+    // ladder has no value there.
+    expect(flat(engine)).toMatch(/Action, at stage 0/u);
+    expect(flat(engine)).toMatch(/no ladder value/iu);
+    expect(flat(engine)).toMatch(/Why not a void/u);
+    // The trigger must reach both live states, not only STAGED.
+    expect(flat(engine)).toMatch(/not yet `SETTLED`/u);
+    expect(flat(engine)).toMatch(/starts at the `open\(\)`/u);
+    // The claim that motivated all of it must still be made, and now be true.
+    expect(flat(engine)).toMatch(/no state in which a committed seed can never be published/u);
+    expect(flat(design)).toMatch(/before its first tap/u);
+  });
+
+  it('keys the environment reveal to value and publishes how often it fires', () => {
+    // MAJOR: the reveal claimed to be a consequence of the exposure curve while
+    // firing on a population event the curve cannot distinguish.
+    const environment = paytable.presentation.environment;
+    expect(design).toContain(environment.thresholdDecimal);
+    expect(design).toContain(environment.threshold);
+    expect(flat(design)).toMatch(/not a bloom effect|it is not a bloom effect/iu);
+    // The old claim, which was false, must be gone from the document's voice.
+    expect(unquoted(flat(design))).not.toMatch(/It is unique and stays unique/u);
+    expect(unquoted(flat(design))).not.toMatch(/Nothing is switched on\. The environment was always/u);
+    // The frequency comparison is published, per policy.
+    const run = environment.policies.find((row) => row.policy === 'RUN');
+    expect(design).toContain(run.reachOneIn);
+  });
+
+  it('runs the wild-line ghost past the responsible-design rules', () => {
+    // MAJOR: a permanent counterfactual colony was specified in §4 and never
+    // evaluated in §9.
+    expect(flat(design)).toMatch(/### 9\.8/u);
+    expect(flat(design)).toMatch(/the persistent ghost is cut/iu);
+    expect(flat(design)).toMatch(/state of a bet the player has placed/iu);
+    // It may still exist as a teaching beat, so the ban has to be specific.
+    expect(flat(design)).toMatch(/400 ms/u);
+  });
+
+  it('applies the feedback doctrine to the harvest beat', () => {
+    // MAJOR: the loudest beat in the game fired on a pathwise wealth-neutral
+    // event, and R1 was scoped so it never reached it.
+    expect(flat(design)).toMatch(/R6 — A transfer is not a gain/u);
+    expect(flat(design)).toMatch(/perverse incentive/iu);
+    // The round-3 treatment, by name.
+    expect(unquoted(flat(design))).not.toMatch(/granular amber pour, 400 ms, ending in a soft click/u);
+    expect(unquoted(flat(design))).not.toMatch(/spiral into the balance chip as amber particles/u);
+  });
+
+  it('publishes ticket-level profit rates for the pairings it flags', () => {
+    // MAJOR: §9.4 defended a pairing with an RTP, and §9.3 makes the profit rate
+    // the binding figure.
+    const banked = paytable.ticketPairings.find(
+      (row) => row.policy === 'BANK_FIRST' && row.sideBet === 'DARK_VENT',
+    );
+    expect(math).toContain(banked.ticketProfitRate);
+    expect(design).toContain(banked.ticketProfitRate);
+    expect(readme).toMatch(/36\.09%|0\.3608881499/u);
+    expect(flat(design)).toMatch(/profit rate of a ticket is\s*not the average of its lines/iu);
+    expect(flat(math)).toMatch(/The profit rate is not linear/u);
+  });
+
+  it('sets a speed-of-play floor and an input guard', () => {
+    // MAJOR: every beat was skippable and no cycle floor existed.
+    expect(flat(design)).toMatch(/### 9\.7 Speed of play/u);
+    expect(design).toContain('2,500 ms');
+    expect(design).toContain('350 ms');
+    expect(flat(design)).toMatch(/Skipping buys the resolved state, not the next decision/u);
+    expect(flat(design)).toMatch(/No turbo, no quick-spin/u);
+  });
+
+  it('keeps the rounding qualifier in the client copy', () => {
+    // MAJOR: MATH is careful that "theoretical" is doing work; three mandated
+    // copy strings dropped it and became false as absolute statements.
+    // Only the mandated copy strings, which always name the percentage; prose
+    // *about* the claim is allowed to quote it in order to correct it.
+    const claims = [...flat(design).matchAll(/returns the same 95%[^."]*/gu)].map(
+      (match) => match[0],
+    );
+    expect(claims.length).toBeGreaterThan(0);
+    for (const claim of claims)
+      expect(claim, claim).toMatch(/before rounding|to within|rounded down/u);
+    expect(flat(design)).toMatch(/same expected return, before rounding/u);
+    expect(flat(design)).toMatch(/rounded down to the nearest 0\.000001/u);
+    expect(flat(design)).toMatch(/The rounding sentence is mandatory/u);
+  });
+
+  it('points at a fixture that exists', () => {
+    // MINOR: the one pointer for the two values MATH elides named a file that
+    // was never in the repository.
+    for (const [name, text] of Object.entries(documents))
+      expect(text, name).not.toMatch(/paytable\.v2\.json/u);
+    expect(math).toContain(FIXTURE_PATH);
+    expect(existsSync(`${root}${FIXTURE_PATH}`)).toBe(true);
+  });
+
+  it('specifies a first-time experience and keeps it out of a live round', () => {
+    // MINOR: no onboarding was specified anywhere, for the game's largest
+    // comprehension risk.
+    expect(flat(design)).toMatch(/S0 — First round only/u);
+    expect(flat(design)).toMatch(/shown before a round, never during one and never after a loss/u);
+    expect(flat(design)).toMatch(/not a demo round/iu);
+  });
+
+  it('states the organism size in the same unit as the layout table', () => {
+    // MINOR: §6.2 gave a px range against a pt layout table, and the two did not
+    // even cover the same interval.
+    const { layout } = paytable.presentation;
+    expect(design).toContain(`${layout.bodyDiameterMin} to ${layout.bodyDiameterMax} pt`);
+    expect(unquoted(flat(design))).not.toMatch(/40–70 px/u);
+  });
+
+  it('reconciles the one forward-looking number on the play surface', () => {
+    // MINOR: the decision panel volunteers the next generation's yield, against
+    // a rule that bans showing the way back.
+    expect(flat(design)).toMatch(/The one forward-looking number, and why it is allowed/u);
+    expect(flat(design)).toMatch(/never multiplied by the current population/iu);
   });
 
   it('keeps every document substantial and linked', () => {

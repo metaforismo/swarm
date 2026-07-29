@@ -1,7 +1,7 @@
 /**
  * Builds the complete SWARM paytable object from the exact model.
  *
- * `tools/enumerate.mjs` prints it, `spec/paytable.v2.json` freezes it, and
+ * `tools/enumerate.mjs` prints it, `spec/paytable.v3.json` freezes it, and
  * `tests/` re-derives it and compares it against both the frozen fixture and
  * the numbers published in docs/MATH.md. There is exactly one source of truth
  * and it is the enumeration, not the prose.
@@ -17,6 +17,7 @@ import {
   COLONY_MAX_WIN_MULTIPLE,
   CONFIG,
   DRAW_MODULUS,
+  HARVEST_COMMITS_PER_STAGE,
   HARVEST_QUANTUM,
   MAX_GENERATIONS,
   MAX_POPULATION,
@@ -38,13 +39,17 @@ import {
   structuralMaxMultiplier,
 } from './config.mjs';
 import {
+  BODY_RADIUS_MAX,
+  BODY_RADIUS_MIN,
   CHORD_RATIO,
   CHORD_STEPS,
+  ENVIRONMENT_THRESHOLD,
   HEAVY_LOSS_THRESHOLD,
   LAYOUT_POPULATIONS,
   MEDUSA_THRESHOLD,
   chordLadder,
   colonyLayout,
+  environmentReveal,
   settlementClasses,
   verdictBands,
   verdictBeatMass,
@@ -58,11 +63,13 @@ import {
   enumerateWildLine,
   extremalRoundVariance,
   feedbackHonesty,
+  maximumCreditEvents,
   maximumRoundPayout,
   evaluatePolicy,
   expectedGenerations,
   peakBand,
   policyOutcomeSplit,
+  policyTerminalProfile,
   populationDistribution,
   proveStrategyInvariance,
   reachProbability,
@@ -74,6 +81,7 @@ import {
   stakeBoundaryIsUnreachable,
   survivalCurve,
   terminalCategories,
+  ticketProfile,
   underwaterAfterFirstGeneration,
 } from './model.mjs';
 import {
@@ -107,6 +115,13 @@ export const REACH_THRESHOLDS = [4, 6, 8, 10, 12, 14, 16];
 export const FEEDBACK_POPULATIONS = [3, 5, 8, 12, 15];
 /** The near-miss band: reached the SWARM-adjacent sizes but not FULL BLOOM. */
 export const NEAR_MISS_BAND = [12, BLOOM_THRESHOLD];
+/**
+ * The policies the ticket-pairing table is published for: the one the client
+ * defaults to, the one that banks immediately, and the one that never harvests.
+ * A ticket's profit rate is a joint law over the colony and the wild line, so it
+ * has to be published per policy like everything else that depends on play.
+ */
+export const TICKET_POLICIES = Object.freeze(['BANK_FIRST', 'HALF_EVERY', 'RUN']);
 
 export function buildPaytable() {
   assertConfig();
@@ -117,6 +132,7 @@ export function buildPaytable() {
   const bands = verdictBands();
   const beatMass = verdictBeatMass();
   const layout = colonyLayout();
+  const environment = environmentReveal();
 
   const pmf = offspringPmf();
   const { terminals } = enumerateWildLine();
@@ -127,6 +143,11 @@ export function buildPaytable() {
   const varianceMax = extremalRoundVariance('max');
   const varianceMin = extremalRoundVariance('min');
   const nearMiss = peakBand(NEAR_MISS_BAND[0], NEAR_MISS_BAND[1]);
+
+  const creditEvents = maximumCreditEvents(HARVEST_COMMITS_PER_STAGE);
+  const repeatedCreditEvents = maximumCreditEvents(Infinity);
+  if (creditEvents >= repeatedCreditEvents)
+    throw new Error('The one-commit rule should strictly reduce the credit-event bound');
 
   const structural = structuralMaxMultiplier();
   const structuralTerminal = terminals.find(
@@ -227,6 +248,7 @@ export function buildPaytable() {
     policies: Object.values(POLICIES).map((policy) => {
       const evaluation = evaluatePolicy(policy.fn);
       const split = policyOutcomeSplit(policy.fn);
+      const terminals = policyTerminalProfile(policy.fn);
       if (toFraction(split.zero) !== toFraction(evaluation.zeroProbability))
         throw new Error(`Outcome split disagrees with backward induction for ${policy.id}`);
       return {
@@ -244,7 +266,45 @@ export function buildPaytable() {
         // P(credit > stake): the number that means what a player thinks "win" means.
         profitRate: toDecimal(split.profit, 10),
         profitRateExact: toFraction(split.profit),
+        // How the round *ends* under this policy. FULL BLOOM is a terminal of
+        // the player's own colony, not a property of the grid: a policy that
+        // halves the colony every generation can never reach it, so the bloom
+        // frequency belongs to a policy and is published with one.
+        terminals: {
+          EXTINCT: toFraction(terminals.EXTINCT),
+          BLOOM: toFraction(terminals.BLOOM),
+          FINAL: toFraction(terminals.FINAL),
+          BANKED: toFraction(terminals.BANKED),
+        },
+        bloomProbability: toDecimal(terminals.BLOOM, 12),
+        bloomScientific: toScientific(terminals.BLOOM, 6),
+        bloomOneIn: toOneIn(terminals.BLOOM, 2),
       };
+    }),
+    /**
+     * Two-line tickets at equal stakes: the COLONY bet plus one side bet. Ticket
+     * RTP is exactly `19/20` by linearity and needs no enumeration; the profit
+     * rate is a joint law and needs one, because the wild line and the player's
+     * colony are drawn from the same rows.
+     */
+    ticketPairings: TICKET_POLICIES.flatMap((policyId) => {
+      const policy = POLICIES[policyId];
+      const colony = policyOutcomeSplit(policy.fn);
+      return sideBets().map((bet) => {
+        const ticket = ticketProfile(policy.fn, bet.id);
+        return {
+          policy: policyId,
+          sideBet: bet.id,
+          lines: ticket.lines,
+          ticketProfitRate: toDecimal(ticket.profit, 10),
+          ticketProfitRateExact: toFraction(ticket.profit),
+          colonyOnlyProfitRate: toDecimal(colony.profit, 10),
+          profitRateChange: toDecimal(subtract(ticket.profit, colony.profit), 10),
+          ticketNothingRate: toDecimal(ticket.nothing, 10),
+          ticketBelowStakeRate: toDecimal(ticket.belowStake, 10),
+          ticketRtp: toFraction(CONFIG.targetRtp),
+        };
+      });
     }),
     varianceBounds: {
       note:
@@ -436,6 +496,35 @@ export function buildPaytable() {
         belowStake: toDecimal(row.belowStake, 10),
         profit: toDecimal(row.profit, 10),
       })),
+      /**
+       * The environment reveal, keyed to colony value and not to population.
+       * Exposure is strictly increasing in value (docs/DESIGN.md §6.3), so a
+       * lighting rule that fires on a population event cannot be a consequence
+       * of the exposure curve. The threshold is the smallest value a FULL BLOOM
+       * can have, so every bloom lights the environment and so does every frame
+       * worth as much.
+       */
+      environment: {
+        note:
+          'The environment lights when the colony is worth at least the smallest ' +
+          'possible FULL BLOOM. That is a value threshold, not a population one: ' +
+          'the reveal fires on every frame that rich, and blooms are a subset of ' +
+          'them. Reach counts frames a round displays, not what it settles for.',
+        threshold: toFraction(ENVIRONMENT_THRESHOLD),
+        thresholdDecimal: toDecimal(ENVIRONMENT_THRESHOLD, 6),
+        thresholdGeneration: 3,
+        thresholdPopulation: BLOOM_THRESHOLD,
+        policies: environment.map((row) => ({
+          policy: row.id,
+          reach: toDecimal(row.reach, 12),
+          reachScientific: toScientific(row.reach, 6),
+          reachOneIn: toOneIn(row.reach, 2),
+          bloom: toDecimal(row.bloom, 12),
+          bloomOneIn: toOneIn(row.bloom, 2),
+          timesMoreCommonThanBloom:
+            row.timesMoreCommon === null ? null : toDecimal(row.timesMoreCommon, 2),
+        })),
+      },
       layout: {
         note:
           'Golden-angle phyllotaxis: body i of n sits at radius R(n) * sqrt(i/n) ' +
@@ -443,6 +532,11 @@ export function buildPaytable() {
           'R(n) and no two bodies share a radius.',
         populations: LAYOUT_POPULATIONS.slice(),
         firstClampedPopulation: layout.firstClampedPopulation,
+        // Published in points, like every other figure an artist reads, so the
+        // material note in docs/DESIGN.md §6.2 cannot quote a different unit
+        // from the layout table two subsections below it.
+        bodyDiameterMin: toDecimal(multiply(BODY_RADIUS_MIN, rat(2n)), 0),
+        bodyDiameterMax: toDecimal(multiply(BODY_RADIUS_MAX, rat(2n)), 0),
         rows: layout.rows.map((row) => ({
           population: row.population,
           bodyRadius: toDecimal(row.bodyRadius, 2),
@@ -459,6 +553,9 @@ export function buildPaytable() {
       samplerDomain: SAMPLER_DOMAIN,
       clientEntropyBytes: CLIENT_ENTROPY_BYTES,
       harvestQuantum: HARVEST_QUANTUM,
+      harvestCommitsPerStage: HARVEST_COMMITS_PER_STAGE,
+      /** One action-log entry per resolved non-terminal stage, and never two. */
+      maximumActionLogEntries: MAX_GENERATIONS - 1,
     },
     structuralMaximum: {
       multiplier: toFraction(structural),
@@ -479,21 +576,31 @@ export function buildPaytable() {
     },
     roundingBound: {
       note:
-        'Floor rounding costs at most one minor unit per credit event; a round has ' +
-        'at most 18 of them. The relative bound is stated at the minimum stake, ' +
-        'which is where it is largest.',
-      maximumCreditEvents: MAX_GENERATIONS,
-      maximumLossUnits: MAX_GENERATIONS.toString(),
-      maximumLossCredits: toDecimal(rat(BigInt(MAX_GENERATIONS), UNITS_PER_CREDIT), 8),
-      relativeAtMinimumStake: toScientific(
-        rat(BigInt(MAX_GENERATIONS), MIN_STAKE_UNITS),
-        6,
-      ),
+        'Floor rounding costs strictly less than one minor unit per credit event, ' +
+        'so the bound on a round is the largest number of credit events a round ' +
+        'can produce. That count is a dynamic program over every draw grid and ' +
+        'every policy, not an assertion: under the shipped protocol a stage ' +
+        'commits one harvest, so the maximum is a harvest at each of generations ' +
+        '1 to 17 plus one settlement. The relative bound is stated at the minimum ' +
+        'stake, which is where it is largest.',
+      maximumCreditEvents: creditEvents,
+      /**
+       * The rejected alternative, costed. If a stage accepted an unbounded
+       * sequence of harvests, a player could shed organisms one at a time and
+       * multiply the number of floor events by more than six.
+       */
+      maximumCreditEventsIfStagesAcceptedRepeatedHarvests: repeatedCreditEvents,
+      harvestCommitsPerStage: HARVEST_COMMITS_PER_STAGE,
+      /** Each selected side bet credits at most once, on its own line and its own stake. */
+      maximumCreditEventsPerSideBetLine: 1,
+      maximumLossUnits: creditEvents.toString(),
+      maximumLossCredits: toDecimal(rat(BigInt(creditEvents), UNITS_PER_CREDIT), 8),
+      relativeAtMinimumStake: toScientific(rat(BigInt(creditEvents), MIN_STAKE_UNITS), 6),
       relativeAtMinimumStakePercentagePoints: toDecimal(
-        multiply(rat(BigInt(MAX_GENERATIONS), MIN_STAKE_UNITS), rat(100n)),
+        multiply(rat(BigInt(creditEvents), MIN_STAKE_UNITS), rat(100n)),
         6,
       ),
-      relativeAtMaximumStake: toScientific(rat(BigInt(MAX_GENERATIONS), MAX_STAKE_UNITS), 6),
+      relativeAtMaximumStake: toScientific(rat(BigInt(creditEvents), MAX_STAKE_UNITS), 6),
     },
     terminals: terminals.map((terminal) => ({
       generation: terminal.generation,

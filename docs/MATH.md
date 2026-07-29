@@ -19,10 +19,10 @@ npm test                     # re-derive and assert every published number
 <!-- generated:identity -->
 | Identity | Value |
 | --- | --- |
-| Adapter | `swarm-colony-v1` @ `1.2.0` |
+| Adapter | `swarm-colony-v1` @ `1.3.0` |
 | Paytable schema | `swarm/paytable-v3` |
 | Frozen fixture | `spec/paytable.v3.json` |
-| Fixture sha256 | `5adfdbb2c1aa16c8d446f6fab7f3897a4436e9eb1eb89ef824cdd062dca564ea` |
+| Fixture sha256 | `d1f494ffb707067a779bd7c05470dfe955599f20b2bb51647ca62d9d416dbbfe` |
 <!-- /generated:identity -->
 
 ---
@@ -42,7 +42,8 @@ npm test                     # re-derive and assert every published number
 | Largest total the COLONY line can credit | `373466920422265/412316860416` = 905.776494x |
 | Declared COLONY cap, on the colony stake | 906x (proven never to bind) |
 | Worst-case ticket liability at the stake bounds | 931,700 credits, admitted below 1,000,000 |
-| FULL BLOOM frequency | 1 in 22217.97 |
+| FULL BLOOM frequency, never-harvest play (`RUN`) | 1 in 22217.97 |
+| FULL BLOOM frequency, the one-tap default harvest (`HALF_EVERY`) | **never** — halving the colony caps it below the threshold |
 | FULL BLOOM payout range | 9.895833x to 527.355936x, median 37.749608x |
 | Standard deviation, proven interval over every policy | 0.513058 to 7.569363 |
 | Rounds left below the stake by the mandatory generation 1 | `68/125` = 54.40% |
@@ -104,6 +105,18 @@ between them — the client's one-tap default is `floor(n / 2)` and its stepper
 reaches every other value (`docs/DESIGN.md` §4.3). The protocol accepts every
 `k` in range, the proof covers every `k`, and section 11's published volatility
 maximum is attained at `k = 1`, so the client has to be able to express it.
+
+**One `k` per generation, and why that is a rule rather than a modelling
+convenience.** The line `k := player action in {0..n}` is consulted exactly once
+per resolved generation: the decision at a generation is a single choice of `k`
+on the continuum from `CONTINUE` to `BANK`, and committing it closes that
+generation's decision (`docs/ENGINE.md` §5.3). Round 3 wrote this model and let
+the command surface accept a second harvest at the same generation, which cost
+nothing in expectation — `c(t)k₁ + c(t)k₂ = c(t)(k₁ + k₂)` — and broke two other
+things: the transcript stopped being one entry per generation, which the
+published verifier assumes, and section 13's rounding bound stopped being true.
+Section 13 states the rule, proves it never costs the player anything, and
+prices the alternative exactly.
 
 **Slot discipline.** After each resolution the colony is compacted into slots
 `1 ... n`, and a harvest removes the highest-numbered slots. The consequence is
@@ -372,7 +385,8 @@ credited amount is never below the displayed multiplier times the stake.
 
 Exact values longer than 44 characters are published as the SHA-256 of their
 canonical `numerator/denominator` string; the full 200-digit fractions are in
-`spec/paytable.v2.json`. `FIRST LIGHT` is exactly `1/5` and pays exactly `19/4`,
+`spec/paytable.v3.json`, under `sideBets[].probability` and
+`sideBets[].multiplier`. `FIRST LIGHT` is exactly `1/5` and pays exactly `19/4`,
 which is a coincidence of the chosen weights and a useful sanity anchor.
 
 Each side bet credits at most once, so the largest amount its line can ever owe
@@ -443,6 +457,62 @@ free. The opposite direction — "SWARM cannot win any more" — is *not* knowab
 early and the client must not imply it, because it would require knowing that no
 later row will reach 10.
 
+### 7.4 What a ticket does, as opposed to what a line does
+
+RTP is linear, so it survives being added up: every line returns exactly `19/20`
+of its own stake, and therefore any ticket returns exactly `19/20` of the total
+staked, at any stake ratio, under any policy. That is the whole of what the RTP
+argument establishes, and it is the argument `docs/DESIGN.md` §9.4 uses to
+defend pairing `DARK VENT` with the base bet.
+
+**The profit rate is not linear, and it is the figure the design makes binding.**
+`docs/DESIGN.md` §9.3 rules that any published "how often do I win" number is
+`P(return > stake)`. No such number existed for a ticket with more than one line,
+and the two lines are anything but independent: side bets resolve on the wild
+line, the player's organisms occupy a *prefix* of the wild line's slots (§7.3),
+and the two are drawn from the same rows. The joint law is therefore enumerated
+exactly — `ticketProfile()` walks `(player population, wild population, banked)`
+with that containment as its kernel — for the COLONY bet plus one side bet at
+**equal stakes**:
+
+<!-- generated:ticket-pairings -->
+| Policy | Ticket | Ticket profit rate | COLONY alone | Change | Ticket returns nothing |
+| --- | --- | --- | --- | --- | --- |
+| `BANK_FIRST` | COLONY + FIRST LIGHT | 0.2000000000 | 0.4560000000 | -0.2560000000 | 0.0640000000 |
+| `BANK_FIRST` | COLONY + DARK VENT | 0.3608881499 | 0.4560000000 | -0.0951118500 | 0.0000000000 |
+| `BANK_FIRST` | COLONY + SWARM | 0.0115337091 | 0.4560000000 | -0.4444662908 | 0.0640000000 |
+| `HALF_EVERY` | COLONY + FIRST LIGHT | 0.2586550945 | 0.3075713875 | -0.0489162930 | 0.1919999780 |
+| `HALF_EVERY` | COLONY + DARK VENT | 0.4568749671 | 0.3075713875 | +0.1493035795 | 0.0204799780 |
+| `HALF_EVERY` | COLONY + SWARM | 0.1049361326 | 0.3075713875 | -0.2026352549 | 0.1919999780 |
+| `RUN` | COLONY + FIRST LIGHT | 0.2144200454 | 0.0224631637 | +0.1919568816 | 0.7855799545 |
+| `RUN` | COLONY + DARK VENT | 0.3756956796 | 0.0224631637 | +0.3532325159 | 0.6243043203 |
+| `RUN` | COLONY + SWARM | 0.0248304304 | 0.0224631637 | +0.0023672667 | 0.9751695695 |
+<!-- /generated:ticket-pairings -->
+
+Read the `BANK_FIRST` / `DARK VENT` row, because it is the pairing §9.4 flags:
+the ticket returns `19/20` like everything else, it can never return nothing, and
+it cuts the chance of finishing the round ahead from `0.4560000000` to
+`0.3608881499` — 9.5 percentage points — while doubling the amount staked. Under
+`RUN` the same pairing moves the same number the other way, from `0.0224631637`
+to `0.3756956796`. Both are large, both were invisible, and neither is an RTP.
+
+Three consequences, binding on the client rather than editorial:
+
+- A ticket's profit rate depends on the **stake ratio**, so there is no single
+  honest number for an arbitrary one. The table is the equal-stake case;
+  `docs/DESIGN.md` §9.3 forbids a combined figure for a ticket whose stakes are
+  not equal and requires the per-line profit rates instead.
+- It depends on the **policy**, like every other number here that depends on how
+  the round is played, so it is published per policy and never as one number.
+- A won side bet is a profitable ticket in every row above only because each of
+  the three multipliers exceeds a two-line ticket stake. That is checked
+  mechanically rather than assumed: `ticketProfile()` refuses to answer at all if
+  a future price breaks it.
+
+The boundary is unambiguous here for the same reason it is for a single line:
+§13.1 shows no round total can equal a whole number of stakes, so "more than the
+ticket stake" and "at least the ticket stake" are the same set on every row.
+
 ---
 
 ## 8. The shape of the distribution
@@ -503,7 +573,11 @@ smallest surviving colony at generation 18 is one organism worth `c(18)`.
 | 500x | 1.38334e-15 | 722887390391809.47 |
 <!-- /generated:tail -->
 
-How often the colony grows to a given size at any point in the round:
+How often the **wild line** grows to a given size at any point in the round —
+that is, the colony under `RUN`, which is also what every side bet resolves on.
+A player who harvests holds a smaller colony than this by construction (§7.3),
+so these are frequencies for the grid and for never-harvest play, not for
+everybody; §8.2 is the per-policy version:
 
 <!-- generated:reach -->
 | Peak population at least | Probability | One in |
@@ -517,10 +591,12 @@ How often the colony grows to a given size at any point in the round:
 | 16 | 4.50086e-05 | 22217.97 |
 <!-- /generated:reach -->
 
-One round in three grows to 4 organisms; one in 12 reaches 6; one in 22,218
-blooms. Those frequencies are not tuned by taste — with an exactly fair value
-process, the probability of reaching a size is pinned by what that size is
-worth.
+One wild line in three grows to 4 organisms; one in 12 reaches 6; one in 22,218
+reaches the FULL BLOOM threshold. Those frequencies are not tuned by taste —
+with an exactly fair value process, the probability of reaching a size is pinned
+by what that size is worth. What they are *not* is a promise to a player who
+harvests: §8.2 enumerates the same event per policy, and the one-tap default puts
+it at zero.
 
 **Reach is not a band.** `reach(12)` counts every round that ever holds 12
 organisms, including the ones that go on to bloom. The near-miss band — reaches
@@ -540,7 +616,7 @@ the design document quotes the band.
 | Share paying under 50x | 61.60% |
 | Share paying under 100x | 84.24% |
 | Share paying less than the smallest generation-18 settlement (17.578531x) | 10.36% |
-| Frequency | 1 in 22217.97 |
+| Frequency, never-harvest play (`RUN`) | 1 in 22217.97 — the figure belongs to a policy; see the per-policy table |
 <!-- /generated:bloom -->
 
 FULL BLOOM is a *population* event, not a size-of-win event. It can pay less
@@ -550,6 +626,49 @@ smallest payout a surviving generation-18 colony can produce. Any presentation
 that treats every bloom as the game's biggest moment is misrepresenting the
 61.60% of them that pay under 50x; `docs/DESIGN.md` §7 scales the celebration to
 the settled multiplier instead.
+
+### 8.2 The bloom frequency belongs to a policy, and one of them is zero
+
+Every frequency above is the wild line's — the colony that is never harvested —
+and the wild line is a property of the grid. **The player's own colony is not.**
+FULL BLOOM is a terminal of the colony the player is actually holding, and
+harvesting changes how often that colony reaches 16 organisms.
+
+The one-tap default takes it to exactly zero, and the argument is two lines. With
+`j` survivors a generation resolves to at most `2j`; harvesting `floor(m / 2)`
+leaves `ceil(m / 2) <= j`. So under `HALF_EVERY` the survivor count never grows
+from its generation-1 value of at most 3, the resolved population never exceeds
+6, and 16 is unreachable — not rare, unreachable. Enumerated over all eight
+published policies, next to how often each one lights the environment reveal
+(`docs/DESIGN.md` §7.2), which is keyed to colony *value* and therefore fires on
+a bloom and on any frame worth as much:
+
+<!-- generated:bloom-by-policy -->
+| Policy | P(FULL BLOOM) | One in | P(a frame worth 9.895833x or more) | One in |
+| --- | --- | --- | --- | --- |
+| `BANK_FIRST` | 0 | **never** | 0 | **never** |
+| `RUN` | 4.50086e-05 | 1 in 22217.97 | 7.29125e-02 | 1 in 13.71 |
+| `HALF_EVERY` | 0 | **never** | 1.57043e-03 | 1 in 636.76 |
+| `STOP_AT_2X` | 0 | **never** | 0 | **never** |
+| `STOP_AT_10X` | 3.73905e-06 | 1 in 267447.36 | 7.29125e-02 | 1 in 13.71 |
+| `HALF_AT_2X` | 0 | **never** | 4.82655e-03 | 1 in 207.18 |
+| `BANK_AT_GEN_5` | 4.80285e-06 | 1 in 208209.38 | 3.53580e-04 | 1 in 2828.20 |
+| `PANIC` | 3.40556e-05 | 1 in 29363.68 | 1.31093e-02 | 1 in 76.28 |
+<!-- /generated:bloom-by-policy -->
+
+Four of the eight never bloom. The headline `1 in 22217.97` belongs to `RUN`, the
+policy that never harvests at all, and `RUN` returns anything whatsoever on only
+2.24% of rounds. Publishing that figure unqualified shows a jackpot frequency to
+a player for whom the event has probability exactly zero, which is the class of
+error `docs/DESIGN.md` §9.3 exists to prevent — so every publication of it in
+this repository names the policy it belongs to, and §9.3 requires the client to
+do the same.
+
+This is not a defect in the mechanic. Harvesting trades the tail for the middle:
+that is what the volatility interval in section 11 *is*, and a player who halves
+the colony every generation has chosen a standard deviation of `1.453021` instead
+of `7.569291`. What was a defect was publishing the tail's frequency as though it
+belonged to everybody.
 
 ---
 
@@ -718,11 +837,15 @@ old top band went silent.
   player, the worst player, and the player who taps at random.
 - **The one gap, disclosed.** Payable RTP is theoretical RTP minus floor
   rounding, and the number of credit events depends on how the player plays: a
-  single bank rounds once, harvesting every generation rounds up to 18 times. At
-  the minimum stake of `0.10` credits that is worth at most `1.80000e-04` of the
-  stake, i.e. **0.018 percentage points**, so `HALF_EVERY` is at most 0.018 pp
-  behind `BANK_FIRST` in payable terms. It is negligible; it is not zero, and
-  section 13 states the bound rather than claiming there is no gap at all.
+  single bank rounds once, harvesting at every generation rounds up to 18 times
+  (section 13 computes that bound rather than asserting it). At the minimum stake
+  of `0.10` credits that is worth at most `1.80000e-04` of the stake, i.e.
+  **0.018 percentage points**, so `HALF_EVERY` is at most 0.018 pp behind
+  `BANK_FIRST` in payable terms. It is negligible; it is not zero; it means
+  harvesting is very slightly the worse policy in payable terms, which is worth
+  saying out loud in a game whose signature beat rewards harvesting
+  (`docs/DESIGN.md` §6.5 R6). Section 13 states the bound; §9.3's client copy
+  carries the qualifier rather than claiming the gap away.
 
 ---
 
@@ -892,16 +1015,9 @@ than after a win.
   `[100,000, 1,000,000,000]` units (0.10 to 1,000 credits) and each side-bet
   stake to `[100,000, 100,000,000]` units (0.10 to 100 credits).
 - Every credit event pays `floor(exact rational)` units, so
-  `0 <= theoretical - credited < 1` unit at each event, and the round total is
-  short of theoretical by less than the number of credit events (at most 18
-  units on the COLONY line: a harvest at each of generations 1 to 17 plus one
-  settlement).
-- **Absolute bound:** `18` units = `1.8e-5` credits per round, whatever the
-  stake. **Relative bound:** at the minimum stake of `0.10` credits that is
-  `1.80000e-04` of the stake, or `0.018` percentage points of RTP; at the
-  maximum stake it is `1.80000e-08`. The relative figure is stated at the
-  minimum stake because that is where it is largest, and it is the only quantity
-  in this document that depends on how the player plays.
+  `0 <= theoretical - credited < 1` unit at each event. The round total is
+  therefore short of theoretical by strictly less than **the number of credit
+  events**, and the whole of this section is a bound on that count.
 - The cap is applied per line with that line's own stake as the basis and the
   already-credited units on that line subtracted, exactly as
   `payableWithinCap()` does in the engine. It never binds (section 12), but it is
@@ -910,6 +1026,66 @@ than after a win.
   `tools/lib/model.mjs` is the reference implementation and is tested against
   hostile inputs (zero and negative stakes, non-BigInt stakes, non-BigInt cap
   multiples, absurd multipliers).
+
+<!-- generated:rounding-bound -->
+| Quantity | Value |
+| --- | --- |
+| Harvest commitments a stage accepts | 1 |
+| Maximum COLONY credit events in a round, over every grid and every policy | 18 |
+| The same bound if a stage accepted repeated harvests (rejected) | 117 |
+| Maximum credit events on each selected side-bet line | 1 |
+| Absolute floor loss on the COLONY line, whatever the stake | 18 units = 0.00001800 credits |
+| Relative, at the minimum stake | 1.80000e-04 = 0.018000 percentage points |
+| Relative, at the maximum stake | 1.80000e-08 |
+<!-- /generated:rounding-bound -->
+
+**The count is computed, not asserted.** `maximumCreditEvents()` in
+`tools/lib/model.mjs` is a deterministic dynamic program over every draw grid and
+every policy simultaneously — the same shape as `maximumRoundPayout()` — and the
+fixture freezes what it returns. Round 3 published this bound as the generation
+count, by hand, and it was wrong for a reason no test could see: it is true only
+if a generation accepts one harvest, and the command surface accepted more.
+
+**Why 18 under the shipped protocol.** A generation credits the COLONY line at
+most once, because a generation accepts one harvest commitment (§1.1,
+`docs/ENGINE.md` §5.3). Generations 1 to 17 can each carry a harvest; generation
+18 force-settles and carries no decision; a settlement credits once. So the count
+is at most `17 + 1 = 18`, and 18 is attained — hold two organisms, harvest one at
+every generation, settle the last one.
+
+**Why 117 if a generation accepted repeated harvests.** Shedding organisms one at
+a time multiplies the events by the number shed. The maximiser climbs to 6, trims
+to 7 survivors, sheds 7 one at a time for fourteen generations and banks the last
+14 one at a time: `5 + 14x7 + 14 = 117`. At the minimum stake that is `0.117`
+percentage points of RTP rather than `0.018` — still small, and 6.5 times the
+number this document was willing to publish. A false bound on a money path is
+worse than no bound.
+
+**Lemma — splitting a harvest never pays more.** For any stake `S`, ladder value
+`c(t)` and split `k = k₁ + k₂`,
+
+```
+floor(S c(t) k₁) + floor(S c(t) k₂)  <=  floor(S c(t) k)
+```
+
+because `floor(x) + floor(y) <= floor(x + y)`. The one-commit rule therefore
+costs the player nothing at any state and is strictly better than the
+alternative at most of them; `tests/model.test.mjs` checks the inequality over
+every generation and every split rather than trusting the algebra.
+
+**Per line, not per ticket.** The 18 events are the COLONY line's. Each selected
+side bet credits at most once, on its own stake, so the worst case for a
+four-line ticket is `18 + 3 = 21` floor events across four independent bases —
+and the relative figures above are per line, at that line's own stake.
+
+**It is the only quantity in this document that depends on how the player plays
+and is still about the *return*.** Section 10 discloses it as a gap rather than
+rounding it away, and `docs/DESIGN.md` §9.3's copy carries the qualifier instead
+of claiming every way of playing returns identically. Three other published
+quantities depend on how the round is played and are published per policy for
+exactly the same reason: the standard deviation (§11), the FULL BLOOM frequency
+(§8.2) and a ticket's profit rate (§7.4). What none of them touch is the
+theoretical return, which is `19/20` for every policy by section 6.
 
 ### 13.1 Lemma — a round can never settle at exactly one stake
 
@@ -940,6 +1116,12 @@ consequence for the product: `P(total <= 1 stake)` and `P(total < 1 stake)` are
 the same number, and the settlement ceremony's loss/win split has no ambiguous
 case to design for.
 
+**Corollary — nor at `L` stakes, for any integer `L` that 19 does not divide.**
+The same argument: `19a / b = L` requires `19a = Lb`, so `19` would have to
+divide `Lb`, and it divides neither factor. A ticket has at most four lines, so
+its stake in colony-stake units is `L <= 4 < 19` and §7.4's boundary inherits the
+property: "returns more than the ticket stake" has no tie case either.
+
 ---
 
 ## 14. Reproducing every number
@@ -949,6 +1131,9 @@ case to design for.
 | Total mass is exactly 1, RTP exactly 19/20 | `npm run enumerate` (section 5 of the report) |
 | Every action at every state ties | `npm run enumerate` (section 9 of the report) |
 | Eight policies all return 19/20, with profit rates | `npm run enumerate` (section 8 of the report) |
+| How often each policy blooms, and which never do | `npm run enumerate` (section 8 of the report) |
+| What a second bet line does to the profit rate | `npm run enumerate` (section 10 of the report) |
+| The floor-rounding bound, and the alternative it rejects | `npm run enumerate` (section 11 of the report) |
 | Every cap sits above its own line's maximum | `npm run enumerate` (section 11 of the report) |
 | Split celebration would fire on losing generations | `npm run enumerate` (section 12 of the report) |
 | What FULL BLOOM actually pays | `npm run enumerate` (section 13 of the report) |
@@ -964,11 +1149,19 @@ case to design for.
 
 The Monte Carlo simulator exists only as a cross-check on the written rules; it
 never sources a published number. At 50,000 deterministic rounds under RUN it
-returns an empirical RTP of 0.986507 against the exact 0.95 (1.08 standard
+returns an empirical RTP of 0.960842 against the exact 0.95 (0.32 standard
 errors, on a policy whose standard deviation is 7.57) and a mean round length of
-5.8415 against the exact 5.85032978. The same run settles one ticket end to end,
-publishes both commitment phases, and then re-publishes it under a forged action
-log so the verifier can be seen refusing it.
+5.8636 against the exact 5.85032978. The same run settles one ticket end to end,
+publishes both commitment phases, re-publishes it under a forged action log so
+the verifier can be seen refusing it, refuses a transcript that commits one stage
+twice, and reconciles a round abandoned at stage 0 — the state §5.5 of
+`docs/ENGINE.md` previously left undefined — so that path is executable evidence
+rather than a paragraph.
+
+A second cross-check runs in `tests/derivation.test.mjs`: the ticket profit rates
+in §7.4 come from a joint enumeration, and 20,000 simulated rounds resolve the
+same pairing off the real grid and the real wild line and land inside the
+5-standard-error band. Two independent code paths, one number.
 
 ---
 

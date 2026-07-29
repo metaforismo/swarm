@@ -50,10 +50,11 @@ npm run simulate         # seeded Monte Carlo cross-check and a worked ticket le
    generation has no decision — it is where the house edge lives, and after it
    nothing else takes a cut.
 3. **Decide.** You see the colony, its exact value, and where that sits against
-   your stake. Three actions:
+   your stake. One decision per generation, on a continuum:
    - **BANK** — take everything, round over.
    - **HARVEST** — credit some organisms immediately and keep the rest running.
      A tap takes `floor(n / 2)`; a press-and-drag takes any number you like.
+     Committing it settles this generation's decision; the next tap is `NEXT`.
    - **CONTINUE** — resolve the next generation.
    There is no timer on any of these, and nothing plays the round for you. The
    round advances when you tap.
@@ -80,10 +81,10 @@ answer for rather than hide ([docs/DESIGN.md §9.2](docs/DESIGN.md)).
 | Max win, COLONY line | **905.77x** its own stake; declared cap `906x`, proven never to bind |
 | Biggest single settlement | `527.35x` |
 | Cap basis | One per bet line, on that line's own stake. No cap sums lines, so no line is ever short-paid |
-| FULL BLOOM | 1 in 22,218 rounds; pays 9.89x to 527.35x, median 37.74x |
+| FULL BLOOM | 1 in 22,218 rounds **if you never harvest**; pays 9.89x to 527.35x, median 37.74x. Harvesting lowers it, and halving the colony every generation puts it at exactly zero — the frequency belongs to a play pattern and is always published with one ([docs/MATH.md §8.2](docs/MATH.md)) |
 | Colony reaches 4+ organisms | 1 in 2.87 rounds |
 | Volatility | Player-selected, and the whole range is selectable. Proven interval over *every* policy: standard deviation `0.513058` (bank at once) to `7.569363` (harvest one organism at 15). The harvest stepper reaches both ends |
-| How often you profit | `P(return > stake)`: 45.60% banking at once, 30.75% harvesting half every generation, 2.24% never banking |
+| How often you profit | `P(return > stake)`: 45.60% banking at once, 30.75% harvesting half every generation, 2.24% never banking. A side bet on the same ticket moves this a long way in either direction — adding DARK VENT at an equal stake takes 45.60% to 36.09% for the first, and 2.24% to 37.57% for the last ([docs/MATH.md §7.4](docs/MATH.md)) |
 | How often you get back less than you staked | 48.00% banking at once, 50.04% harvesting half every generation — the most common outcome class in the game, and the settlement screen says so ([docs/DESIGN.md §7.1](docs/DESIGN.md)) |
 | Round length | 5.85 generations on average, 18 maximum |
 | Side bets | FIRST LIGHT `4.75x`, DARK VENT `2.689x`, SWARM `248.798x` — all at 95%, each with its own stake and cap |
@@ -123,12 +124,20 @@ Full derivations, exact fractions and the strategy proof: [docs/MATH.md](docs/MA
   [docs/MATH.md §7.3](docs/MATH.md), not where taste would.
 - **Exact arithmetic end to end.** Probabilities and money are BigInt rationals;
   the only rounding is a single floor at each credit, in integer minor units
-  (`1 credit = 10^6 units`), which costs at most 18 units per round — `1.8e-4`
-  of the minimum stake, or 0.018 percentage points of RTP.
-- **No latency-sensitive decisions.** Nothing in SWARM is timed. A slow
-  connection cannot cost you a payout. The one server-initiated transition is a
-  forced bank at the exact current value after 72 hours of abandonment, which is
-  EV-neutral because every action ties.
+  (`1 credit = 10^6 units`). A round can produce at most **18** such credits on
+  the colony line — a number computed by dynamic program over every grid and
+  every play pattern, not asserted — so the floor costs at most `1.8e-4` of the
+  minimum stake, or 0.018 percentage points of RTP. It is the one quantity that
+  depends on how you play, and it is disclosed rather than rounded away
+  ([docs/MATH.md §13](docs/MATH.md)).
+- **No latency-sensitive decisions.** No decision in SWARM has a deadline. A slow
+  connection cannot cost you a payout. There is a *floor* on how fast rounds can
+  be chained — a speed-of-play control, not a clock on any decision
+  ([docs/DESIGN.md §9.7](docs/DESIGN.md)) — and the one server-initiated
+  transition is a forced bank at the exact current value after 72 hours of
+  abandonment, which is EV-neutral because every action ties. That covers a round
+  that was staked and never advanced: it resolves its one mandatory generation
+  and banks what survives.
 
 **What this does not prove.** Commit-reveal shows a seed was fixed before the
 round; it does not show *how that seed was chosen*, and an operator could in
@@ -148,6 +157,7 @@ rather than left for a reader to notice.
 | Path | What it is |
 | --- | --- |
 | [docs/DESIGN.md](docs/DESIGN.md) | Product spec: loop, decisions, bets, portrait UX flow, art and sound direction, responsible-design rules |
+| [docs/DECISIONS.md](docs/DECISIONS.md) | The design decisions behind the rules above: what was rejected, what it would have cost, and how to reopen it |
 | [docs/MATH.md](docs/MATH.md) | Exact model, paytable, RTP justification, volatility bounds, caps, strategy proof |
 | [docs/ENGINE.md](docs/ENGINE.md) | The `staged-survival` Reveal Engine module and the adapter surface SWARM expects |
 | `tools/enumerate.mjs` | Exhaustive exact enumeration — the proof behind every number |

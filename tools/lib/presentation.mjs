@@ -21,7 +21,14 @@ import {
   TARGET_RTP,
   colonyMultiplier,
 } from './config.mjs';
-import { POLICIES, aliveOccupancy, buildKernel, policyOutcomeSplit } from './model.mjs';
+import {
+  POLICIES,
+  aliveOccupancy,
+  buildKernel,
+  policyOutcomeSplit,
+  policyTerminalProfile,
+  valuePeakReachProbability,
+} from './model.mjs';
 import {
   ONE,
   ZERO,
@@ -265,6 +272,48 @@ export function settlementClasses() {
       nothing: split.zero,
       belowStake: split.subStake,
       profit: split.profit,
+    };
+  });
+}
+
+/**
+ * The environment reveal (docs/DESIGN.md §7.2), priced.
+ *
+ * §6.3 makes screen exposure a strictly increasing function of colony *value*,
+ * so "the frame is bright enough for the unlit environment to rise above the
+ * black floor" is a statement about value and about nothing else. Round 3 sold
+ * the reveal as a physical consequence of that curve and then attached it to a
+ * population event, which is a contradiction: a colony worth more than the
+ * smallest FULL BLOOM is brighter than the smallest FULL BLOOM, whatever its
+ * headcount, and the exposure formula cannot tell the two apart.
+ *
+ * The threshold is therefore a value, and it is not a taste parameter either: it
+ * is exactly the smallest colony value a bloom can have, `c(3) * 16`. Every
+ * bloom lights the environment because every bloom is at least this rich, and so
+ * does every equally rich frame that is not a bloom — which is the honest half
+ * of the claim, and the half round 3 did not publish.
+ */
+export const ENVIRONMENT_THRESHOLD = Object.freeze(colonyMultiplier(3, BLOOM_THRESHOLD));
+
+/**
+ * How often a round lights the environment, per policy, against how often it
+ * blooms. Both are exact; the gap between them is the size of the error in
+ * treating the reveal as a bloom effect.
+ *
+ * The reach figure counts every frame a round *displays*, not what it settles
+ * for: the light is on while the colony is worth that much, whether or not the
+ * player ends up keeping it.
+ */
+export function environmentReveal() {
+  return Object.values(POLICIES).map((policy) => {
+    const reach = valuePeakReachProbability(policy.fn, ENVIRONMENT_THRESHOLD);
+    const bloom = policyTerminalProfile(policy.fn).BLOOM;
+    return {
+      id: policy.id,
+      label: policy.label,
+      reach,
+      bloom,
+      timesMoreCommon: bloom.numerator === 0n ? null : divide(reach, bloom),
     };
   });
 }

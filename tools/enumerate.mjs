@@ -36,7 +36,7 @@ import {
   structuralMaxMultiplier,
 } from './lib/config.mjs';
 import { payableUnits } from './lib/model.mjs';
-import { toDecimal, toFraction } from './lib/rational.mjs';
+import { fromFraction, toDecimal, toFraction } from './lib/rational.mjs';
 
 function parseArgs(argv) {
   const options = { terminals: false, json: null, check: null };
@@ -122,6 +122,22 @@ function printReport(paytable, options) {
       `  ${padEnd(row.id, 15)} ${padEnd(row.rtp, 10)} ${pad(row.standardDeviation, 9)}  ${pad(row.profitRate, 12)}  ${pad(row.hitRate, 12)}  ${row.label}`,
     );
   console.log(
+    '\n  how each policy ends, and how often it reaches the biggest moments in the game:',
+  );
+  console.log('  policy           EXTINCT     BLOOM        one in       BANKED      environment  one in');
+  const environmentByPolicy = new Map(
+    paytable.presentation.environment.policies.map((row) => [row.policy, row]),
+  );
+  for (const row of paytable.policies) {
+    const environment = environmentByPolicy.get(row.id);
+    console.log(
+      `  ${padEnd(row.id, 15)} ${pad(toDecimal(fromFraction(row.terminals.EXTINCT), 6), 9)}  ${pad(row.bloomScientific, 11)}  ${pad(row.bloomOneIn, 11)}  ${pad(toDecimal(fromFraction(row.terminals.BANKED), 6), 9)}  ${pad(environment.reachScientific, 11)}  ${pad(environment.reachOneIn, 8)}`,
+    );
+  }
+  console.log(
+    `  the environment reveal fires at a colony value of ${paytable.presentation.environment.threshold} = ${paytable.presentation.environment.thresholdDecimal}x, the smallest a FULL BLOOM can be`,
+  );
+  console.log(
     `  proven SD interval over every adapted policy: ${paytable.varianceBounds.minimum.standardDeviation} .. ${paytable.varianceBounds.maximum.standardDeviation}`,
   );
   console.log(
@@ -142,6 +158,15 @@ function printReport(paytable, options) {
       `    p = ${bet.probability} = ${bet.probabilityDecimal} (1 in ${bet.oneIn})   pays ${bet.multiplier} = ${bet.multiplierDecimal}x   RTP ${bet.rtp}`,
     );
   }
+  console.log(
+    '\n  two-line tickets at equal stakes: RTP is 19/20 on every row by linearity,',
+  );
+  console.log('  and the profit rate is a joint law that moves in both directions');
+  console.log('  policy           ticket                  P(>ticket stake)  COLONY alone   change         nothing');
+  for (const row of paytable.ticketPairings)
+    console.log(
+      `  ${padEnd(row.policy, 15)} ${padEnd(`COLONY + ${row.sideBet}`, 22)}  ${pad(row.ticketProfitRate, 16)}  ${pad(row.colonyOnlyProfitRate, 13)}  ${pad(`${row.profitRateChange.startsWith('-') ? '' : '+'}${row.profitRateChange}`, 13)}  ${pad(row.ticketNothingRate, 12)}`,
+    );
 
   console.log(HEAD('11. Caps, per bet line, each on its own stake'));
   const structural = structuralMaxMultiplier();
@@ -164,6 +189,9 @@ function printReport(paytable, options) {
   );
   console.log(
     `  floor loss <= ${paytable.roundingBound.maximumLossUnits} units per round = ${paytable.roundingBound.relativeAtMinimumStake} of the minimum stake (${paytable.roundingBound.relativeAtMinimumStakePercentagePoints} percentage points of RTP)`,
+  );
+  console.log(
+    `  that bound is a dynamic program, not an assertion: ${paytable.roundingBound.maximumCreditEvents} credit events with ${paytable.roundingBound.harvestCommitsPerStage} harvest commitment per stage, against ${paytable.roundingBound.maximumCreditEventsIfStagesAcceptedRepeatedHarvests} if a stage accepted repeated harvests`,
   );
 
   console.log(HEAD('12. Outcome-feedback honesty (evidence for docs/DESIGN.md §6.5)'));

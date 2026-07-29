@@ -38,6 +38,7 @@ import {
   COHORT_MODEL_VERSION,
   COLONY_MAX_WIN_MULTIPLE,
   DRAW_MODULUS,
+  HARVEST_COMMITS_PER_STAGE,
   HARVEST_QUANTUM,
   LADDER_BASE,
   MAX_GENERATIONS,
@@ -131,6 +132,10 @@ export function roundContext(roundId, clientEntropyHex) {
  * ladder base and step, target RTP, rounding mode, the colony cap, and every
  * side-bet line with its own cap in declaration order.
  *
+ * `HARVEST_COMMITS_PER_STAGE` is in the list because it decides which action
+ * logs are legal, and a rule about legal transcripts is part of the replay
+ * contract exactly like a draw band is.
+ *
  * Any change to the economics *or to the proof surface* changes this value, and
  * the value is bound into both commitments and into every draw, so a transcript
  * can only be verified against the adapter it was produced under.
@@ -158,6 +163,7 @@ export function adapterFingerprint() {
     BLOOM_THRESHOLD,
     MAX_POPULATION,
     HARVEST_QUANTUM,
+    HARVEST_COMMITS_PER_STAGE,
     LADDER_BASE.numerator,
     LADDER_BASE.denominator,
     step.numerator,
@@ -263,8 +269,40 @@ function actionKind(units, population) {
 }
 
 /**
+ * How a round was settled. `PLAYER` is a player-initiated `settle()`;
+ * `RECONCILED` is the abandonment rule (docs/ENGINE.md §5.5) settling a round
+ * whose player never came back. It is bound into the settlement body, so the two
+ * are different digests rather than two readings of one, and the verifier can
+ * insist that a `RECONCILED` terminal is backed by a forced bank.
+ */
+export const SETTLEMENT_MODES = Object.freeze(['PLAYER', 'RECONCILED']);
+
+/**
+ * The terminal reason a settlement publishes, from the terminal the grid
+ * actually produced and the mode it was settled in.
+ *
+ * `RECONCILED` is reserved for a round that still owed a decision when the
+ * abandonment clock ran out: the rule forced the bank, so the wire says so. A
+ * round that had already reached `EXTINCT`, `THRESHOLD` or `FINAL` keeps that
+ * terminal whoever calls the settlement, because nothing was forced.
+ */
+export function publishedTerminal(reason, settlementMode) {
+  if (!SETTLEMENT_MODES.includes(settlementMode))
+    throw new Error('Settlement mode must be PLAYER or RECONCILED');
+  return settlementMode === 'RECONCILED' && reason === 'BANKED' ? 'RECONCILED' : reason;
+}
+
+/**
  * Plays one round of SWARM against a committed grid, taking each decision from
  * `decide(generation, population)`.
+ *
+ * `decide` is consulted **once per resolved non-terminal generation**, which is
+ * the protocol rule and not an implementation convenience: a stage accepts one
+ * harvest commitment (`HARVEST_COMMITS_PER_STAGE`, docs/ENGINE.md §5.3), so the
+ * action log holds one entry per stage and the verifier can replay it in step
+ * with the grid. Round 3 left the command surface able to accept a second
+ * harvest at the same stage while every consumer of the log assumed it could
+ * not, which made a legal command sequence unverifiable.
  *
  * Returns the exact total payout as a multiple of the stake, the resolved
  * populations, and the **ordered action log** — the artifact the settlement body
@@ -303,7 +341,7 @@ export function playRound(seedHex, context, decide) {
     if (population === 0) return finish('EXTINCT', generation);
     if (population >= BLOOM_THRESHOLD) {
       total = add(total, multiply(organismValue(generation), rat(BigInt(population))));
-      return finish('BLOOM', generation);
+      return finish('THRESHOLD', generation);
     }
     if (generation === MAX_GENERATIONS) {
       total = add(total, multiply(organismValue(generation), rat(BigInt(population))));
@@ -434,7 +472,10 @@ export function bodyCommitment(bundle) {
     sideBetResults,
     receipts,
     chainTerminal,
+    settlementMode,
   } = bundle;
+  if (!SETTLEMENT_MODES.includes(settlementMode))
+    throw new Error('Settlement mode must be PLAYER or RECONCILED');
 
   const fields = [
     'Axiom Games SWARM settlement body',
@@ -458,7 +499,12 @@ export function bodyCommitment(bundle) {
   fields.push(round.actions.length);
   for (const action of round.actions) fields.push(action.generation, action.kind, action.units);
 
-  fields.push(round.reason, round.generation, round.population);
+  // The terminal the grid produced, the mode it was settled in, and therefore
+  // the terminal reason the round publishes. Binding the mode is what makes an
+  // abandonment settlement a different digest from a player settlement of the
+  // same grid and the same log.
+  fields.push(round.reason, settlementMode, publishedTerminal(round.reason, settlementMode));
+  fields.push(round.generation, round.population);
 
   fields.push(wild.populations.length);
   for (const population of wild.populations) fields.push(population);
@@ -519,6 +565,62 @@ export function settleTicket({
     round,
     wild,
     exposure,
+    settlementMode: 'PLAYER',
+  });
+}
+
+/**
+ * The abandonment rule, executable (docs/ENGINE.md §5.5).
+ *
+ * A round left with no player command for the timeout is settled by the server:
+ * every decision still owed becomes a forced BANK of the entire colony at the
+ * exact current stage value. `abandonedAtStage` is the stage the round was
+ * sitting at, and `policy` is whatever the player did before walking away.
+ *
+ * **Stage 0 is the case round 3 left undefined.** A round that was staked and
+ * never advanced sits at stage 0, where the ladder has no value and the only
+ * legal command is `advance()`. Reconciliation performs that one command — the
+ * mandatory generation 1, which carries no decision and which every round takes
+ * — and then forces the bank at stage 1. It therefore produces exactly the
+ * transcript a returning player would have produced by tapping once and banking,
+ * which is why nothing new has to be defined for it: no settlement at a stage
+ * that has no ladder value, no void that returns more than the round is worth,
+ * and no decision taken away from a player who had none to make.
+ *
+ * If generation 1 resolves to extinction there is nothing to bank and the
+ * terminal is `EXTINCT`, exactly as it would be for a player who was watching.
+ */
+export function reconcileTicket({
+  seedHex,
+  roundId,
+  clientEntropy,
+  stakeUnits,
+  sideBetStakes = {},
+  policy = () => 0,
+  abandonedAtStage = 0,
+}) {
+  if (!Number.isSafeInteger(abandonedAtStage) || abandonedAtStage < 0 || abandonedAtStage >= MAX_GENERATIONS)
+    throw new Error('Abandoned stage must be a stage a round can be staged at');
+  const context = roundContext(roundId, clientEntropy);
+  const exposure = ticketExposureUnits(stakeUnits, sideBetStakes);
+  const phaseOne = seedCommitment(seedHex, context.roundId);
+  // Stage 0 owes the mandatory advance and then the forced bank at stage 1, so
+  // the forced-bank stage is the same for an abandonment at 0 and at 1.
+  const forcedFrom = Math.max(abandonedAtStage, 1);
+  const round = playRound(seedHex, context, (generation, population) =>
+    generation >= forcedFrom ? population : policy(generation, population),
+  );
+  const wild = wildLine(seedHex, context);
+  return sealSettlement({
+    seedHex,
+    context,
+    phaseOne,
+    stakeUnits,
+    sideBetStakes,
+    round,
+    wild,
+    exposure,
+    settlementMode: 'RECONCILED',
   });
 }
 
@@ -537,7 +639,9 @@ function sealSettlement({
   round,
   wild,
   exposure,
+  settlementMode,
 }) {
+  const terminal = publishedTerminal(round.reason, settlementMode);
   const receipts = [];
   let sequence = 0;
   const push = (receipt) => {
@@ -585,8 +689,10 @@ function sealSettlement({
       capped: payable.capped,
     });
   }
+  // A forced bank has already credited the whole colony as a HARVEST, exactly
+  // like a player-initiated one, so the SETTLE receipt is zero on that path too.
   const settlementMultiplier =
-    round.reason === 'BLOOM' || round.reason === 'FINAL'
+    round.reason === 'THRESHOLD' || round.reason === 'FINAL'
       ? multiply(organismValue(round.generation), rat(BigInt(round.population)))
       : ZERO;
   const settlement = payableUnits(
@@ -601,7 +707,7 @@ function sealSettlement({
     line: 'COLONY',
     direction: 'CREDIT',
     stage: round.generation,
-    terminal: round.reason,
+    terminal,
     amountUnits: settlement.credited,
     theoretical: settlement.theoretical,
     capped: settlement.capped,
@@ -643,6 +749,7 @@ function sealSettlement({
     sideBetResults,
     receipts,
     chainTerminal: chain.terminal,
+    settlementMode,
   });
 
   const creditedUnits = receipts
@@ -681,7 +788,8 @@ function sealSettlement({
         units: action.units,
       })),
       populations: round.trace.map((entry) => entry.population),
-      terminal: round.reason,
+      terminal,
+      settlementMode,
       sideBetResults,
     },
   };
@@ -713,16 +821,29 @@ export function verifyRound(proof) {
     if (!constantTimeHexEqual(phaseOne, proof.seedCommitment))
       return failure('COMMITMENT_MISMATCH', 'seed pre-commitment does not re-derive');
 
+    const settlementMode = proof.settlementMode;
+    if (!SETTLEMENT_MODES.includes(settlementMode))
+      return failure('INVALID_TRANSCRIPT', 'unknown settlement mode');
+
     // 3. Replay the grid *using the submitted action log*, never a policy.
+    //
+    // A stage commits one harvest, so the log holds at most one entry per
+    // resolved non-terminal stage — generations 1 to 17, because generation 18
+    // force-settles. A log with two entries for one stage is rejected here
+    // rather than misread as the next stage's decision.
     const log = proof.actionLog;
-    if (!Array.isArray(log) || log.length > MAX_GENERATIONS)
+    if (!Array.isArray(log) || log.length > MAX_GENERATIONS - 1)
       return failure('INVALID_TRANSCRIPT', 'malformed action log');
     let cursor = 0;
+    let lastStage = 0;
     const replay = playRound(seed, context, (generation, population) => {
       const entry = log[cursor];
       cursor += 1;
       if (entry === undefined) throw new Error('action log is shorter than the round');
+      if (entry.generation <= lastStage)
+        throw new Error('action log commits a stage more than once');
       if (entry.generation !== generation) throw new Error('action log is out of order');
+      lastStage = entry.generation;
       if (!Number.isSafeInteger(entry.units) || entry.units < 0 || entry.units > population)
         throw new Error('action log contains an illegal harvest');
       if (entry.kind !== actionKind(entry.units, population))
@@ -737,7 +858,12 @@ export function verifyRound(proof) {
       proof.populations.some((value, index) => value !== populations[index])
     )
       return failure('TRANSCRIPT_MISMATCH', 'resolved populations do not re-derive');
-    if (proof.terminal !== replay.reason)
+    // The published terminal is a function of the replayed terminal and the
+    // settlement mode, and both are sealed in the body. What that proves is that
+    // a settlement cannot be *relabelled* after publication; it does not prove
+    // the clock ran out, because a wall-clock claim is not in the transcript.
+    // docs/ENGINE.md §8 lists that residual rather than implying it away.
+    if (proof.terminal !== publishedTerminal(replay.reason, settlementMode))
       return failure('TRANSCRIPT_MISMATCH', 'terminal reason does not re-derive');
 
     // 4 and 5. Recompute the whole per-line ledger, including the side bets,
@@ -755,6 +881,7 @@ export function verifyRound(proof) {
       round: replay,
       wild,
       exposure: ticketExposureUnits(proof.stakeUnits, sideBetStakes),
+      settlementMode,
     });
     if (receipts.length !== expected.receipts.length)
       return failure('TRANSCRIPT_MISMATCH', 'receipt count does not re-derive');
@@ -867,7 +994,7 @@ export function simulate({ rounds, seed, policy }) {
       extinct += 1;
       if (result.generation === 1) gen1Extinct += 1;
     }
-    if (result.reason === 'BLOOM') bloom += 1;
+    if (result.reason === 'THRESHOLD') bloom += 1;
   }
   return {
     rounds,
@@ -969,6 +1096,48 @@ function main() {
   };
   const relabelledResult = verifyRound(relabelled);
   console.log(`    log rewritten in place : ${relabelledResult.code} (${relabelledResult.detail})`);
+
+  // A stage committed twice: the transcript a second harvest at one stage would
+  // produce, which the protocol no longer allows and the verifier now names.
+  const duplicated = proofBundle(example);
+  const firstHarvest = duplicated.actionLog.find((entry) => entry.kind === 'HARVEST');
+  if (firstHarvest !== undefined) {
+    const twice = {
+      ...duplicated,
+      actionLog: [
+        { ...firstHarvest, units: 1, kind: 'HARVEST' },
+        ...duplicated.actionLog,
+      ],
+    };
+    const twiceResult = verifyRound(twice);
+    console.log(`    stage committed twice  : ${twiceResult.code} (${twiceResult.detail})`);
+  }
+
+  // The abandonment rule, on the state round 3 left undefined: a round staked
+  // and never advanced. Reconciliation performs the one legal command — the
+  // mandatory generation 1 — and forces the bank, so the round settles, the seed
+  // is revealed and the transcript verifies like any other.
+  const abandoned = reconcileTicket({
+    seedHex: seedFor(options.seed, 0),
+    roundId: 'sim-0',
+    clientEntropy: entropyFor(options.seed, 0),
+    stakeUnits: 1000000n,
+    sideBetStakes: { FIRST_LIGHT: 500000n, SWARM: 200000n },
+    abandonedAtStage: 0,
+  });
+  console.log('\n  abandonment at stage 0 (staked, never advanced), reconciled');
+  console.log(
+    `    action log             : ${abandoned.proof.actionLog.map((a) => `${a.generation}:${a.kind}${a.units ? `(${a.units})` : ''}`).join(' ') || '(none)'}`,
+  );
+  console.log(`    terminal               : ${abandoned.proof.terminal} (mode ${abandoned.proof.settlementMode})`);
+  console.log(`    credited               : ${abandoned.creditedUnits} units of ${abandoned.stakedUnits} staked`);
+  console.log(`    settlement body commit : ${abandoned.proof.bodyCommitment}`);
+  console.log(`    verification           : ${verifyRound(proofBundle(abandoned)).code}`);
+  const relabelledMode = { ...proofBundle(abandoned), settlementMode: 'PLAYER' };
+  const relabelledModeResult = verifyRound(relabelledMode);
+  console.log(
+    `    re-labelled as PLAYER  : ${relabelledModeResult.code} (${relabelledModeResult.detail})`,
+  );
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) main();

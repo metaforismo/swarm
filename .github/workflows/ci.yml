@@ -56,16 +56,19 @@ jobs:
               console.log('fixture', c.digest(c.canonicalJson(buildPaytable())));
             })"
 
-      # The round-3 blocker, asserted rather than printed: a settlement
-      # re-published under a different decision log must not verify. If this step
-      # ever passes silently, the two-phase commitment has stopped working.
-      - name: A forged action log is rejected
+      # The round-3 and round-4 blockers, asserted rather than printed: a
+      # settlement re-published under a different decision log must not verify;
+      # a transcript that commits one stage twice must not verify; and a round
+      # abandoned before it advanced must settle, verify, and be distinguishable
+      # from a player-settled one. If any of this passes silently, the
+      # commitment scheme has stopped working.
+      - name: Forged, duplicated and relabelled transcripts are rejected
         run: |
           node -e "
             import('./tools/simulate.mjs').then(async m => {
               const { POLICIES } = await import('./tools/lib/model.mjs');
               const args = {
-                seedHex: 'a1053cf9d4e7158153247cb389f5879ed90ff85a6dc0fa12a88249dd9a8df595',
+                seedHex: 'dc33ba04fda908c673650e88419ab5378c52c21333103f7a90717be45909f981',
                 roundId: 'swarm-vector-side', clientEntropy: 'c'.repeat(64),
                 stakeUnits: 1000000n, sideBetStakes: { SWARM: 100000n },
               };
@@ -76,12 +79,34 @@ jobs:
               const ok = m.verifyRound(m.proofBundle(honest));
               const forged = m.verifyRound({ ...m.proofBundle(other), actionLog: honest.proof.actionLog });
               console.log('honest ->', ok.code, '| forged ->', forged.code);
+              // Guard against a vacuous pass: if the two policies made the same
+              // decisions on this grid, swapping the logs proves nothing.
+              if (JSON.stringify(honest.proof.actionLog) === JSON.stringify(other.proof.actionLog))
+                throw new Error('the two logs are identical, so the forgery check is vacuous');
               if (!ok.ok) throw new Error('an honest settlement failed to verify');
               if (forged.ok) throw new Error('a forged action log verified');
               if (honest.proof.seedCommitment !== other.proof.seedCommitment)
                 throw new Error('phase 1 should be identical across settlements of one round');
               if (honest.proof.bodyCommitment === other.proof.bodyCommitment)
                 throw new Error('phase 2 failed to distinguish two decision logs');
+
+              // A stage may be committed once. Round 3 accepted a second harvest
+              // at the command surface and refused the transcript it produced.
+              const first = honest.proof.actionLog.find(entry => entry.kind === 'HARVEST');
+              const twice = m.verifyRound({
+                ...m.proofBundle(honest),
+                actionLog: [{ ...first, units: 1, kind: 'HARVEST' }, ...honest.proof.actionLog],
+              });
+              console.log('stage committed twice ->', twice.code, '|', twice.detail);
+              if (twice.ok) throw new Error('a transcript committing one stage twice verified');
+
+              // Abandonment at stage 0, the state round 3 left undefined.
+              const abandoned = m.reconcileTicket({ ...args, abandonedAtStage: 0 });
+              const settled = m.verifyRound(m.proofBundle(abandoned));
+              const relabelled = m.verifyRound({ ...m.proofBundle(abandoned), settlementMode: 'PLAYER' });
+              console.log('abandoned at stage 0 ->', abandoned.proof.terminal, settled.code, '| relabelled ->', relabelled.code);
+              if (!settled.ok) throw new Error('a reconciled round failed to verify');
+              if (relabelled.ok) throw new Error('a settlement mode was relabelled and still verified');
             }).catch(error => { console.error(error.message); process.exit(1); })"
 
       # Independent sanity cross-check of the written rules. Seeded, so a
