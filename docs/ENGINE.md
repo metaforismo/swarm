@@ -570,6 +570,12 @@ transition:
   exact current stage value** — `k = units`, no advance, no extra draw — settles
   with terminal reason `RECONCILED`, resolves any side bets on the wild line,
   reveals the seed and posts the receipts.
+- **A round already at a terminal.** If the last stage resolved to `EXTINCT`,
+  `THRESHOLD` or `FINAL` and the player simply never returned to see it, there
+  is no decision left to force. `reconcile()` settles at the terminal that
+  actually occurred, with that terminal's reason and that terminal's payout, and
+  the ledger is indistinguishable from the one a returning player would have
+  produced. `RECONCILED` is reserved for rounds that still owed a decision.
 - **Why a forced bank and not a void or a forced advance.** Every action at
   every state has identical exact value ([MATH.md §6](MATH.md)), so a forced
   bank is exactly EV-neutral: it neither takes value from an absent player nor
@@ -587,8 +593,13 @@ transition:
   decision depend on connection speed, which is the property
   [DESIGN.md §9.5](DESIGN.md) protects.
 - **Mechanics.** `reconcile()` carries a reserved idempotency key derived from
-  the round id, is refused if the round is not past the timeout, and produces a
-  receipt ledger indistinguishable in structure from a player-initiated bank.
+  the round id, is refused with `TOO_EARLY` if the round is not past the timeout,
+  and produces a receipt ledger indistinguishable in structure from a
+  player-initiated bank. It takes the round's current frame revision from the
+  book rather than from a request, so it cannot race a player command: whichever
+  lands first wins the fence, and a player command that arrives after
+  reconciliation fails `ROUND_SETTLED` with the settled receipts attached, so a
+  returning player is shown what they were paid rather than an error.
 
 ---
 
