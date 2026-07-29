@@ -1,16 +1,23 @@
 #!/usr/bin/env node
 /**
- * SWARM — seeded Monte Carlo cross-check and reference draw derivation.
+ * SWARM — reference derivation, two-phase commit-reveal, settlement ledger and
+ * seeded Monte Carlo cross-check.
  *
  * This is NOT the source of any published number: `tools/enumerate.mjs` is.
- * This script exists for two reasons.
+ * This script exists for three reasons.
  *
  *   1. It is an executable reference implementation of the draw derivation and
- *      commit-reveal scheme specified in docs/ENGINE.md — length-prefixed
- *      canonical encoding, domain-separated HMAC-SHA256, exact rejection
- *      sampling. Anything that claims to verify a SWARM round must reproduce
- *      these bytes.
- *   2. It is an independent sanity cross-check: if the enumeration and a
+ *      the **two-phase** commitment scheme specified in docs/ENGINE.md §4 —
+ *      length-prefixed canonical encoding, domain-separated HMAC-SHA256, exact
+ *      rejection sampling, player-supplied client entropy, a seed
+ *      pre-commitment published before the first decision and a settlement body
+ *      commitment that seals the action log. Anything that claims to verify a
+ *      SWARM round must reproduce these bytes.
+ *   2. It is an executable verifier. `verifyRound()` takes the action log as an
+ *      *untrusted input* and refuses any log that does not reproduce the
+ *      published body commitment, which is what makes "verifiable by
+ *      re-derivation" true against the operator and not only against the RNG.
+ *   3. It is an independent sanity cross-check: if the enumeration and a
  *      straight simulation of the written rules disagree, one of them is wrong.
  *
  * Everything here is deterministic given `--seed`, so a CI failure is
@@ -20,20 +27,26 @@
  *   node tools/simulate.mjs [--rounds 20000] [--seed <64 hex chars>] [--policy RUN]
  */
 
-import { createHash, createHmac } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import {
+  ACTION_CHAIN_DOMAIN,
   ADAPTER_ID,
   ADAPTER_VERSION,
   BLOOM_THRESHOLD,
+  BODY_COMMITMENT_VERSION,
+  CLIENT_ENTROPY_BYTES,
   COHORT_MODEL_VERSION,
   COLONY_MAX_WIN_MULTIPLE,
   DRAW_MODULUS,
+  HARVEST_QUANTUM,
   LADDER_BASE,
   MAX_GENERATIONS,
   MAX_POPULATION,
   MODULE_API,
   MU,
   OFFSPRING,
+  SAMPLER_DOMAIN,
+  SEED_COMMITMENT_VERSION,
   SEED_COUNT,
   SIDE_BET_MAX_WIN_MULTIPLES,
   TARGET_RTP,
@@ -43,9 +56,12 @@ import {
 import { POLICIES, payableUnits, sideBets } from './lib/model.mjs';
 import { ONE, add, divide, multiply, rat, toDecimal, toFraction, ZERO } from './lib/rational.mjs';
 
-export const COMMITMENT_VERSION = 'reveal-engine/stage-commit-v1';
+export { SEED_COMMITMENT_VERSION, BODY_COMMITMENT_VERSION, SAMPLER_DOMAIN, ACTION_CHAIN_DOMAIN };
 export const DRAW_LABEL = 'swarm-organism';
 const SLOTS = BLOOM_THRESHOLD - 1;
+
+/** Ordered side-bet ids. The body commitment walks them in this order, always. */
+const SIDE_BET_IDS = Object.freeze(Object.keys(SIDE_BET_MAX_WIN_MULTIPLES));
 
 function lengthPrefix(length) {
   const buffer = Buffer.allocUnsafe(4);
@@ -69,32 +85,79 @@ export function encodeFields(fields) {
   ]);
 }
 
+const sha256 = (buffer) => createHash('sha256').update(buffer).digest('hex');
+
+function normalizeHex32(value, what) {
+  if (typeof value !== 'string' || !/^[0-9a-f]{64}$/iu.test(value))
+    throw new Error(`${what} must be exactly 32 bytes of hexadecimal`);
+  return value.toLowerCase();
+}
+
 export function normalizeSeed(seedHex) {
-  if (typeof seedHex !== 'string' || !/^[0-9a-f]{64}$/iu.test(seedHex))
-    throw new Error('Seed must be exactly 32 bytes of hexadecimal');
-  return seedHex.toLowerCase();
+  return normalizeHex32(seedHex, 'Seed');
 }
 
 /**
- * Adapter fingerprint, exactly the field set docs/ENGINE.md section 2 declares:
- * module API, adapter id and version, cohort model version, draw modulus, every
- * outcome band in order, seed units, stage count, both thresholds, ladder base
- * and step, target RTP, rounding mode, the colony cap, and every side-bet line
- * with its own cap in declaration order.
- *
- * Any change to the economics changes this value, and the value is bound into
- * the commitment, so a transcript can only be verified against the adapter it
- * was produced under.
+ * Player-supplied entropy, 32 bytes. It is chosen by the client *after* the seed
+ * pre-commitment is published and enters every draw, so an operator cannot grind
+ * seeds against a grid it has already seen. See docs/ENGINE.md §4.5 for what
+ * this does and does not close.
  */
+export function normalizeClientEntropy(entropyHex) {
+  return normalizeHex32(entropyHex, 'Client entropy');
+}
+
+/** Constant-time comparison of two lowercase hex digests of equal length. */
+export function constantTimeHexEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  return timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
+}
+
+/**
+ * A round context: the round identity plus the player's entropy contribution.
+ * Every draw and both commitments are domain-separated by all of it.
+ */
+export function roundContext(roundId, clientEntropyHex) {
+  if (typeof roundId !== 'string' || roundId.length === 0 || roundId.length > 128)
+    throw new Error('Round id must be a non-empty string of at most 128 characters');
+  return Object.freeze({ roundId, clientEntropy: normalizeClientEntropy(clientEntropyHex) });
+}
+
+/**
+ * Adapter fingerprint, exactly the field set docs/ENGINE.md §2 declares: module
+ * API, adapter id and version, cohort model version, both commitment versions,
+ * the sampler domain, the client-entropy width, draw modulus, every outcome band
+ * in order, seed units, stage count, both thresholds, the harvest quantum,
+ * ladder base and step, target RTP, rounding mode, the colony cap, and every
+ * side-bet line with its own cap in declaration order.
+ *
+ * Any change to the economics *or to the proof surface* changes this value, and
+ * the value is bound into both commitments and into every draw, so a transcript
+ * can only be verified against the adapter it was produced under.
+ */
+let fingerprintCache = null;
 export function adapterFingerprint() {
+  if (fingerprintCache !== null) return fingerprintCache;
   const step = divide(ONE, MU);
-  const fields = [MODULE_API, ADAPTER_ID, ADAPTER_VERSION, COHORT_MODEL_VERSION, DRAW_MODULUS];
+  const fields = [
+    MODULE_API,
+    ADAPTER_ID,
+    ADAPTER_VERSION,
+    COHORT_MODEL_VERSION,
+    SEED_COMMITMENT_VERSION,
+    BODY_COMMITMENT_VERSION,
+    SAMPLER_DOMAIN,
+    ACTION_CHAIN_DOMAIN,
+    CLIENT_ENTROPY_BYTES,
+    DRAW_MODULUS,
+  ];
   for (const outcome of OFFSPRING) fields.push(outcome.id, outcome.children, outcome.weight);
   fields.push(
     SEED_COUNT,
     MAX_GENERATIONS,
     BLOOM_THRESHOLD,
     MAX_POPULATION,
+    HARVEST_QUANTUM,
     LADDER_BASE.numerator,
     LADDER_BASE.denominator,
     step.numerator,
@@ -104,46 +167,63 @@ export function adapterFingerprint() {
     'floor',
     COLONY_MAX_WIN_MULTIPLE,
   );
-  for (const [id, cap] of Object.entries(SIDE_BET_MAX_WIN_MULTIPLES)) fields.push(id, cap);
-  return createHash('sha256').update(encodeFields(fields)).digest('hex');
+  for (const id of SIDE_BET_IDS) fields.push(id, SIDE_BET_MAX_WIN_MULTIPLES[id]);
+  fingerprintCache = sha256(encodeFields(fields));
+  return fingerprintCache;
 }
 
-/** Commitment published before the round: binds seed, round, adapter identity and grid shape. */
-export function commitment(seedHex, roundId) {
+/**
+ * **Phase 1.** The seed pre-commitment, published before the round opens and
+ * therefore before the player supplies entropy or makes a decision. It binds the
+ * server seed, the frozen economics and the grid shape, and discloses nothing:
+ * it is a hash of an unrevealed 32-byte seed.
+ *
+ * It deliberately does *not* bind the client entropy — the entropy does not
+ * exist yet, and that ordering is the whole point.
+ */
+export function seedCommitment(seedHex, roundId) {
   const seed = normalizeSeed(seedHex);
-  return createHash('sha256')
-    .update(
-      encodeFields([
-        'Axiom Games SWARM commitment',
-        COMMITMENT_VERSION,
-        Buffer.from(seed, 'hex'),
-        ADAPTER_ID,
-        ADAPTER_VERSION,
-        adapterFingerprint(),
-        roundId,
-        MAX_GENERATIONS,
-        SLOTS,
-        DRAW_MODULUS,
-      ]),
-    )
-    .digest('hex');
+  if (typeof roundId !== 'string' || roundId.length === 0)
+    throw new Error('Round id must be a non-empty string');
+  return sha256(
+    encodeFields([
+      'Axiom Games SWARM seed pre-commitment',
+      SEED_COMMITMENT_VERSION,
+      Buffer.from(seed, 'hex'),
+      ADAPTER_ID,
+      ADAPTER_VERSION,
+      adapterFingerprint(),
+      roundId,
+      MAX_GENERATIONS,
+      SLOTS,
+      DRAW_MODULUS,
+    ]),
+  );
 }
 
 const RANGE = 1n << 256n;
 
-/** Exact uniform value in [0, modulus) by domain-separated rejection sampling. */
-export function uniformBigInt(seedHex, roundId, label, counter, modulus) {
+/**
+ * Exact uniform value in `[0, modulus)` by domain-separated rejection sampling.
+ * The payload carries the adapter fingerprint and the player's entropy, so a
+ * draw belongs to exactly one (adapter, round, client entropy) triple.
+ */
+export function uniformBigInt(seedHex, context, label, counter, modulus) {
   const seed = normalizeSeed(seedHex);
   if (typeof modulus !== 'bigint' || modulus <= 0n || modulus >= RANGE)
     throw new Error('Modulus must be in [1, 2^256)');
   if (!Number.isSafeInteger(counter) || counter < 0) throw new Error('Counter must be a safe index');
   const limit = RANGE - (RANGE % modulus);
+  const fingerprint = adapterFingerprint();
   for (let nonce = 0n; ; nonce += 1n) {
     const payload = encodeFields([
       'sampler',
-      COMMITMENT_VERSION,
+      SAMPLER_DOMAIN,
       ADAPTER_ID,
-      roundId,
+      ADAPTER_VERSION,
+      fingerprint,
+      context.roundId,
+      context.clientEntropy,
       label,
       counter,
       nonce,
@@ -164,60 +244,141 @@ export function drawIndex(generation, slot) {
   return (generation - 1) * SLOTS + (slot - 1);
 }
 
-const BANDS = OFFSPRING.map((outcome) => ({ id: outcome.id, children: outcome.children, high: outcome.highDraw }));
+const BANDS = OFFSPRING.map((outcome) => ({
+  id: outcome.id,
+  children: outcome.children,
+  high: outcome.highDraw,
+}));
 
-/** Maps a draw in [0, DRAW_MODULUS) to an offspring count. */
+/** Maps a draw in `[0, DRAW_MODULUS)` to an offspring count. */
 export function resolveDraw(draw) {
   for (const band of BANDS) if (draw <= band.high) return band;
   throw new Error('Draw outside the declared bands');
 }
 
+/** Classifies a harvest of `units` from a population of `population`. */
+function actionKind(units, population) {
+  if (units === 0) return 'CONTINUE';
+  return units === population ? 'BANK' : 'HARVEST';
+}
+
 /**
- * Plays one round of SWARM against a committed seed under a Markov policy.
- * Returns the exact total payout as a multiple of the stake, plus a trace.
+ * Plays one round of SWARM against a committed grid, taking each decision from
+ * `decide(generation, population)`.
+ *
+ * Returns the exact total payout as a multiple of the stake, the resolved
+ * populations, and the **ordered action log** — the artifact the settlement body
+ * commitment seals and the verifier re-derives.
  */
-export function playRound(seedHex, roundId, policy) {
+export function playRound(seedHex, context, decide) {
+  if (typeof decide !== 'function') throw new Error('A decision source is required');
   let population = SEED_COUNT;
   let total = ZERO;
   const trace = [];
+  const actions = [];
+  const finish = (reason, generation) => ({
+    total,
+    population,
+    generation,
+    reason,
+    trace,
+    actions,
+    events: chainEvents(trace),
+  });
+
   for (let generation = 1; generation <= MAX_GENERATIONS; generation += 1) {
     let next = 0;
     for (let slot = 1; slot <= population; slot += 1) {
-      const draw = uniformBigInt(seedHex, roundId, DRAW_LABEL, drawIndex(generation, slot), DRAW_MODULUS);
+      const draw = uniformBigInt(
+        seedHex,
+        context,
+        DRAW_LABEL,
+        drawIndex(generation, slot),
+        DRAW_MODULUS,
+      );
       next += resolveDraw(draw).children;
     }
     population = next;
     trace.push({ generation, population });
-    if (population === 0) return { total, population, generation, reason: 'EXTINCT', trace };
+    if (population === 0) return finish('EXTINCT', generation);
     if (population >= BLOOM_THRESHOLD) {
       total = add(total, multiply(organismValue(generation), rat(BigInt(population))));
-      return { total, population, generation, reason: 'BLOOM', trace };
+      return finish('BLOOM', generation);
     }
     if (generation === MAX_GENERATIONS) {
       total = add(total, multiply(organismValue(generation), rat(BigInt(population))));
-      return { total, population, generation, reason: 'FINAL', trace };
+      return finish('FINAL', generation);
     }
-    const harvest = policy(generation, population);
+    const harvest = decide(generation, population);
     if (!Number.isSafeInteger(harvest) || harvest < 0 || harvest > population)
       throw new Error('Policy returned an illegal harvest');
+    const kind = actionKind(harvest, population);
+    actions.push({ generation, kind, units: harvest, population });
+    trace[trace.length - 1].harvest = harvest;
+    trace[trace.length - 1].action = kind;
     if (harvest > 0) {
       total = add(total, multiply(organismValue(generation), rat(BigInt(harvest))));
       population -= harvest;
-      trace[trace.length - 1].harvest = harvest;
-      if (population === 0) return { total, population, generation, reason: 'BANKED', trace };
+      if (population === 0) return finish('BANKED', generation);
     }
   }
   throw new Error('Round escaped the generation bound');
 }
 
 /**
+ * The ordered frame events a client observes live, one per resolution and one
+ * per decision. The action chain is folded over exactly this sequence, so the
+ * value the client holds mid-round is a commitment to everything it has seen so
+ * far — before the seed is revealed.
+ */
+function chainEvents(trace) {
+  const events = [];
+  for (const entry of trace) {
+    events.push({ kind: 'RESOLVE', generation: entry.generation, value: entry.population });
+    if (entry.action !== undefined)
+      events.push({ kind: entry.action, generation: entry.generation, value: entry.harvest });
+  }
+  return events;
+}
+
+/**
+ * The live action chain: `chain(0)` is the seed pre-commitment and each frame
+ * folds the next observed event into it. The client is handed `chain(i)` with
+ * the response to command `i`, so it accumulates an incremental witness of its
+ * own decision log while the round is still running and the seed is still
+ * sealed. The terminal value is bound into the body commitment (§4.3), which is
+ * what stops a settlement from being replayed under a different log.
+ */
+export function actionChain(seedCommitmentHex, events) {
+  let chain = normalizeHex32(seedCommitmentHex, 'Seed commitment');
+  const values = [chain];
+  events.forEach((event, index) => {
+    chain = sha256(
+      encodeFields([
+        ACTION_CHAIN_DOMAIN,
+        chain,
+        index,
+        event.kind,
+        event.generation,
+        event.value,
+      ]),
+    );
+    values.push(chain);
+  });
+  return { terminal: chain, values };
+}
+
+/**
  * The wild line: the same committed grid replayed with an empty action log.
  * Every side bet resolves on this and nothing else, which is why no decision can
- * move one. Derived only at settlement — see docs/MATH.md §7.3 for why revealing
- * it earlier would leak future draws into a live decision.
+ * move one.
+ *
+ * Its generation-`t` population is a function of row-`t` draws only, so it may
+ * be disclosed to the client as soon as the player's own generation `t` has
+ * resolved, and never before (docs/MATH.md §7.3, docs/ENGINE.md §5.2).
  */
-export function wildLine(seedHex, roundId) {
-  const run = playRound(seedHex, roundId, POLICIES.RUN.fn);
+export function wildLine(seedHex, context) {
+  const run = playRound(seedHex, context, () => 0);
   const populations = run.trace.map((entry) => entry.population);
   let peak = SEED_COUNT;
   for (const population of populations) if (population > peak) peak = population;
@@ -227,12 +388,15 @@ export function wildLine(seedHex, roundId) {
     peak,
     terminal: run.reason,
     extinctGeneration: extinctIndex === -1 ? null : extinctIndex + 1,
+    /** Peak of the wild line restricted to generations the player has resolved. */
+    peakThrough: (generation) =>
+      populations.slice(0, generation).reduce((best, value) => (value > best ? value : best), SEED_COUNT),
   };
 }
 
 /** Resolves all three side bets against the wild line. Pure function of the grid. */
-export function resolveSideBets(seedHex, roundId) {
-  const line = wildLine(seedHex, roundId);
+export function resolveSideBets(seedHex, context) {
+  const line = wildLine(seedHex, context);
   const won = {
     FIRST_LIGHT: (line.populations[0] ?? 0) >= 4,
     DARK_VENT: line.extinctGeneration !== null && line.extinctGeneration <= 3,
@@ -247,21 +411,138 @@ export function resolveSideBets(seedHex, roundId) {
 }
 
 /**
+ * **Phase 2.** The settlement body commitment: everything the round actually
+ * did, sealed at settlement and re-derivable by anyone holding the revealed
+ * seed.
+ *
+ * It binds the phase-1 commitment, the revealed seed, the client entropy, every
+ * stake, every resolved population, **the ordered action log**, the terminal,
+ * the wild line, every side-bet resolution, the whole per-line credit ledger and
+ * the terminal action-chain value. Two settlements of one published seed
+ * commitment under different decision logs therefore produce two different body
+ * commitments, which is the attack docs/ENGINE.md §4.2 previously left open.
+ */
+export function bodyCommitment(bundle) {
+  const {
+    seedCommitment: phaseOne,
+    revealedSeed,
+    context,
+    stakeUnits,
+    sideBetStakes,
+    round,
+    wild,
+    sideBetResults,
+    receipts,
+    chainTerminal,
+  } = bundle;
+
+  const fields = [
+    'Axiom Games SWARM settlement body',
+    BODY_COMMITMENT_VERSION,
+    normalizeHex32(phaseOne, 'Seed commitment'),
+    Buffer.from(normalizeSeed(revealedSeed), 'hex'),
+    Buffer.from(context.clientEntropy, 'hex'),
+    ADAPTER_ID,
+    ADAPTER_VERSION,
+    adapterFingerprint(),
+    context.roundId,
+    stakeUnits,
+  ];
+
+  fields.push(SIDE_BET_IDS.length);
+  for (const id of SIDE_BET_IDS) fields.push(id, sideBetStakes[id] ?? 0n);
+
+  fields.push(round.trace.length);
+  for (const entry of round.trace) fields.push(entry.generation, entry.population);
+
+  fields.push(round.actions.length);
+  for (const action of round.actions) fields.push(action.generation, action.kind, action.units);
+
+  fields.push(round.reason, round.generation, round.population);
+
+  fields.push(wild.populations.length);
+  for (const population of wild.populations) fields.push(population);
+  fields.push(wild.peak, wild.terminal);
+
+  fields.push(sideBetResults.length);
+  for (const result of sideBetResults) fields.push(result.id, result.resolved);
+
+  fields.push(receipts.length);
+  for (const receipt of receipts)
+    fields.push(
+      receipt.sequence,
+      receipt.kind,
+      receipt.line,
+      receipt.direction,
+      receipt.stage,
+      receipt.amountUnits,
+      receipt.unitsHarvested ?? 0,
+      receipt.resolved ?? 'NONE',
+      receipt.theoretical === null ? '0' : toFraction(receipt.theoretical),
+    );
+
+  fields.push(normalizeHex32(chainTerminal, 'Action chain'));
+  return sha256(encodeFields(fields));
+}
+
+/**
  * Reference money path for a whole ticket: one COLONY bet plus any side bets,
- * each with its own stake, its own cap basis and its own ledger lines.
+ * each with its own stake, its own cap basis and its own ledger lines, plus the
+ * complete two-phase proof bundle a verifier needs.
  *
  * This exists because a paytable with no money path is not a specification. It
- * is the executable form of docs/ENGINE.md §5.3: every movement is a receipt,
- * every receipt names its line, and the cap is applied per line with that line's
- * own stake as the basis.
+ * is the executable form of docs/ENGINE.md §4 and §5.3: every movement is a
+ * receipt, every receipt names its line, the cap is applied per line with that
+ * line's own stake as the basis, and the whole thing is sealed by a commitment
+ * a verifier re-derives.
  */
-export function settleTicket({ seedHex, roundId, stakeUnits, sideBetStakes = {}, policy }) {
+export function settleTicket({
+  seedHex,
+  roundId,
+  clientEntropy,
+  stakeUnits,
+  sideBetStakes = {},
+  policy,
+}) {
+  const context = roundContext(roundId, clientEntropy);
+  // Validates stake bounds and side-bet ids before a single receipt exists.
   const exposure = ticketExposureUnits(stakeUnits, sideBetStakes);
+  const phaseOne = seedCommitment(seedHex, context.roundId);
+  const round = playRound(seedHex, context, policy);
+  const wild = wildLine(seedHex, context);
+  return sealSettlement({
+    seedHex,
+    context,
+    phaseOne,
+    stakeUnits,
+    sideBetStakes,
+    round,
+    wild,
+    exposure,
+  });
+}
+
+/**
+ * Turns a replayed round into the ledger, the proof bundle and the aggregate
+ * money figures. Split out of `settleTicket()` so `verifyRound()` re-derives the
+ * settlement through exactly the same code path a settlement was produced by,
+ * rather than through a parallel implementation that could drift.
+ */
+function sealSettlement({
+  seedHex,
+  context,
+  phaseOne,
+  stakeUnits,
+  sideBetStakes,
+  round,
+  wild,
+  exposure,
+}) {
   const receipts = [];
   let sequence = 0;
   const push = (receipt) => {
     sequence += 1;
-    receipts.push({ sequence, ...receipt });
+    receipts.push({ sequence, unitsHarvested: 0, resolved: null, ...receipt });
   };
 
   push({
@@ -273,7 +554,9 @@ export function settleTicket({ seedHex, roundId, stakeUnits, sideBetStakes = {},
     theoretical: null,
     capped: false,
   });
-  for (const [id, amount] of Object.entries(sideBetStakes))
+  for (const id of SIDE_BET_IDS) {
+    const amount = sideBetStakes[id];
+    if (amount === undefined) continue;
     push({
       kind: 'OPEN',
       line: id,
@@ -283,8 +566,8 @@ export function settleTicket({ seedHex, roundId, stakeUnits, sideBetStakes = {},
       theoretical: null,
       capped: false,
     });
+  }
 
-  const round = playRound(seedHex, roundId, policy);
   let colonyCredited = 0n;
   for (const entry of round.trace) {
     if (!entry.harvest) continue;
@@ -325,12 +608,17 @@ export function settleTicket({ seedHex, roundId, stakeUnits, sideBetStakes = {},
   });
 
   // Side bets resolve only now, after the base round has reached a terminal.
-  for (const bet of resolveSideBets(seedHex, roundId)) {
+  const sideBetResults = [];
+  for (const bet of resolveSideBets(seedHex, context)) {
     const stake = sideBetStakes[bet.id];
-    if (stake === undefined) continue;
+    if (stake === undefined) {
+      sideBetResults.push({ id: bet.id, resolved: 'NOT_SELECTED' });
+      continue;
+    }
     const payable = bet.won
       ? payableUnits(stake, bet.multiplier, 0n, bet.capMultiple)
       : { theoretical: ZERO, credited: 0n, capped: false };
+    sideBetResults.push({ id: bet.id, resolved: bet.won ? 'WON' : 'LOST' });
     push({
       kind: 'SIDE_BET',
       line: bet.id,
@@ -343,6 +631,20 @@ export function settleTicket({ seedHex, roundId, stakeUnits, sideBetStakes = {},
     });
   }
 
+  const chain = actionChain(phaseOne, round.events);
+  const body = bodyCommitment({
+    seedCommitment: phaseOne,
+    revealedSeed: seedHex,
+    context,
+    stakeUnits,
+    sideBetStakes,
+    round,
+    wild,
+    sideBetResults,
+    receipts,
+    chainTerminal: chain.terminal,
+  });
+
   const creditedUnits = receipts
     .filter((receipt) => receipt.direction === 'CREDIT')
     .reduce((total, receipt) => total + receipt.amountUnits, 0n);
@@ -353,14 +655,161 @@ export function settleTicket({ seedHex, roundId, stakeUnits, sideBetStakes = {},
     throw new Error('A cap truncated a credit, which the risk policy proves impossible');
   if (creditedUnits > exposure)
     throw new Error('Ticket credited more than its disclosed worst-case exposure');
-  return { receipts, creditedUnits, stakedUnits, exposureUnits: exposure, round };
+
+  return {
+    receipts,
+    creditedUnits,
+    stakedUnits,
+    exposureUnits: exposure,
+    round,
+    wild,
+    /** Everything a third party needs, and nothing it has to be trusted about. */
+    proof: {
+      seedCommitment: phaseOne,
+      bodyCommitment: body,
+      actionChain: chain.terminal,
+      liveChainValues: chain.values,
+      revealedSeed: normalizeSeed(seedHex),
+      roundId: context.roundId,
+      clientEntropy: context.clientEntropy,
+      adapterFingerprint: adapterFingerprint(),
+      stakeUnits,
+      sideBetStakes,
+      actionLog: round.actions.map((action) => ({
+        generation: action.generation,
+        kind: action.kind,
+        units: action.units,
+      })),
+      populations: round.trace.map((entry) => entry.population),
+      terminal: round.reason,
+      sideBetResults,
+    },
+  };
 }
 
-function seedFor(masterSeed, index) {
-  return createHash('sha256')
-    .update(encodeFields(['swarm-simulation-seed', masterSeed, index]))
-    .digest('hex');
+/**
+ * The verifier, in the phase order docs/ENGINE.md §4.4 mandates.
+ *
+ * `proof.actionLog` is an **untrusted input**: it is what the operator claims
+ * the player did. Step 7 re-seals the body commitment over the log that was
+ * actually replayed and compares it in constant time, so a fabricated log — or a
+ * genuine log attached to a fabricated ledger — fails closed. Every failure is
+ * one of the public codes; nothing throws a parser trace at the caller.
+ */
+export function verifyRound(proof) {
+  const failure = (code, detail) => ({ ok: false, code, detail });
+  try {
+    if (typeof proof !== 'object' || proof === null) return failure('INVALID_TRANSCRIPT', 'not an object');
+
+    // 1. Definition identity.
+    if (proof.adapterFingerprint !== adapterFingerprint())
+      return failure('ADAPTER_MISMATCH', 'adapter fingerprint does not match this build');
+
+    const context = roundContext(proof.roundId, proof.clientEntropy);
+    const seed = normalizeSeed(proof.revealedSeed);
+
+    // 2. Phase 1: the seed pre-commitment must re-derive from the revealed seed.
+    const phaseOne = seedCommitment(seed, context.roundId);
+    if (!constantTimeHexEqual(phaseOne, proof.seedCommitment))
+      return failure('COMMITMENT_MISMATCH', 'seed pre-commitment does not re-derive');
+
+    // 3. Replay the grid *using the submitted action log*, never a policy.
+    const log = proof.actionLog;
+    if (!Array.isArray(log) || log.length > MAX_GENERATIONS)
+      return failure('INVALID_TRANSCRIPT', 'malformed action log');
+    let cursor = 0;
+    const replay = playRound(seed, context, (generation, population) => {
+      const entry = log[cursor];
+      cursor += 1;
+      if (entry === undefined) throw new Error('action log is shorter than the round');
+      if (entry.generation !== generation) throw new Error('action log is out of order');
+      if (!Number.isSafeInteger(entry.units) || entry.units < 0 || entry.units > population)
+        throw new Error('action log contains an illegal harvest');
+      if (entry.kind !== actionKind(entry.units, population))
+        throw new Error('action log mislabels an action');
+      return entry.units;
+    });
+    if (cursor !== log.length) return failure('TRANSCRIPT_MISMATCH', 'action log has trailing entries');
+    const populations = replay.trace.map((entry) => entry.population);
+    if (
+      !Array.isArray(proof.populations) ||
+      proof.populations.length !== populations.length ||
+      proof.populations.some((value, index) => value !== populations[index])
+    )
+      return failure('TRANSCRIPT_MISMATCH', 'resolved populations do not re-derive');
+    if (proof.terminal !== replay.reason)
+      return failure('TRANSCRIPT_MISMATCH', 'terminal reason does not re-derive');
+
+    // 4 and 5. Recompute the whole per-line ledger, including the side bets,
+    // through the same sealing path a settlement was produced by.
+    const receipts = proof.receipts;
+    if (!Array.isArray(receipts)) return failure('INVALID_TRANSCRIPT', 'missing receipt ledger');
+    const sideBetStakes = proof.sideBetStakes ?? {};
+    const wild = wildLine(seed, context);
+    const expected = sealSettlement({
+      seedHex: seed,
+      context,
+      phaseOne,
+      stakeUnits: proof.stakeUnits,
+      sideBetStakes,
+      round: replay,
+      wild,
+      exposure: ticketExposureUnits(proof.stakeUnits, sideBetStakes),
+    });
+    if (receipts.length !== expected.receipts.length)
+      return failure('TRANSCRIPT_MISMATCH', 'receipt count does not re-derive');
+    for (let index = 0; index < receipts.length; index += 1) {
+      const actual = receipts[index];
+      const want = expected.receipts[index];
+      if (
+        actual.sequence !== want.sequence ||
+        actual.kind !== want.kind ||
+        actual.line !== want.line ||
+        actual.direction !== want.direction ||
+        actual.stage !== want.stage ||
+        actual.amountUnits !== want.amountUnits
+      )
+        return failure('TRANSCRIPT_MISMATCH', `receipt ${index + 1} does not re-derive`);
+      // 6. A cap can only bind if the adapter is misconfigured.
+      if (actual.capped) return failure('TRANSCRIPT_MISMATCH', 'a receipt reports a capped credit');
+    }
+    for (const result of proof.sideBetResults ?? []) {
+      const want = expected.proof.sideBetResults.find((entry) => entry.id === result.id);
+      if (want === undefined) return failure('TRANSCRIPT_MISMATCH', `unknown side bet ${result.id}`);
+      if (result.resolved !== want.resolved)
+        return failure('TRANSCRIPT_MISMATCH', `side bet ${result.id} does not re-derive`);
+    }
+
+    // 7. Phase 2: the action chain and the settlement body, re-sealed over what
+    // was actually replayed and compared in constant time. This is the step that
+    // turns the action log from an unverified input into bound evidence.
+    if (!constantTimeHexEqual(expected.proof.actionChain, proof.actionChain))
+      return failure('COMMITMENT_MISMATCH', 'action chain does not re-derive');
+    if (!constantTimeHexEqual(expected.proof.bodyCommitment, proof.bodyCommitment))
+      return failure('COMMITMENT_MISMATCH', 'settlement body does not re-derive');
+
+    return {
+      ok: true,
+      code: 'VERIFIED',
+      seedCommitment: phaseOne,
+      bodyCommitment: expected.proof.bodyCommitment,
+    };
+  } catch (error) {
+    return failure('DERIVATION_FAILED', error instanceof Error ? error.message : 'unknown');
+  }
 }
+
+/** Bundles a settlement into the shape `verifyRound()` accepts. */
+export function proofBundle(settlement) {
+  return { ...settlement.proof, receipts: settlement.receipts };
+}
+
+function derived(masterSeed, label, index) {
+  return sha256(encodeFields([label, masterSeed, index]));
+}
+
+const seedFor = (masterSeed, index) => derived(masterSeed, 'swarm-simulation-seed', index);
+const entropyFor = (masterSeed, index) => derived(masterSeed, 'swarm-simulation-client', index);
 
 function parseArgs(argv) {
   const options = {
@@ -397,11 +846,11 @@ export function simulate({ rounds, seed, policy }) {
   const sideBetWins = { FIRST_LIGHT: 0, DARK_VENT: 0, SWARM: 0 };
   for (let index = 0; index < rounds; index += 1) {
     const roundSeed = seedFor(seed, index);
-    const roundId = `sim-${index}`;
+    const context = roundContext(`sim-${index}`, entropyFor(seed, index));
     // The wild line is always derived, because side bets resolve on it and on
     // nothing else. When the policy is RUN the two coincide exactly.
-    const wild = chosen.id === 'RUN' ? null : playRound(roundSeed, roundId, POLICIES.RUN.fn);
-    const result = playRound(roundSeed, roundId, chosen.fn);
+    const wild = chosen.id === 'RUN' ? null : playRound(roundSeed, context, POLICIES.RUN.fn);
+    const result = playRound(roundSeed, context, chosen.fn);
     const line = wild ?? result;
     const populations = line.trace.map((entry) => entry.population);
     const peak = populations.reduce((best, value) => (value > best ? value : best), SEED_COUNT);
@@ -457,13 +906,17 @@ function main() {
     );
   console.log(`  elapsed                : ${elapsedMs.toFixed(0)} ms`);
   console.log(`  adapter fingerprint    : ${adapterFingerprint()}`);
-  console.log(`  commitment sample      : ${commitment(seedFor(options.seed, 0), 'sim-0')}`);
+  console.log(
+    `  seed pre-commitment    : ${seedCommitment(seedFor(options.seed, 0), 'sim-0')}`,
+  );
   console.log(`  exact empirical RTP    : ${toFraction(result.empiricalRtp)}`);
 
-  // One fully-worked ticket, so the money path is visible and not just described.
+  // One fully-worked ticket, so the money path and the proof are visible rather
+  // than described.
   const example = settleTicket({
     seedHex: seedFor(options.seed, 0),
     roundId: 'sim-0',
+    clientEntropy: entropyFor(options.seed, 0),
     stakeUnits: 1000000n,
     sideBetStakes: { FIRST_LIGHT: 500000n, SWARM: 200000n },
     policy: POLICIES.HALF_EVERY.fn,
@@ -476,6 +929,46 @@ function main() {
   console.log(
     `    staked ${example.stakedUnits} units, credited ${example.creditedUnits} units, worst-case exposure ${example.exposureUnits} units`,
   );
+  console.log(
+    `    action log             : ${example.proof.actionLog.map((a) => `${a.generation}:${a.kind}${a.units ? `(${a.units})` : ''}`).join(' ') || '(none)'}`,
+  );
+  console.log(`    seed pre-commitment    : ${example.proof.seedCommitment}`);
+  console.log(`    settlement body commit : ${example.proof.bodyCommitment}`);
+  console.log(`    verification           : ${verifyRound(proofBundle(example)).code}`);
+
+  // The attack phase 2 exists to close: one published seed pre-commitment, two
+  // mutually inconsistent settlements. Same seed, same round, same entropy, a
+  // different decision log — and therefore a different, distinguishable body.
+  const alternative = settleTicket({
+    seedHex: seedFor(options.seed, 0),
+    roundId: 'sim-0',
+    clientEntropy: entropyFor(options.seed, 0),
+    stakeUnits: 1000000n,
+    sideBetStakes: { FIRST_LIGHT: 500000n, SWARM: 200000n },
+    policy: POLICIES.RUN.fn,
+  });
+  console.log('\n  re-settlement of the same published seed pre-commitment under a different log');
+  console.log(
+    `    same phase-1 commitment: ${alternative.proof.seedCommitment === example.proof.seedCommitment}`,
+  );
+  // A swap is only a forgery if the two logs actually differ; say so, so the
+  // demo cannot look like a proof when it is a tautology.
+  console.log(
+    `    logs differ            : ${JSON.stringify(alternative.proof.actionLog) !== JSON.stringify(example.proof.actionLog)}`,
+  );
+  console.log(`    alternative body commit: ${alternative.proof.bodyCommitment}`);
+  console.log(
+    `    bodies differ          : ${alternative.proof.bodyCommitment !== example.proof.bodyCommitment}`,
+  );
+  const swapped = { ...proofBundle(alternative), actionLog: example.proof.actionLog };
+  const swappedResult = verifyRound(swapped);
+  console.log(`    log swapped onto body  : ${swappedResult.code} (${swappedResult.detail})`);
+  const relabelled = {
+    ...proofBundle(example),
+    actionLog: example.proof.actionLog.map((entry) => ({ ...entry, units: 0, kind: 'CONTINUE' })),
+  };
+  const relabelledResult = verifyRound(relabelled);
+  console.log(`    log rewritten in place : ${relabelledResult.code} (${relabelledResult.detail})`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) main();

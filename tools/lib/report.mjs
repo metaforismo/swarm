@@ -12,9 +12,12 @@ import {
   ADAPTER_ID,
   ADAPTER_VERSION,
   BLOOM_THRESHOLD,
+  BODY_COMMITMENT_VERSION,
+  CLIENT_ENTROPY_BYTES,
   COLONY_MAX_WIN_MULTIPLE,
   CONFIG,
   DRAW_MODULUS,
+  HARVEST_QUANTUM,
   MAX_GENERATIONS,
   MAX_POPULATION,
   MAX_SIDE_BET_STAKE_UNITS,
@@ -24,6 +27,8 @@ import {
   MIN_STAKE_UNITS,
   OFFSPRING,
   PAYTABLE_SCHEMA,
+  SAMPLER_DOMAIN,
+  SEED_COMMITMENT_VERSION,
   SEED_COUNT,
   UNITS_PER_CREDIT,
   assertConfig,
@@ -32,6 +37,19 @@ import {
   organismValue,
   structuralMaxMultiplier,
 } from './config.mjs';
+import {
+  CHORD_RATIO,
+  CHORD_STEPS,
+  HEAVY_LOSS_THRESHOLD,
+  LAYOUT_POPULATIONS,
+  MEDUSA_THRESHOLD,
+  chordLadder,
+  colonyLayout,
+  settlementClasses,
+  verdictBands,
+  verdictBeatMass,
+  verdictReach,
+} from './presentation.mjs';
 import {
   POLICIES,
   assertRiskPolicy,
@@ -51,7 +69,9 @@ import {
   runProbabilityMass,
   runRtp,
   runTail,
+  sharedCapBinding,
   sideBets,
+  stakeBoundaryIsUnreachable,
   survivalCurve,
   terminalCategories,
   underwaterAfterFirstGeneration,
@@ -91,6 +111,12 @@ export const NEAR_MISS_BAND = [12, BLOOM_THRESHOLD];
 export function buildPaytable() {
   assertConfig();
   const risk = assertRiskPolicy();
+  const stakeBoundary = stakeBoundaryIsUnreachable();
+  const sharedCap = sharedCapBinding();
+  const chord = chordLadder();
+  const bands = verdictBands();
+  const beatMass = verdictBeatMass();
+  const layout = colonyLayout();
 
   const pmf = offspringPmf();
   const { terminals } = enumerateWildLine();
@@ -331,6 +357,108 @@ export function buildPaytable() {
         admissionLimitCredits: (risk.ticket.admissionLimitUnits / UNITS_PER_CREDIT).toString(),
         binds: risk.ticket.binds,
       },
+      sharedCeilingCounterfactual: {
+        note:
+          'What a single ticket-wide ceiling would do instead of one cap basis per ' +
+          'line. Not the shipped design: published so the rejected alternative is ' +
+          'costed exactly rather than dismissed.',
+        combinedMaximum: toFraction(sharedCap.combined),
+        combinedMaximumDecimal: toDecimal(sharedCap.combined, 6),
+        sideBetTotalDecimal: toDecimal(sharedCap.sideTotal, 6),
+        shortfallDecimal: toDecimal(sharedCap.shortfall, 6),
+        colonyThreshold: toFraction(sharedCap.colonyThreshold),
+        colonyThresholdDecimal: toDecimal(sharedCap.colonyThreshold, 6),
+        runMaximumDecimal: toDecimal(sharedCap.runMaximum, 6),
+        runCanBind: sharedCap.runCanBind,
+        minimumPeakPopulation: sharedCap.minimumPeak,
+        attainableBelowPeakDecimal: toDecimal(sharedCap.attainableBelowPeak, 6),
+        bindingProbabilityBound: toScientific(sharedCap.bound, 6),
+        bindingProbabilityBoundOneIn: toOneIn(sharedCap.bound, 2),
+      },
+    },
+    stakeBoundary: {
+      note:
+        'No round can settle at exactly one stake: every credit carries an ' +
+        'uncancellable factor of 19 in its numerator over a denominator of 2s and ' +
+        'a 3, so a sum of credits is never exactly 1. The loss/win boundary of the ' +
+        'settlement ceremony is therefore unambiguous.',
+      factor: stakeBoundary.factor,
+      creditsChecked: stakeBoundary.creditsChecked,
+      exactlyOneStakeIsReachable: false,
+    },
+    presentation: {
+      note:
+        'Feedback contracts docs/DESIGN.md publishes, derived from the model. The ' +
+        'verdict beat is keyed to D, the signed change in colony value in stake ' +
+        'multiples, and never to the ratio V(t+1)/V(t): a ratio band above +50% is ' +
+        'structurally unreachable at populations 13, 14 and 15, because every such ' +
+        'outcome is at or above the FULL BLOOM threshold and ends the round.',
+      verdict: {
+        beatsPerRound: toDecimal(beatMass, 8),
+        entryValue: toFraction(CONFIG.targetRtp),
+        heavyLossThreshold: toFraction(HEAVY_LOSS_THRESHOLD),
+        largeGainThreshold: toFraction(MEDUSA_THRESHOLD),
+        bands: bands.map((row) => ({
+          band: row.band,
+          share: toDecimal(row.share, 8),
+          shareExact: toFraction(row.share),
+        })),
+      },
+      chord: {
+        ratio: toFraction(CHORD_RATIO),
+        steps: CHORD_STEPS,
+        note:
+          'One semitone per 3/2 of gain. Every note is asserted reachable: the ' +
+          'enumeration fails the build if any step has zero probability or zero ' +
+          'reachable states.',
+        ladder: chord.map((row) => ({
+          step: row.step,
+          threshold: toFraction(row.threshold),
+          thresholdDecimal: toDecimal(row.threshold, 7),
+          shareExact: toFraction(row.share),
+          share: toDecimal(row.share, 8),
+          oneInBeats: toOneIn(row.share, 2),
+          perRound: toDecimal(row.mass, 8),
+          reachableStates: row.reachable,
+          earliestGeneration: row.earliestGeneration,
+        })),
+      },
+      reach: verdictReach().map((row) => ({
+        population: row.population,
+        bestOffspring: row.bestOffspring,
+        bestDelta: toDecimal(row.bestDelta, 6),
+        firstLargeGainGeneration: row.firstMedusaGeneration,
+      })),
+      settlement: settlementClasses().map((row) => ({
+        id: row.id,
+        label: row.label,
+        nothing: toDecimal(row.nothing, 10),
+        belowStake: toDecimal(row.belowStake, 10),
+        profit: toDecimal(row.profit, 10),
+      })),
+      layout: {
+        note:
+          'Golden-angle phyllotaxis: body i of n sits at radius R(n) * sqrt(i/n) ' +
+          'and angle i * 137.507764 degrees, so the outermost body is at exactly ' +
+          'R(n) and no two bodies share a radius.',
+        populations: LAYOUT_POPULATIONS.slice(),
+        firstClampedPopulation: layout.firstClampedPopulation,
+        rows: layout.rows.map((row) => ({
+          population: row.population,
+          bodyRadius: toDecimal(row.bodyRadius, 2),
+          bodyRadiusRaw: toDecimal(row.bodyRadiusRaw, 2),
+          clamped: row.clamped,
+          layoutRadius: row.layoutRadius,
+          innermostRadius: row.innermostRadius,
+        })),
+      },
+    },
+    proofSurface: {
+      seedCommitmentVersion: SEED_COMMITMENT_VERSION,
+      bodyCommitmentVersion: BODY_COMMITMENT_VERSION,
+      samplerDomain: SAMPLER_DOMAIN,
+      clientEntropyBytes: CLIENT_ENTROPY_BYTES,
+      harvestQuantum: HARVEST_QUANTUM,
     },
     structuralMaximum: {
       multiplier: toFraction(structural),

@@ -1,6 +1,6 @@
 {
   "adapterId": "swarm-colony-v1",
-  "adapterVersion": "1.1.0",
+  "adapterVersion": "1.2.0",
   "bloom": {
     "largest": "527.355936",
     "mass": "79606155952091278329467823330689276565669354290180296664321758950761472039052542939792763507512445364706732092265914035601274945916484769910224091067564510822863256013/1768687320083342259279124861501521832164556874636550427652854470690527601287665061472564736711124628799600085800171451104664596264311182682860135173541493713855743408203125",
@@ -549,12 +549,380 @@
       "zeroProbability": "0.1097579368"
     }
   ],
+  "presentation": {
+    "chord": {
+      "ladder": [
+        {
+          "earliestGeneration": 2,
+          "oneInBeats": "5.15",
+          "perRound": "0.94066875",
+          "reachableStates": 237,
+          "share": "0.19393913",
+          "shareExact": "136294309977384616796559833841430873255386864004781339677782082079104042127486615009397603880757823300008552390151978097013215102411617709836413709582865084571812/702768479207409351174337899801553000512712087589924292999633336449607079815231126879266508309658346093488288710517865068134001792829931947430011918993692155328727",
+          "step": 0,
+          "threshold": "1/1",
+          "thresholdDecimal": "1.0000000"
+        },
+        {
+          "earliestGeneration": 2,
+          "oneInBeats": "8.27",
+          "perRound": "0.58628803",
+          "reachableStates": 232,
+          "share": "0.12087591",
+          "shareExact": "169895561818861899771480123170363276100325844553254173847843090588305842915432629343139077128000978310937522015621366758090812266212104680227029320124745061721749/1405536958414818702348675799603106001025424175179848585999266672899214159630462253758533016619316692186976577421035730136268003585659863894860023837987384310657454",
+          "step": 1,
+          "threshold": "3/2",
+          "thresholdDecimal": "1.5000000"
+        },
+        {
+          "earliestGeneration": 2,
+          "oneInBeats": "12.32",
+          "perRound": "0.39352677",
+          "reachableStates": 226,
+          "share": "0.08113402",
+          "shareExact": "114036870715569769412153613745087695457547429123509197836571940663939067025281163489791556938844751076437299619578740107892037426626677718223917480830311467971749/1405536958414818702348675799603106001025424175179848585999266672899214159630462253758533016619316692186976577421035730136268003585659863894860023837987384310657454",
+          "step": 2,
+          "threshold": "9/4",
+          "thresholdDecimal": "2.2500000"
+        },
+        {
+          "earliestGeneration": 2,
+          "oneInBeats": "20.62",
+          "perRound": "0.23518390",
+          "reachableStates": 209,
+          "share": "0.04848822",
+          "shareExact": "68151997685282191862697193821671003551907815541317111260339353932079126982292565110983528950331348063432381874210750480747407702558790415605009327533993248909249/1405536958414818702348675799603106001025424175179848585999266672899214159630462253758533016619316692186976577421035730136268003585659863894860023837987384310657454",
+          "step": 3,
+          "threshold": "27/8",
+          "thresholdDecimal": "3.3750000"
+        },
+        {
+          "earliestGeneration": 3,
+          "oneInBeats": "34.85",
+          "perRound": "0.13917601",
+          "reachableStates": 182,
+          "share": "0.02869413",
+          "shareExact": "20165333392299467670911676130310392327303298766741547283196388223798562201237572211890853986280671023340938540547627417861948562777913310382428926262037518009312/702768479207409351174337899801553000512712087589924292999633336449607079815231126879266508309658346093488288710517865068134001792829931947430011918993692155328727",
+          "step": 4,
+          "threshold": "81/16",
+          "thresholdDecimal": "5.0625000"
+        },
+        {
+          "earliestGeneration": 5,
+          "oneInBeats": "65.31",
+          "perRound": "0.07426139",
+          "reachableStates": 152,
+          "share": "0.01531058",
+          "shareExact": "10759797564041073051086256524697105911912926504875035567383545286468441410267284644060694944665825169491511462039853923946848005602510480408567951382714022429312/702768479207409351174337899801553000512712087589924292999633336449607079815231126879266508309658346093488288710517865068134001792829931947430011918993692155328727",
+          "step": 5,
+          "threshold": "243/32",
+          "thresholdDecimal": "7.5937500"
+        },
+        {
+          "earliestGeneration": 7,
+          "oneInBeats": "130.48",
+          "perRound": "0.03717082",
+          "reachableStates": 124,
+          "share": "0.00766356",
+          "shareExact": "5385713392492995552448874479033189528874381337759318950424436442141256722819580067820354740525254179752280142943727745428378914544009775797901269346153360038912/702768479207409351174337899801553000512712087589924292999633336449607079815231126879266508309658346093488288710517865068134001792829931947430011918993692155328727",
+          "step": 6,
+          "threshold": "729/64",
+          "thresholdDecimal": "11.3906250"
+        },
+        {
+          "earliestGeneration": 9,
+          "oneInBeats": "333.88",
+          "perRound": "0.01452676",
+          "reachableStates": 99,
+          "share": "0.00299500",
+          "shareExact": "2104794860041337404071529668827600087447791019297685838866237347357941253608243489695421573896620028039994317907618482611196982337853830381859639448888717732352/702768479207409351174337899801553000512712087589924292999633336449607079815231126879266508309658346093488288710517865068134001792829931947430011918993692155328727",
+          "step": 7,
+          "threshold": "2187/128",
+          "thresholdDecimal": "17.0859375"
+        }
+      ],
+      "note": "One semitone per 3/2 of gain. Every note is asserted reachable: the enumeration fails the build if any step has zero probability or zero reachable states.",
+      "ratio": "3/2",
+      "steps": 8
+    },
+    "layout": {
+      "firstClampedPopulation": 17,
+      "note": "Golden-angle phyllotaxis: body i of n sits at radius R(n) * sqrt(i/n) and angle i * 137.507764 degrees, so the outermost body is at exactly R(n) and no two bodies share a radius.",
+      "populations": [
+        1,
+        3,
+        8,
+        12,
+        15,
+        16,
+        17,
+        30
+      ],
+      "rows": [
+        {
+          "bodyRadius": "34.00",
+          "bodyRadiusRaw": "37.20",
+          "clamped": true,
+          "innermostRadius": "51.500",
+          "layoutRadius": "51.500",
+          "population": 1
+        },
+        {
+          "bodyRadius": "34.00",
+          "bodyRadiusRaw": "34.00",
+          "clamped": false,
+          "innermostRadius": "32.904",
+          "layoutRadius": "56.990",
+          "population": 3
+        },
+        {
+          "bodyRadius": "26.00",
+          "bodyRadiusRaw": "26.00",
+          "clamped": false,
+          "innermostRadius": "23.058",
+          "layoutRadius": "65.210",
+          "population": 8
+        },
+        {
+          "bodyRadius": "19.60",
+          "bodyRadiusRaw": "19.60",
+          "clamped": false,
+          "innermostRadius": "20.202",
+          "layoutRadius": "69.980",
+          "population": 12
+        },
+        {
+          "bodyRadius": "14.80",
+          "bodyRadiusRaw": "14.80",
+          "clamped": false,
+          "innermostRadius": "18.863",
+          "layoutRadius": "73.040",
+          "population": 15
+        },
+        {
+          "bodyRadius": "13.20",
+          "bodyRadiusRaw": "13.20",
+          "clamped": false,
+          "innermostRadius": "18.500",
+          "layoutRadius": "74.000",
+          "population": 16
+        },
+        {
+          "bodyRadius": "12.00",
+          "bodyRadiusRaw": "11.60",
+          "clamped": true,
+          "innermostRadius": "18.171",
+          "layoutRadius": "74.922",
+          "population": 17
+        },
+        {
+          "bodyRadius": "12.00",
+          "bodyRadiusRaw": "-9.20",
+          "clamped": true,
+          "innermostRadius": "15.533",
+          "layoutRadius": "85.077",
+          "population": 30
+        }
+      ]
+    },
+    "note": "Feedback contracts docs/DESIGN.md publishes, derived from the model. The verdict beat is keyed to D, the signed change in colony value in stake multiples, and never to the ratio V(t+1)/V(t): a ratio band above +50% is structurally unreachable at populations 13, 14 and 15, because every such outcome is at or above the FULL BLOOM threshold and ends the round.",
+    "reach": [
+      {
+        "bestDelta": "16.875389",
+        "bestOffspring": 2,
+        "firstLargeGainGeneration": 5,
+        "population": 1
+      },
+      {
+        "bestDelta": "33.750779",
+        "bestOffspring": 4,
+        "firstLargeGainGeneration": 2,
+        "population": 2
+      },
+      {
+        "bestDelta": "50.626169",
+        "bestOffspring": 6,
+        "firstLargeGainGeneration": 2,
+        "population": 3
+      },
+      {
+        "bestDelta": "67.501559",
+        "bestOffspring": 8,
+        "firstLargeGainGeneration": 2,
+        "population": 4
+      },
+      {
+        "bestDelta": "84.376949",
+        "bestOffspring": 10,
+        "firstLargeGainGeneration": 2,
+        "population": 5
+      },
+      {
+        "bestDelta": "101.252339",
+        "bestOffspring": 12,
+        "firstLargeGainGeneration": 2,
+        "population": 6
+      },
+      {
+        "bestDelta": "118.127729",
+        "bestOffspring": 14,
+        "firstLargeGainGeneration": 2,
+        "population": 7
+      },
+      {
+        "bestDelta": "120.940294",
+        "bestOffspring": 15,
+        "firstLargeGainGeneration": 2,
+        "population": 8
+      },
+      {
+        "bestDelta": "109.690034",
+        "bestOffspring": 15,
+        "firstLargeGainGeneration": 2,
+        "population": 9
+      },
+      {
+        "bestDelta": "98.439774",
+        "bestOffspring": 15,
+        "firstLargeGainGeneration": 2,
+        "population": 10
+      },
+      {
+        "bestDelta": "87.189514",
+        "bestOffspring": 15,
+        "firstLargeGainGeneration": 2,
+        "population": 11
+      },
+      {
+        "bestDelta": "75.939254",
+        "bestOffspring": 15,
+        "firstLargeGainGeneration": 2,
+        "population": 12
+      },
+      {
+        "bestDelta": "64.688994",
+        "bestOffspring": 15,
+        "firstLargeGainGeneration": 2,
+        "population": 13
+      },
+      {
+        "bestDelta": "53.438734",
+        "bestOffspring": 15,
+        "firstLargeGainGeneration": 2,
+        "population": 14
+      },
+      {
+        "bestDelta": "42.188474",
+        "bestOffspring": 15,
+        "firstLargeGainGeneration": 2,
+        "population": 15
+      }
+    ],
+    "settlement": [
+      {
+        "belowStake": "0.4800000000",
+        "id": "BANK_FIRST",
+        "label": "Bank at generation 1",
+        "nothing": "0.0640000000",
+        "profit": "0.4560000000"
+      },
+      {
+        "belowStake": "0.0000000000",
+        "id": "RUN",
+        "label": "Never harvest, ride to the end",
+        "nothing": "0.9775368362",
+        "profit": "0.0224631637"
+      },
+      {
+        "belowStake": "0.5004286344",
+        "id": "HALF_EVERY",
+        "label": "Harvest half every generation",
+        "nothing": "0.1919999780",
+        "profit": "0.3075713875"
+      },
+      {
+        "belowStake": "0.0000000000",
+        "id": "STOP_AT_2X",
+        "label": "Bank everything at 2.00x or better",
+        "nothing": "0.6569048229",
+        "profit": "0.3430951770"
+      },
+      {
+        "belowStake": "0.0000000000",
+        "id": "STOP_AT_10X",
+        "label": "Bank everything at 10.00x or better",
+        "nothing": "0.9270874356",
+        "profit": "0.0729125643"
+      },
+      {
+        "belowStake": "0.0541179111",
+        "id": "HALF_AT_2X",
+        "label": "Harvest half whenever value is 2.00x or better",
+        "nothing": "0.6597663744",
+        "profit": "0.2861157144"
+      },
+      {
+        "belowStake": "0.1454703056",
+        "id": "BANK_AT_GEN_5",
+        "label": "Bank everything at generation 5",
+        "nothing": "0.5834417939",
+        "profit": "0.2710879003"
+      },
+      {
+        "belowStake": "0.7189429463",
+        "id": "PANIC",
+        "label": "Bank whenever the colony shrank below 3, else run",
+        "nothing": "0.1097579368",
+        "profit": "0.1712991168"
+      }
+    ],
+    "verdict": {
+      "bands": [
+        {
+          "band": "HEAVY_LOSS",
+          "share": "0.09537276",
+          "shareExact": "67024975196418072114598157223712525973185574264709743038624351431426996804382674700749855677954217914432020774967281461301685915688264453162772099575230040669600/702768479207409351174337899801553000512712087589924292999633336449607079815231126879266508309658346093488288710517865068134001792829931947430011918993692155328727"
+        },
+        {
+          "band": "LOSS",
+          "share": "0.28856537",
+          "shareExact": "202794647422601532243083691429915622561342015125898448324464888895723171596709353379411788784534581474592509515365070784861933894660523947095498442649841308593750/702768479207409351174337899801553000512712087589924292999633336449607079815231126879266508309658346093488288710517865068134001792829931947430011918993692155328727"
+        },
+        {
+          "band": "FLAT",
+          "share": "0.01134745",
+          "shareExact": "7974633933460442747339605608759528515153372051792157055815219923805969181554244413477534921675547100315250692479053697920998463270070465533586245963068953915440/702768479207409351174337899801553000512712087589924292999633336449607079815231126879266508309658346093488288710517865068134001792829931947430011918993692155328727"
+        },
+        {
+          "band": "GAIN",
+          "share": "0.41077527",
+          "shareExact": "288679912677544687272756611697734450207644262142742604902946794119546900105098239376229725044736176304139955337554481027036168416799455371801741421222686767578125/702768479207409351174337899801553000512712087589924292999633336449607079815231126879266508309658346093488288710517865068134001792829931947430011918993692155328727"
+        },
+        {
+          "band": "LARGE_GAIN",
+          "share": "0.19393913",
+          "shareExact": "136294309977384616796559833841430873255386864004781339677782082079104042127486615009397603880757823300008552390151978097013215102411617709836413709582865084571812/702768479207409351174337899801553000512712087589924292999633336449607079815231126879266508309658346093488288710517865068134001792829931947430011918993692155328727"
+        }
+      ],
+      "beatsPerRound": "4.85032978",
+      "entryValue": "19/20",
+      "heavyLossThreshold": "-1/1",
+      "largeGainThreshold": "1/1"
+    }
+  },
   "proof": {
     "actionsChecked": 2295,
     "failures": 0,
     "ok": true,
     "optimalRtp": "19/20",
     "statesChecked": 255
+  },
+  "proofSurface": {
+    "bodyCommitmentVersion": "reveal-engine/stage-body-commit-v1",
+    "clientEntropyBytes": 32,
+    "harvestQuantum": "any",
+    "samplerDomain": "reveal-engine/stage-draw-v2",
+    "seedCommitmentVersion": "reveal-engine/stage-seed-commit-v1"
   },
   "reach": [
     {
@@ -647,6 +1015,21 @@
         "maximumCreditDecimal": "248.798505"
       }
     ],
+    "sharedCeilingCounterfactual": {
+      "attainableBelowPeakDecimal": "638.035863",
+      "bindingProbabilityBound": "1.96449e-04",
+      "bindingProbabilityBoundOneIn": "5090.36",
+      "colonyThreshold": "29279361026173653112508740813741281009814943534736989683470875681838532687478130240320745017641318651063246326819811468805/45061667002353235057320862281147396297328814630593947809584324702468394705057431557468443704721095091875298488570818464",
+      "colonyThresholdDecimal": "649.762047",
+      "combinedMaximum": "674683201834827302838783126280242282195565367879035357835507162541979214630917928053401805975181535967410300407550813814479355169557/580615158235048498832981366628144073357736252990541980693086529854040057195523703023255930791382552662731566955949685248498860032",
+      "combinedMaximumDecimal": "1162.014446",
+      "minimumPeakPopulation": 14,
+      "note": "What a single ticket-wide ceiling would do instead of one cap basis per line. Not the shipped design: published so the rejected alternative is costed exactly rather than dismissed.",
+      "runCanBind": false,
+      "runMaximumDecimal": "527.355936",
+      "shortfallDecimal": "256.014446",
+      "sideBetTotalDecimal": "256.237952"
+    },
     "ticket": {
       "admissionLimitCredits": "1000000",
       "admissionLimitUnits": "1000000000000",
@@ -672,7 +1055,7 @@
     "relativeAtMinimumStake": "1.80000e-04",
     "relativeAtMinimumStakePercentagePoints": "0.018000"
   },
-  "schema": "swarm/paytable-v2",
+  "schema": "swarm/paytable-v3",
   "sideBets": [
     {
       "capMultiple": "5",
@@ -711,6 +1094,12 @@
       "rtp": "19/20"
     }
   ],
+  "stakeBoundary": {
+    "creditsChecked": 540,
+    "exactlyOneStakeIsReachable": false,
+    "factor": 19,
+    "note": "No round can settle at exactly one stake: every credit carries an uncancellable factor of 19 in its numerator over a denominator of 2s and a 3, so a sum of credits is never exactly 1. The loss/win boundary of the settlement ceremony is therefore unambiguous."
+  },
   "structuralMaximum": {
     "capBinds": false,
     "decimal": "527.355936",

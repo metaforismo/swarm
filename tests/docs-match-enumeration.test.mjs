@@ -42,7 +42,7 @@ describe('generated tables', () => {
   it('publishes every block the generator produces, somewhere', () => {
     const published = new Set(Object.values(documents).flatMap(blocksIn));
     expect([...Object.keys(blocks)].sort()).toEqual([...published].sort());
-    expect(published.size).toBeGreaterThanOrEqual(15);
+    expect(published.size).toBeGreaterThanOrEqual(23);
   });
 
   for (const [name, text] of Object.entries(documents))
@@ -109,6 +109,16 @@ describe('prose numbers agree with the model', () => {
     const percent = (value) => `${(Number(value) * 100).toFixed(2)}%`;
     expect(readme).toContain(percent(bankFirst.profitRate));
     expect(readme).toMatch(/return > stake|P\(return > stake\)/u);
+  });
+
+  it('README publishes how often a round returns less than the stake', () => {
+    const percent = (value) => `${(Number(value) * 100).toFixed(2)}%`;
+    const settlement = paytable.presentation.settlement;
+    for (const id of ['BANK_FIRST', 'HALF_EVERY']) {
+      const row = settlement.find((entry) => entry.id === id);
+      expect(readme, id).toContain(percent(row.belowStake));
+    }
+    expect(flat(readme)).toMatch(/less than you staked/iu);
   });
 
   it('DESIGN states the derived numbers it quotes', () => {
@@ -232,6 +242,130 @@ describe('documentation discipline', () => {
     // The Round 1 rule made splits "always the loudest thing on screen".
     expect(design).not.toMatch(/[Ss]plits are always the loudest/u);
     expect(design).toMatch(/verdict/iu);
+  });
+
+  // -------------------------------------------------------------------------
+  // Regression guards for the round-2 findings. Each of these was a real defect
+  // that no test could see, so each gets a test that would have seen it.
+  // -------------------------------------------------------------------------
+
+  it('splits the settlement ceremony on the stake, not only on 2x', () => {
+    // BLOCKER: tier T0 spanned X < 2, so a 0.40x return and a 1.90x win got the
+    // same balance-chip count-up. That is the most common outcome class in the
+    // game (48.00% of BANK_FIRST rounds) presented as a win.
+    const settlement = paytable.presentation.settlement;
+    const bankFirst = settlement.find((row) => row.id === 'BANK_FIRST');
+    expect(design).toMatch(/T0-loss/u);
+    expect(design).toMatch(/T0-win/u);
+    expect(flat(design)).toMatch(/no count-up into the balance chip/iu);
+    expect(flat(design)).toMatch(/signed net result/iu);
+    // The frequency must be published, not merely alluded to.
+    const percent = (value) => `${(Number(value) * 100).toFixed(2)}%`;
+    expect(design).toContain(percent(bankFirst.belowStake));
+    // And the boundary has to be the one MATH proves is unambiguous.
+    expect(math).toMatch(/never settle at exactly one stake/iu);
+  });
+
+  it('binds the action log with a settlement-time body commitment', () => {
+    // BLOCKER: a choice-timed round shipped a single-phase commitment, so the
+    // action log was an unverified input to its own verifier.
+    expect(flat(engine)).toMatch(/two-phase/iu);
+    expect(engine).toContain('stage-seed-commit-v1');
+    expect(engine).toContain('stage-body-commit-v1');
+    expect(flat(engine)).toMatch(/settlement body commitment/iu);
+    // The verifier must re-derive the body, not accept it.
+    expect(flat(engine)).toMatch(/Re-seal the \*\*settlement body commitment\*\*/u);
+    expect(flat(readme)).toMatch(/two-phase commit-reveal/iu);
+    // The round-2 defence may be *quoted* while explaining why it was wrong, but
+    // the document must not assert it in its own voice.
+    expect(unquoted(flat(engine))).not.toMatch(
+      /action log is bound separately by the receipt ledger and the frame fence/iu,
+    );
+  });
+
+  it('discloses seed grinding and ships client entropy', () => {
+    for (const [name, text] of Object.entries({ readme, math, engine }))
+      expect(flat(text), name).toMatch(/client entropy|client seed/iu);
+    expect(flat(math)).toMatch(/how that seed was chosen/iu);
+    expect(flat(engine)).toMatch(/grind/iu);
+    expect(flat(readme)).toMatch(/What this does not prove/u);
+    // The exposure is specific to SWARM and the number is stated.
+    expect(engine).toContain('(2/5)^3 = 0.064');
+  });
+
+  it('specifies the lifecycle states and the full-bank path', () => {
+    for (const state of ['IDLE', 'STAGED', 'AWAITING_SETTLEMENT', 'SETTLED'])
+      expect(engine, state).toContain(state);
+    // The round-2 diagram transitioned into a state it never declared.
+    expect(engine).not.toMatch(/\bRESOLVED\b/u);
+    expect(flat(engine)).toMatch(/`settle\(\)` is required on every path/u);
+    // A full bank is a terminal with its own row, not an implication.
+    expect(flat(engine)).toMatch(/full BANK.*?`BANKED`.*?`AWAITING_SETTLEMENT`/u);
+  });
+
+  it('replaces the in-round harvest plan with a stepper, and says why', () => {
+    // The presets may be *named* in the paragraph that cuts them; they may not
+    // be offered.
+    for (const gone of ['RIDE TO 18', 'HARVEST HALF EVERY GENERATION', 'BANK AT 2x'])
+      expect(unquoted(design), gone).not.toContain(gone);
+    expect(flat(design)).toMatch(/no harvest plan and no in-round auto-play/iu);
+    expect(flat(design)).toMatch(/stepper/iu);
+    // MATH publishes a volatility maximum at k = 1, so the client must reach it.
+    expect(flat(math)).toMatch(/client can reach both ends/iu);
+    expect(engine).toContain("clientQuantum: 'any'");
+  });
+
+  it('keys the verdict bands to money, and proves every note reachable', () => {
+    expect(flat(design)).toMatch(/stake multiples/iu);
+    expect(flat(design)).toMatch(/R5 — Reachable/u);
+    expect(flat(math)).toMatch(/structurally unreachable/iu);
+    // The exact claim the round-2 text made, which was false.
+    expect(design).not.toMatch(/every organism in the colony splits at once/u);
+    const top = paytable.presentation.chord.ladder.at(-1);
+    expect(design).toContain(top.thresholdDecimal.replace(/0+$/u, ''));
+    expect(math).toContain(top.oneInBeats);
+  });
+
+  it('gives a live side bet in-round feedback within the proven bound', () => {
+    expect(flat(design)).toMatch(/wild-line ghost/iu);
+    expect(flat(design)).toMatch(/PEAK 7 \/ 10|peak so far/iu);
+    // The rule must be the one-generation-lagged one, not the blanket ban.
+    expect(flat(math)).toMatch(/what is safe/iu);
+    expect(flat(math)).toMatch(/what is not/iu);
+    expect(flat(engine)).toMatch(/wildUnits/u);
+    expect(flat(design)).not.toMatch(
+      /Nothing about the wild line — not a count, not a hint/u,
+    );
+  });
+
+  it('states the shared-ceiling frequency against the right scenario', () => {
+    const shared = paytable.risk.sharedCeilingCounterfactual;
+    expect(math).toContain(shared.colonyThresholdDecimal);
+    expect(math).toContain(shared.bindingProbabilityBound);
+    expect(math).toContain(String(shared.minimumPeakPopulation));
+    // The exact wrong sentence from round 2, which attached P(SWARM wins) to the
+    // equal-stake bind, must be gone.
+    expect(flat(math)).not.toMatch(
+      /it would bind on a `1 in 261\.89` event, not a tail event/u,
+    );
+    // And the document must say where that frequency actually belongs.
+    expect(flat(math)).toMatch(/On unequal stakes it is not rare at all/u);
+  });
+
+  it('makes the colony layout buildable', () => {
+    const { layout } = paytable.presentation;
+    expect(flat(design)).toMatch(/rho_i\s*=\s*R\(n\) \* sqrt\(i \/ n\)/u);
+    expect(design).toContain(`\`n = ${layout.firstClampedPopulation}\``);
+    // The round-2 text gave one radius per population and called it a spiral.
+    expect(flat(design)).toMatch(/which is a ring/iu);
+  });
+
+  it('specifies the signature visual with the same rigour as the rest of §6', () => {
+    for (const marker of ['silt', 'plankton', 'roughness', 'parallax', 'Asset list'])
+      expect(design, marker).toMatch(new RegExp(marker, 'iu'));
+    // Beat table, camera note and a bounded asset count, not two sentences.
+    expect(flat(design)).toMatch(/Camera and composition/u);
+    expect(flat(design)).toMatch(/dollies back \*\*8%\*\*/u);
   });
 
   it('keeps every document substantial and linked', () => {

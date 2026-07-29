@@ -48,6 +48,27 @@ const G = MAX_GENERATIONS;
 const D = DRAW_MODULUS;
 
 /**
+ * Memoization for the pure, expensive enumerations.
+ *
+ * Every function wrapped here is a deterministic function of the frozen
+ * configuration, so caching cannot change a result — but the report builds the
+ * wild line, the reach curve and the round-maximum dynamic program dozens of
+ * times, and the shared-ceiling bound alone runs the program sixteen times.
+ * Results are treated as read-only by every caller; nothing in this module
+ * mutates a returned structure.
+ */
+function memoize(compute) {
+  const cache = new Map();
+  return (...args) => {
+    const key = args.length === 0 ? '' : args.join('|');
+    if (cache.has(key)) return cache.get(key);
+    const value = compute(...args);
+    cache.set(key, value);
+    return value;
+  };
+}
+
+/**
  * K[n][m] = integer coefficient of x^m in (w0 + w1*x + w2*x^2)^n.
  * P(n organisms produce m organisms) = K[n][m] / DRAW_MODULUS^n, exactly.
  */
@@ -134,7 +155,7 @@ function terminalReason(generation, population) {
  * never harvests. This is simultaneously the reference paytable of the base bet
  * under the RUN policy and the resolution source for every side bet.
  */
-export function enumerateWildLine() {
+function enumerateWildLineUncached() {
   const step = POWERS[B - 1];
   let denominator = 1n;
   let alive = new Array(B).fill(0n);
@@ -197,7 +218,7 @@ export function enumerateWildLine() {
  * organisms during the round. Absorbing forward pass; used to price the SWARM
  * side bet and to state the FULL BLOOM frequency.
  */
-export function reachProbability(threshold) {
+function reachProbabilityUncached(threshold) {
   if (!Number.isSafeInteger(threshold) || threshold < 1 || threshold > MAX_POPULATION)
     fail('INVALID_ARGUMENT', 'threshold out of range');
   const step = POWERS[B - 1];
@@ -449,7 +470,7 @@ export function proveStrategyInvariance() {
  * Exact deterministic dynamic program: the player maximizes over harvests, the
  * grid is maximized over reachable populations (a supremum, not an expectation).
  */
-export function maximumRoundPayout() {
+function maximumRoundPayoutUncached() {
   let value = new Array(MAX_POPULATION + 1);
   for (let m = 0; m <= MAX_POPULATION; m += 1) value[m] = terminalMultiplier(G, m);
 
@@ -517,7 +538,7 @@ export function runTail(thresholds) {
  * Every side bet is priced at exactly TARGET_RTP by construction:
  *   multiplier = TARGET_RTP / probability.
  */
-export function sideBets() {
+function sideBetsUncached() {
   const distribution = populationDistribution(1);
   const firstLight = distribution
     .filter((entry) => entry.population >= 4)
@@ -994,3 +1015,198 @@ export function peakBand(low, high) {
   return subtract(reachProbability(low), reachProbability(high));
 }
 
+/**
+ * Exact occupancy of the wild line: `alive[t][n]` is the probability that the
+ * colony holds exactly `n` organisms (1 <= n < BLOOM_THRESHOLD) immediately
+ * after generation `t` has resolved, with `t = 0` the seeded state. Terminal
+ * mass (extinction, FULL BLOOM) is absorbed and never re-enters.
+ *
+ * Exported because the presentation layer prices its feedback bands against the
+ * states a player is actually in, not against a uniform sweep of the state space.
+ */
+function aliveOccupancyUncached() {
+  const rows = [];
+  let alive = new Array(B).fill(ZERO);
+  alive[SEED_COUNT] = ONE;
+  rows.push(alive.slice());
+  for (let t = 1; t <= G; t += 1) {
+    const next = new Array(MAX_POPULATION + 1).fill(ZERO);
+    for (let n = 1; n < B; n += 1) {
+      if (alive[n].numerator === 0n) continue;
+      const row = KERNEL[n];
+      for (let m = 0; m < row.length; m += 1) {
+        if (row[m] === 0n) continue;
+        next[m] = add(next[m], multiply(alive[n], rat(row[m], POWERS[n])));
+      }
+    }
+    const survivors = new Array(B).fill(ZERO);
+    for (let m = 1; m < B; m += 1) survivors[m] = next[m];
+    rows.push(survivors.slice());
+    alive = survivors;
+  }
+  return rows;
+}
+
+/**
+ * The largest total the COLONY line can credit in one round *given that the
+ * population never reaches `peakLimit` organisms*.
+ *
+ * Same deterministic dynamic program as `maximumRoundPayout()` — the player
+ * maximizes over harvests and the grid is maximized over reachable populations —
+ * with every state at or above `peakLimit` deleted from the reachable set. It
+ * exists to turn "how likely is a shared ticket ceiling to bind" into an exactly
+ * computable bound (see `sharedCapBinding()`), rather than a guess.
+ */
+function maximumRoundPayoutBelowPeakUncached(peakLimit) {
+  if (!Number.isSafeInteger(peakLimit) || peakLimit < 1 || peakLimit > MAX_POPULATION + 1)
+    fail('INVALID_ARGUMENT', 'peakLimit out of range');
+  let value = new Array(MAX_POPULATION + 1);
+  for (let m = 0; m <= MAX_POPULATION; m += 1)
+    value[m] = m >= peakLimit ? null : terminalMultiplier(G, m);
+
+  for (let t = G - 1; t >= 1; t -= 1) {
+    const continuation = new Array(B).fill(ZERO);
+    for (let j = 1; j < B; j += 1) {
+      let best = ZERO;
+      for (let m = 0; m <= 2 * j && m <= MAX_POPULATION; m += 1) {
+        if (m >= peakLimit || value[m] === null) continue;
+        if (compare(value[m], best) > 0) best = value[m];
+      }
+      continuation[j] = best;
+    }
+    const next = new Array(MAX_POPULATION + 1);
+    for (let n = 0; n <= MAX_POPULATION; n += 1) {
+      if (n >= peakLimit) {
+        next[n] = null;
+        continue;
+      }
+      if (n === 0 || n >= B) {
+        next[n] = terminalMultiplier(t, n);
+        continue;
+      }
+      let best = ZERO;
+      for (let k = 0; k <= n; k += 1) {
+        const rest = n - k;
+        const candidate = add(
+          multiply(organismValue(t), rat(BigInt(k))),
+          rest === 0 ? ZERO : continuation[rest],
+        );
+        if (compare(candidate, best) > 0) best = candidate;
+      }
+      next[n] = best;
+    }
+    value = next;
+  }
+
+  let best = ZERO;
+  for (let m = 0; m <= 2 * SEED_COUNT && m <= MAX_POPULATION; m += 1)
+    if (m < peakLimit && value[m] !== null && compare(value[m], best) > 0) best = value[m];
+  return best;
+}
+
+/**
+ * What would happen if the ticket had a single shared ceiling instead of one cap
+ * basis per line — and how likely it would be to bite.
+ *
+ * On equal stakes the four lines can jointly owe `combined`; against a shared
+ * ceiling equal to the COLONY cap the COLONY line alone would have to credit
+ * more than `colonyThreshold` for the ceiling to bind. Two exact statements
+ * bound that event:
+ *
+ *   - under RUN it is impossible, because RUN's largest total is the largest
+ *     single settlement and that is below the threshold;
+ *   - over *every* adapted policy it requires the colony to reach
+ *     `minimumPeak` organisms, because the maximum total attainable without ever
+ *     reaching that size is below the threshold. The player's population never
+ *     exceeds the wild line's (the colony occupies a prefix of the wild line's
+ *     slots), so `reachProbability(minimumPeak)` is an upper bound on it.
+ *
+ * docs/MATH.md §12.1 publishes both. The previous text attached the SWARM side
+ * bet's `1 in 261.89` frequency to this event, which was the frequency of a
+ * different scenario entirely.
+ */
+export function sharedCapBinding() {
+  const colonyMaximum = maximumRoundPayout().multiplier;
+  let sideTotal = ZERO;
+  for (const bet of sideBets()) sideTotal = add(sideTotal, bet.multiplier);
+  const combined = add(colonyMaximum, sideTotal);
+  const ceiling = rat(COLONY_MAX_WIN_MULTIPLE);
+  const shortfall = subtract(combined, ceiling);
+  const colonyThreshold = subtract(ceiling, sideTotal);
+
+  // RUN never harvests, so its round total *is* its single settlement, and the
+  // largest settlement in the enumerated terminal space is the largest total it
+  // can produce.
+  let runMaximum = ZERO;
+  for (const entry of runPayoutDistribution())
+    if (compare(entry.multiplier, runMaximum) > 0) runMaximum = entry.multiplier;
+  const runCanBind = compare(runMaximum, colonyThreshold) > 0;
+
+  // The tightest population bound: the *largest* limit whose reachable maximum
+  // still sits below the threshold. `maximumRoundPayoutBelowPeak(L)` forbids
+  // every population at or above `L`, so "peak < L cannot bind" is the same
+  // statement as "binding requires peak >= L", and a larger `L` is a rarer event
+  // and therefore a stronger bound.
+  let minimumPeak = null;
+  let attainableBelowPeak = null;
+  for (let limit = B; limit >= 1; limit -= 1) {
+    const attainable = maximumRoundPayoutBelowPeak(limit);
+    if (compare(attainable, colonyThreshold) <= 0) {
+      minimumPeak = limit;
+      attainableBelowPeak = attainable;
+      break;
+    }
+  }
+  if (minimumPeak === null)
+    fail('INVALID_MODEL', 'No population bound rules out a shared-ceiling bind');
+
+  return {
+    colonyMaximum,
+    sideTotal,
+    combined,
+    ceiling,
+    shortfall,
+    colonyThreshold,
+    runMaximum,
+    runCanBind,
+    minimumPeak,
+    attainableBelowPeak,
+    bound: reachProbability(minimumPeak),
+  };
+}
+
+/**
+ * Proof that a round can never settle at *exactly* one stake, so the boundary
+ * between "returned less than you staked" and "returned more" is unambiguous and
+ * every round total falls on one side of it.
+ *
+ * Every credit is `c(t) * k = 19 * 5^(t-1) * k / (3 * 2^(2t+2))`. The 19 in the
+ * numerator can never cancel, because the denominator is a product of 2s and a 3.
+ * A sum of such values is therefore `19a/b` with `19` not dividing `b`, and
+ * `19a/b = 1` would need `19a = b`. This function checks the invariant
+ * mechanically over every reachable single credit rather than trusting the
+ * argument, and `docs/MATH.md §13.1` states it.
+ */
+export function stakeBoundaryIsUnreachable() {
+  let checked = 0;
+  for (let t = 1; t <= G; t += 1)
+    for (let k = 1; k <= MAX_POPULATION; k += 1) {
+      const value = multiply(organismValue(t), rat(BigInt(k)));
+      if (value.numerator % 19n !== 0n)
+        fail('INVALID_MODEL', `Credit c(${t}) * ${k} lost the factor 19 from its numerator`);
+      if (value.denominator % 19n === 0n)
+        fail('INVALID_MODEL', `Credit c(${t}) * ${k} carries 19 in its denominator`);
+      checked += 1;
+    }
+  return { ok: true, creditsChecked: checked, factor: 19 };
+}
+
+
+// Cached public entry points. Each is a pure function of the frozen
+// configuration; see `memoize` above for why that makes caching safe.
+export const enumerateWildLine = memoize(enumerateWildLineUncached);
+export const reachProbability = memoize(reachProbabilityUncached);
+export const maximumRoundPayout = memoize(maximumRoundPayoutUncached);
+export const sideBets = memoize(sideBetsUncached);
+export const maximumRoundPayoutBelowPeak = memoize(maximumRoundPayoutBelowPeakUncached);
+export const aliveOccupancy = memoize(aliveOccupancyUncached);

@@ -23,8 +23,8 @@
  * Usage:
  *   node tools/enumerate.mjs                     full report
  *   node tools/enumerate.mjs --terminals         also print every terminal state
- *   node tools/enumerate.mjs --json spec/paytable.v2.json   write the frozen fixture
- *   node tools/enumerate.mjs --check spec/paytable.v2.json  verify the frozen fixture
+ *   node tools/enumerate.mjs --json spec/paytable.v3.json   write the frozen fixture
+ *   node tools/enumerate.mjs --check spec/paytable.v3.json  verify the frozen fixture
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -193,8 +193,57 @@ function printReport(paytable, options) {
     `  near-miss band ${paytable.nearMiss.band} organisms: ${paytable.nearMiss.decimal} (1 in ${paytable.nearMiss.oneIn})`,
   );
 
+  console.log(HEAD('14. Verdict feedback, keyed to money (evidence for docs/DESIGN.md §6.5)'));
+  console.log(
+    `  D = signed change in colony value, in stake multiples; ${paytable.presentation.verdict.beatsPerRound} verdict beats per RUN round`,
+  );
+  for (const band of paytable.presentation.verdict.bands)
+    console.log(`  ${padEnd(band.band, 11)} share ${band.share}`);
+  console.log('  chord ladder (one semitone per 3/2 of gain), every note proved reachable:');
+  console.log('   note  D at least     share of beats  one in     per round   reachable states  from gen');
+  for (const row of paytable.presentation.chord.ladder)
+    console.log(
+      `    +${row.step}   ${pad(`${row.thresholdDecimal}x`, 13)}  ${pad(row.share, 14)}  ${pad(row.oneInBeats, 9)}  ${pad(row.perRound, 10)}  ${pad(row.reachableStates, 16)}  ${pad(row.earliestGeneration, 8)}`,
+    );
+  console.log('  largest gain a verdict beat can carry, and where the large-gain band opens:');
+  console.log('   pop  best m   largest D      first generation with D >= 1x');
+  for (const row of paytable.presentation.reach)
+    console.log(
+      `   ${pad(row.population, 3)}  ${pad(row.bestOffspring, 5)}   ${pad(`${row.bestDelta}x`, 13)}  ${pad(row.firstLargeGainGeneration, 6)}`,
+    );
+
+  console.log(HEAD('15. How a round settles, as the player experiences it (docs/DESIGN.md §7.1)'));
+  console.log(
+    `  exactly one stake is unreachable as a round total (factor ${paytable.stakeBoundary.factor}, ${paytable.stakeBoundary.creditsChecked} credits checked), so the loss/win boundary is unambiguous`,
+  );
+  console.log('  policy           nothing        below the stake  above the stake');
+  for (const row of paytable.presentation.settlement)
+    console.log(
+      `  ${padEnd(row.id, 15)} ${pad(row.nothing, 13)}  ${pad(row.belowStake, 15)}  ${pad(row.profit, 15)}`,
+    );
+
+  console.log(HEAD('16. The rejected alternative: one shared ticket ceiling (docs/MATH.md §12.1)'));
+  const shared = paytable.risk.sharedCeilingCounterfactual;
+  console.log(`  combined maximum of the four lines on equal stakes : ${shared.combinedMaximumDecimal}x`);
+  console.log(`  short-pay against a single ${paytable.roundMaximum.declaredMaxWinMultiple}x ceiling            : ${shared.shortfallDecimal}x`);
+  console.log(`  COLONY credit needed before it binds at all        : ${shared.colonyThresholdDecimal}x`);
+  console.log(`  largest total RUN can produce                     : ${shared.runMaximumDecimal}x (binds: ${shared.runCanBind})`);
+  console.log(
+    `  binding requires a peak of >= ${shared.minimumPeakPopulation} organisms (max below that peak ${shared.attainableBelowPeakDecimal}x), so P(bind) <= ${shared.bindingProbabilityBound} = 1 in ${shared.bindingProbabilityBoundOneIn}`,
+  );
+
+  console.log(HEAD('17. Colony layout contract (docs/DESIGN.md §6.4)'));
+  console.log(
+    `  body radius clamps to its floor from population ${paytable.presentation.layout.firstClampedPopulation} upward`,
+  );
+  console.log('   pop  r(n)      unclamped  R(n)       innermost body');
+  for (const row of paytable.presentation.layout.rows)
+    console.log(
+      `   ${pad(row.population, 3)}  ${pad(row.bodyRadius, 8)}  ${pad(row.bodyRadiusRaw, 9)}  ${pad(row.layoutRadius, 9)}  ${pad(row.innermostRadius, 14)}${row.clamped ? '  (clamped)' : ''}`,
+    );
+
   if (options.terminals) {
-    console.log(HEAD('14. Every terminal state'));
+    console.log(HEAD('18. Every terminal state'));
     console.log('  gen  pop  reason   multiplier                probability');
     for (const row of paytable.terminals)
       console.log(

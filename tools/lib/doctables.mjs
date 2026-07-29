@@ -18,7 +18,7 @@ import { canonicalJson, digest } from './canonical.mjs';
 import { buildPaytable } from './report.mjs';
 
 /** Where the frozen fixture lives, relative to the repository root. */
-export const FIXTURE_PATH = 'spec/paytable.v2.json';
+export const FIXTURE_PATH = 'spec/paytable.v3.json';
 
 /** Values longer than this are published as digest + decimal instead of inline. */
 export const INLINE_FRACTION_LIMIT = 44;
@@ -273,6 +273,95 @@ export function renderBlocks(paytable = buildPaytable()) {
       `${row.multiplierDecimal}x`,
       `${row.capMultiple}x`,
       `\`${row.rtp}\``,
+    ]),
+  );
+
+  /** docs/DESIGN.md §6.5 — the verdict bands, keyed to money and not to the ratio. */
+  const BAND_LABELS = {
+    HEAVY_LOSS: '`D <= -1.00x` — the generation took at least a stake off the table',
+    LOSS: '`-1.00x < D < 0`',
+    FLAT: '`D = 0` — reachable only when `5m = 4n`',
+    GAIN: '`0 < D < +1.00x`',
+    LARGE_GAIN: '`D >= +1.00x` — MEDUSA, and the chord',
+  };
+  blocks['verdict-bands'] = table(
+    ['Verdict band', 'Share of verdict beats'],
+    paytable.presentation.verdict.bands.map((row) => [
+      BAND_LABELS[row.band] ?? row.band,
+      `${percent(row.share)}%`,
+    ]),
+  );
+
+  blocks['chord-ladder'] = table(
+    ['Note', '`D` at least', 'Share of verdict beats', 'One in', 'Per round', 'Reachable from'],
+    paytable.presentation.chord.ladder.map((row) => [
+      `+${row.step}`,
+      `\`${row.threshold}\` = ${row.thresholdDecimal}x`,
+      `${percent(row.share)}%`,
+      row.oneInBeats,
+      row.perRound,
+      `generation ${row.earliestGeneration}, ${row.reachableStates} states`,
+    ]),
+  );
+
+  blocks['verdict-reach'] = table(
+    ['Population `n`', 'Largest non-terminal offspring `m`', 'Largest `D` a verdict beat can carry', 'First generation that can reach `D >= 1.00x`'],
+    paytable.presentation.reach.map((row) => [
+      String(row.population),
+      String(row.bestOffspring),
+      `${row.bestDelta}x`,
+      String(row.firstLargeGainGeneration),
+    ]),
+  );
+
+  blocks['settlement-classes'] = table(
+    ['Policy', 'Returns nothing', 'Returns **less than the stake**', 'Returns more than the stake'],
+    paytable.presentation.settlement.map((row) => [
+      `\`${row.id}\``,
+      `${percent(row.nothing)}%`,
+      `${percent(row.belowStake)}%`,
+      `${percent(row.profit)}%`,
+    ]),
+  );
+
+  blocks['shared-cap'] = table(
+    ['Quantity, under one shared ticket ceiling of 906x on equal stakes', 'Exact value'],
+    [
+      [
+        'Combined maximum the four lines can owe',
+        `${paytable.risk.sharedCeilingCounterfactual.combinedMaximumDecimal}x`,
+      ],
+      [
+        'Short-pay if a single 906x ceiling were applied to that sum',
+        `${paytable.risk.sharedCeilingCounterfactual.shortfallDecimal}x`,
+      ],
+      [
+        'COLONY credit needed before the shared ceiling binds at all',
+        `${paytable.risk.sharedCeilingCounterfactual.colonyThresholdDecimal}x`,
+      ],
+      [
+        'Largest total `RUN` can produce (so `RUN` can never bind it)',
+        `${paytable.risk.sharedCeilingCounterfactual.runMaximumDecimal}x`,
+      ],
+      [
+        'Largest total attainable without ever holding this many organisms',
+        `${paytable.risk.sharedCeilingCounterfactual.attainableBelowPeakDecimal}x below a peak of ${paytable.risk.sharedCeilingCounterfactual.minimumPeakPopulation}`,
+      ],
+      [
+        'Upper bound on P(bind), over every adapted policy',
+        `${paytable.risk.sharedCeilingCounterfactual.bindingProbabilityBound} (1 in ${paytable.risk.sharedCeilingCounterfactual.bindingProbabilityBoundOneIn})`,
+      ],
+    ],
+  );
+
+  blocks.layout = table(
+    ['Population `n`', 'Body radius `r(n)`', 'Unclamped', 'Layout radius `R(n)`', 'Innermost body at'],
+    paytable.presentation.layout.rows.map((row) => [
+      String(row.population),
+      `${row.bodyRadius} pt${row.clamped ? ' (clamped)' : ''}`,
+      `${row.bodyRadiusRaw} pt`,
+      `${row.layoutRadius} pt`,
+      `${row.innermostRadius} pt`,
     ]),
   );
 

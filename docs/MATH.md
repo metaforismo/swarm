@@ -19,10 +19,10 @@ npm test                     # re-derive and assert every published number
 <!-- generated:identity -->
 | Identity | Value |
 | --- | --- |
-| Adapter | `swarm-colony-v1` @ `1.1.0` |
-| Paytable schema | `swarm/paytable-v2` |
-| Frozen fixture | `spec/paytable.v2.json` |
-| Fixture sha256 | `60be0abca67ae59045ff2a6e726a6485209151f24a934f495f717420853e7a70` |
+| Adapter | `swarm-colony-v1` @ `1.2.0` |
+| Paytable schema | `swarm/paytable-v3` |
+| Frozen fixture | `spec/paytable.v3.json` |
+| Fixture sha256 | `5adfdbb2c1aa16c8d446f6fab7f3897a4436e9eb1eb89ef824cdd062dca564ea` |
 <!-- /generated:identity -->
 
 ---
@@ -99,10 +99,11 @@ loop t := t + 1 :
 ```
 
 `children(d) = 0` for `d <= 7`, `1` for `8 <= d <= 15`, `2` for `d >= 16`.
-`HARVEST` in the client is `k = floor(n / 2)`; `BANK` is `k = n`; `CONTINUE` is
-`k = 0`. The protocol accepts every `k` in range and the proof covers every `k`,
-so a future client button (`HARVEST ONE`, `HARVEST TWO THIRDS`) needs no new
-mathematics.
+`CONTINUE` is `k = 0`, `BANK` is `k = n`, and `HARVEST` is any `k` strictly
+between them — the client's one-tap default is `floor(n / 2)` and its stepper
+reaches every other value (`docs/DESIGN.md` §4.3). The protocol accepts every
+`k` in range, the proof covers every `k`, and section 11's published volatility
+maximum is attained at `k = 1`, so the client has to be able to express it.
 
 **Slot discipline.** After each resolution the colony is compacted into slots
 `1 ... n`, and a harvest removes the highest-numbered slots. The consequence is
@@ -387,14 +388,37 @@ neither hedges the house edge away nor adds one — two 95% bets combine to 95% 
 the total staked, on a larger total. See `docs/DESIGN.md` §9.4 for the copy rules
 this forces.
 
-### 7.3 When a side bet may be revealed
+### 7.3 Exactly when a side bet may be revealed
 
-Because the wild line never harvests, its population at every generation is at
-least the player's, and the player's organisms occupy a *prefix* of the wild
-line's slots. So the wild line's next population is a sum that **contains** the
-player's next population as a partial sum.
+There is a real leak here and there is a precise boundary to it, and the two are
+one generation apart. Getting the boundary right matters in both directions: a
+rule one generation too loose breaks the invariance theorem, and a rule one
+generation too tight — which is what round 2 shipped — costs a player holding a
+`248.798x` bet every scrap of feedback for an entire round.
 
-That makes early wild-line disclosure a leak of future draws, not a spoiler:
+**Setup.** Write `D(t, s)` for the draw at row `t`, slot `s`. The 270 draws are
+independent uniforms, domain-separated in the sampler payload by their counter
+(`docs/ENGINE.md` §4.1). `N(t)` is the player's population after generation `t`
+and `W(t)` the wild line's; because the wild line never harvests and the player's
+organisms occupy a *prefix* of its slots, `N(t) <= W(t)` for every `t`, by
+induction on the slot discipline in §1.1.
+
+**Lemma (what is safe).** Fix `t`. `W(t)` is a function of row `t` alone:
+`W(t) = sum over s = 1 .. W(t-1) of children(D(t, s))`. The player's future from
+a decision at generation `t` consumes rows `t+1 ... 18`, a disjoint set of draws.
+Rows are independent, so for any adapted policy `pi`
+
+```
+E[ future payout | F(t) , W(1..t) ]  =  E[ future payout | F(t) ]
+```
+
+and conditioning on the wild line **through the generation the player has already
+resolved** changes nothing the theorem in §6 depends on. Disclosing `W(1..t)` at
+a decision at generation `t` is therefore exactly free.
+
+**Lemma (what is not).** `W(t+1)` is a sum over slots `1 ... W(t)` of row `t+1`,
+and the player's own `N(t+1)` is a partial sum of *those same draws*, over slots
+`1 ... N(t)` with `N(t) <= W(t)`. So:
 
 > If a client shows that the wild line goes from 10 organisms to 0 at generation
 > `t + 1` while the player still owes a decision at generation `t`, the player
@@ -403,13 +427,21 @@ That makes early wild-line disclosure a leak of future draws, not a spoiler:
 > generation, `BANK` is now a strictly winning move, and the round no longer
 > returns `19/20`.
 
-**Rule, binding on the protocol and not only the UI:** no wild-line state for
-generation `t + 1` may be computed into a client-visible response, or into any
-message the client can time, before the player's own generation `t + 1` has
-resolved. Side bets are resolved and credited **only at settlement**, after the
-base round has reached a terminal state, and the wild line is derived to its own
-terminal at that point. `advance()` and `harvest()` responses carry no side-bet
-field at all (`docs/ENGINE.md` §5.2).
+**Rule, binding on the protocol and not only the UI:** a response may carry
+wild-line state for generation `t` and every earlier generation once the player's
+own generation `t` has resolved, and may never carry — or vary its timing with —
+wild-line state for a generation the player has not resolved. Side bets are
+*resolved and credited* only at settlement, after the base round has reached a
+terminal state; what a live frame may carry is the wild population it is already
+safe to show (`docs/ENGINE.md` §5.2).
+
+One consequence is worth stating because it reads like a leak and is not. `SWARM`
+pays on the wild line's **peak**, and a peak is monotone, so the moment
+`W(t) >= 10` the bet is decided and the client may say so. That reveals a
+property of rows `1 ... t` only, which the lemma above has already established is
+free. The opposite direction — "SWARM cannot win any more" — is *not* knowable
+early and the client must not imply it, because it would require knowing that no
+later row will reach 10.
 
 ---
 
@@ -599,6 +631,77 @@ process, a higher seed count, a shallower ladder) trades it for a worse property
 What the mathematics *can* do is state it exactly, so the product spec has to
 answer for it. `docs/DESIGN.md` §9.2 is that answer.
 
+### 9.3 A feedback band has to be reachable, and a ratio band is not
+
+`docs/DESIGN.md` §6.5 keys the verdict beat to `D`, the **signed change in colony
+value measured in stake multiples**, and not to the ratio `V(t+1) / V(t)`. That
+is not a taste decision. A ratio band above `+50%` is structurally unreachable in
+the largest colonies, and round 2 of this specification shipped one that was.
+
+**Why the ratio fails.** A verdict beat exists only where a generation resolves
+*without* ending the round: `1 <= m <= 15`, and `t < 18`. Extinction, FULL BLOOM
+and generation 18 go to a terminal screen and skip the beat. A ratio above
+`+50%` means `5m / 4n > 3/2`, i.e. `m > 1.2n`; at `n = 13` that needs `m >= 16`,
+which is FULL BLOOM. So the top ratio band has probability exactly `0.00%` at
+`n = 13`, `14` and `15` — silent in exactly the colonies whose gains are largest
+— while at `n = 1` it fires on `20.00%` of generations, because tripling a
+`0.3958x` position clears the same bar as tripling a `5x` one.
+
+**Why `D` does not.** `D = c(t+1)m - c(t)n = c(t)(5m/4 - n)`, and `c(t)` climbs
+25% per generation, so a large absolute gain is reachable from every live
+population. The largest gain each population can carry as a verdict beat, and the
+first generation at which the large-gain band opens there:
+
+<!-- generated:verdict-reach -->
+| Population `n` | Largest non-terminal offspring `m` | Largest `D` a verdict beat can carry | First generation that can reach `D >= 1.00x` |
+| --- | --- | --- | --- |
+| 1 | 2 | 16.875389x | 5 |
+| 2 | 4 | 33.750779x | 2 |
+| 3 | 6 | 50.626169x | 2 |
+| 4 | 8 | 67.501559x | 2 |
+| 5 | 10 | 84.376949x | 2 |
+| 6 | 12 | 101.252339x | 2 |
+| 7 | 14 | 118.127729x | 2 |
+| 8 | 15 | 120.940294x | 2 |
+| 9 | 15 | 109.690034x | 2 |
+| 10 | 15 | 98.439774x | 2 |
+| 11 | 15 | 87.189514x | 2 |
+| 12 | 15 | 75.939254x | 2 |
+| 13 | 15 | 64.688994x | 2 |
+| 14 | 15 | 53.438734x | 2 |
+| 15 | 15 | 42.188474x | 2 |
+<!-- /generated:verdict-reach -->
+
+Every row reaches the `+1.00x` band, which is what the ratio bands could not
+manage, and the enumeration **fails the build** if any row ever stops doing so.
+
+**The chord ladder.** The verdict chord climbs one semitone per `3/2` of gain,
+from `+0` at a one-stake gain to `+7` at `(3/2)^7 = 2187/128 = 17.0859375`
+stakes. Each note's exact frequency, over the wild-line occupancy — so this
+answers "how often does a player hear it", not "how many cells of the state space
+contain it":
+
+<!-- generated:chord-ladder -->
+| Note | `D` at least | Share of verdict beats | One in | Per round | Reachable from |
+| --- | --- | --- | --- | --- | --- |
+| +0 | `1/1` = 1.0000000x | 19.39% | 5.15 | 0.94066875 | generation 2, 237 states |
+| +1 | `3/2` = 1.5000000x | 12.08% | 8.27 | 0.58628803 | generation 2, 232 states |
+| +2 | `9/4` = 2.2500000x | 8.11% | 12.32 | 0.39352677 | generation 2, 226 states |
+| +3 | `27/8` = 3.3750000x | 4.84% | 20.62 | 0.23518390 | generation 2, 209 states |
+| +4 | `81/16` = 5.0625000x | 2.86% | 34.85 | 0.13917601 | generation 3, 182 states |
+| +5 | `243/32` = 7.5937500x | 1.53% | 65.31 | 0.07426139 | generation 5, 152 states |
+| +6 | `729/64` = 11.3906250x | 0.76% | 130.48 | 0.03717082 | generation 7, 124 states |
+| +7 | `2187/128` = 17.0859375x | 0.29% | 333.88 | 0.01452676 | generation 9, 99 states |
+<!-- /generated:chord-ladder -->
+
+A RUN round contains `4.85032978` verdict beats on average — the expected round
+length minus its one terminal generation — so a player hears the top note about
+once every 69 rounds (`1 / 0.01452676`, an expected count rather than a
+probability, though at this frequency the two barely differ). Every step is asserted to have strictly positive probability and at
+least one reachable state; `chordLadder()` in `tools/lib/presentation.mjs` throws
+`INVALID_PRESENTATION` otherwise, which is the check that was missing when the
+old top band went silent.
+
 ---
 
 ## 10. Why 95%
@@ -663,6 +766,13 @@ harvests exactly one organism whenever the colony reaches 15, which dodges the
 FULL BLOOM force-settle and keeps the round alive for a heavier tail. It returns
 `19/20`, like everything else.
 
+**The client can reach both ends of that interval.** `HARVEST ONE` is not a
+hypothetical button: `thinning.clientQuantum` is `any`, and `docs/DESIGN.md` §4.3
+puts a stepper on the harvest control that reaches every legal `k`. A published
+range whose maximum no player could select would be an honest sentence about a
+product that does not exist, which is why the adapter changed rather than the
+sentence.
+
 Expected round length under RUN is `5.85032978` generations; policies that bank
 early are shorter, which matters for session pacing (docs/DESIGN.md).
 
@@ -709,19 +819,44 @@ total over its cap fails the build.
 ### 12.1 Why the cap basis is per line and not per ticket
 
 A single round-level ceiling applied to the sum of all credits would be the
-obvious design and it is wrong. On equal stakes the four lines can owe
+obvious design and it is wrong. Exactly how wrong, and exactly how often:
 
-```
-905.776494 + 248.798505 + 4.750000 + 2.689446 = 1162.014445 x
-```
+<!-- generated:shared-cap -->
+| Quantity, under one shared ticket ceiling of 906x on equal stakes | Exact value |
+| --- | --- |
+| Combined maximum the four lines can owe | 1162.014446x |
+| Short-pay if a single 906x ceiling were applied to that sum | 256.014446x |
+| COLONY credit needed before the shared ceiling binds at all | 649.762047x |
+| Largest total `RUN` can produce (so `RUN` can never bind it) | 527.355936x |
+| Largest total attainable without ever holding this many organisms | 638.035863x below a peak of 14 |
+| Upper bound on P(bind), over every adapted policy | 1.96449e-04 (1 in 5090.36) |
+<!-- /generated:shared-cap -->
 
-against a 906x ceiling, so the cap would bind and short-pay `256.014445x` — and
-it would bind on a `1 in 261.89` event, not a tail event. Worse, nothing relates
-a side-bet stake to the colony stake, so a shared basis makes the payout of one
-bet depend on the size of a different bet: a `0.10` credit colony bet next to a
-`100.00` credit SWARM bet would pay 0.4% of what SWARM owes.
+Read that carefully, because the round-2 text got the frequency wrong and it is
+worth being precise about which number belongs to which scenario.
 
-Per-line bases remove all of it. Each line's cap is proven above that line's own
+**On equal stakes** a shared ceiling is a real short-pay but a rare one. The four
+lines can jointly owe `1162.014446x`, so a single `906x` ceiling would truncate
+`256.014446x`. But binding requires the COLONY line *alone* to credit more than
+`649.762047x`, and that is a tail event twice over: `RUN` cannot produce it at
+all, because `RUN`'s largest possible total is the largest single settlement,
+`527.355936x`; and no policy can produce it without the colony reaching 14
+organisms, because the largest total attainable while never holding 14 is
+`638.035863x`. The player's population never exceeds the wild line's (§7.3), so
+`P(bind | equal stakes) <= P(peak >= 14) = 1.96449e-04`, one round in 5,090. The
+round-2 text attached `1 in 261.89` to this event; that is `P(SWARM wins)`, which
+belongs to the **unequal**-stake case below and is correct only there.
+
+**On unequal stakes it is not rare at all, and that is the real argument.**
+Nothing relates a side-bet stake to the colony stake, so a shared basis makes the
+payout of one bet depend on the size of a different bet: a `0.10` credit colony
+bet next to a `100.00` credit SWARM bet would have a ceiling of `90.6` credits
+against a `24,879.85` credit obligation, and would pay 0.4% of what SWARM owes —
+on a `1 in 261.89` event, which is emphatically not a tail. A design whose
+failure mode is "the small bet you placed silently caps the large bet you placed"
+is not a risk control, it is a bug with a ceiling in front of it.
+
+Per-line bases remove both cases. Each line's cap is proven above that line's own
 maximum, so:
 
 - no credit is ever truncated, on any line, at any stake ratio;
@@ -776,6 +911,35 @@ than after a win.
   hostile inputs (zero and negative stakes, non-BigInt stakes, non-BigInt cap
   multiples, absurd multipliers).
 
+### 13.1 Lemma — a round can never settle at exactly one stake
+
+The settlement ceremony has to tell a player whether they finished up or down
+(`docs/DESIGN.md` §7.1), so the boundary between the two had better not be a
+value a round can land on.
+
+**Claim.** No reachable round total equals exactly `1` stake.
+
+**Proof.** Every credit is `c(t) * k` for some generation `t` and some
+`1 <= k <= 30`, and
+
+```
+c(t) * k = 19 * 5^(t-1) * k / (3 * 2^(2t + 2))
+```
+
+The denominator is a product of `2`s and a `3`, so the factor `19` in the
+numerator can never cancel: every single credit, in lowest terms, has a numerator
+divisible by `19` and a denominator coprime to it. A round total is a sum of such
+values over a common denominator that is still a product of `2`s and a `3`, so it
+is `19a / b` with `19` not dividing `b`. Setting `19a / b = 1` would require
+`19a = b`, and `19` does not divide `b`. ∎
+
+`stakeBoundaryIsUnreachable()` in `tools/lib/model.mjs` checks the invariant
+mechanically over all 540 reachable single credits rather than trusting the
+argument, so a future ladder that lost the property would fail the build. The
+consequence for the product: `P(total <= 1 stake)` and `P(total < 1 stake)` are
+the same number, and the settlement ceremony's loss/win split has no ambiguous
+case to design for.
+
 ---
 
 ## 14. Reproducing every number
@@ -788,16 +952,23 @@ than after a win.
 | Every cap sits above its own line's maximum | `npm run enumerate` (section 11 of the report) |
 | Split celebration would fire on losing generations | `npm run enumerate` (section 12 of the report) |
 | What FULL BLOOM actually pays | `npm run enumerate` (section 13 of the report) |
+| Every note of the audio hook is reachable | `npm run enumerate` (section 14 of the report) |
+| How often a round settles below the stake | `npm run enumerate` (section 15 of the report) |
+| A shared ticket ceiling would short-pay, and how rarely | `npm run enumerate` (section 16 of the report) |
+| The colony layout contract | `npm run enumerate` (section 17 of the report) |
 | Published tables equal the model | `npm test` |
 | Generated tables in the docs are current | `npm run docs:check` |
 | Frozen fixture is byte-identical | `npm run paytable:check` |
-| Simulation agrees with enumeration | `npm run simulate` |
+| Simulation agrees with enumeration, and a forged action log is rejected | `npm run simulate` |
 | Every terminal state and its probability | `npm run enumerate:terminals` |
 
 The Monte Carlo simulator exists only as a cross-check on the written rules; it
 never sources a published number. At 50,000 deterministic rounds under RUN it
-returns an empirical RTP of 0.983942 against the exact 0.95 (1.00 standard
-errors) and a mean round length of 5.8351 against the exact 5.85032978.
+returns an empirical RTP of 0.986507 against the exact 0.95 (1.08 standard
+errors, on a policy whose standard deviation is 7.57) and a mean round length of
+5.8415 against the exact 5.85032978. The same run settles one ticket end to end,
+publishes both commitment phases, and then re-publishes it under a forged action
+log so the verifier can be seen refusing it.
 
 ---
 
@@ -808,10 +979,34 @@ certification. No RNG certification, no laboratory approval, no jurisdictional
 analysis, and no production RTP measurement exists for SWARM. The exactness
 claims in this document are claims about *this model and this code*: that the
 published paytable is the enumerated paytable, that the arithmetic is exact, and
-that the strategy proof is exhaustive over the declared state space. Deploying
-this game for real money would require independent RNG and seed-custody review,
-an operator wallet and idempotency audit, jurisdictional review, and whatever
-laboratory process applies — none of which this repository performs or replaces.
+that the strategy proof is exhaustive over the declared state space.
+
+Four fairness controls sit outside those claims and are named here rather than
+left to be inferred:
+
+- **Seed selection.** Commit-reveal proves a seed was fixed before the round; it
+  does not prove *how that seed was chosen*. An operator can generate many seeds,
+  inspect the grid each one produces and publish the convenient one — and SWARM's
+  exposure to that is structurally worse than a generic round, because the entire
+  270-draw grid is a pure function of one seed and one grind target
+  (`P = (2/5)^3 = 0.064`, about 16 attempts) zeroes the colony, loses FIRST LIGHT
+  and loses SWARM at the same time. Client entropy (`docs/ENGINE.md` §4.5) is the
+  control, and it works only if the publication order it depends on is actually
+  enforced by the operator's storage. Reveal Engine's own threat model marks seed
+  grinding "not closed here"; this repository inherits that and does not paper
+  over it. Seed **custody** — who can read a sealed seed before reveal — is a
+  separate and equally unaudited control.
+- **The action log against a third party.** The two-phase commitment makes two
+  settlements of one round publicly distinguishable, and the live action chain
+  gives a player pre-reveal evidence of their own decisions. Neither produces a
+  log a third party can verify without the player retaining what they were handed
+  (`docs/ENGINE.md` §8).
+- **Everything the client does with all this.** No client exists in this
+  repository, so no claim here is evidence about a shipped user interface.
+- **Operator infrastructure.** Deploying this game for real money would require
+  independent RNG and seed-custody review, an operator wallet and idempotency
+  audit, jurisdictional review, and whatever laboratory process applies — none of
+  which this repository performs or replaces.
 
 The market claims in `docs/DESIGN.md` §1.1 are desk observation of publicly
 described competitor behaviour, not a commissioned competitive audit, and are

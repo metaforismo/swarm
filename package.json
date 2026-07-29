@@ -11,8 +11,8 @@
   "scripts": {
     "enumerate": "node tools/enumerate.mjs",
     "enumerate:terminals": "node tools/enumerate.mjs --terminals",
-    "paytable:write": "node tools/enumerate.mjs --json spec/paytable.v2.json",
-    "paytable:check": "node tools/enumerate.mjs --check spec/paytable.v2.json",
+    "paytable:write": "node tools/enumerate.mjs --json spec/paytable.v3.json",
+    "paytable:check": "node tools/enumerate.mjs --check spec/paytable.v3.json",
     "docs:sync": "node tools/syncdocs.mjs",
     "docs:check": "node tools/syncdocs.mjs --check",
     "simulate": "node tools/simulate.mjs --rounds 50000 --policy RUN",

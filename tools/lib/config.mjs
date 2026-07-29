@@ -12,17 +12,53 @@ import { rat, multiply, divide, add, power, compare, fail, ONE } from './rationa
 export const ADAPTER_ID = 'swarm-colony-v1';
 /**
  * 1.1.0 replaced the single round-level max-win multiple with one cap basis per
- * bet line and bound the side-bet caps into the adapter fingerprint. That is a
- * replay-visible change to the money path, so it takes a new adapter version and
- * a new fingerprint, exactly as docs/ENGINE.md §2 requires.
+ * bet line and bound the side-bet caps into the adapter fingerprint.
+ *
+ * 1.2.0 changed the derivation and the proof: player-supplied client entropy now
+ * enters every draw, the single-phase commitment became the mandatory two-phase
+ * scheme (seed pre-commitment before the first decision, settlement body
+ * commitment binding the action log), and the harvest quantum opened from
+ * `floor-half` to any legal `k`. All of that is replay-visible, so it takes a
+ * new adapter version, a new fingerprint and a re-frozen fixture, exactly as
+ * docs/ENGINE.md §2 requires.
  */
-export const ADAPTER_VERSION = '1.1.0';
-/** v2 added the risk, bloom, feedback, break-even and variance-bound sections. */
-export const PAYTABLE_SCHEMA = 'swarm/paytable-v2';
+export const ADAPTER_VERSION = '1.2.0';
+/**
+ * v2 added the risk, bloom, feedback, break-even and variance-bound sections.
+ * v3 added the presentation contracts (verdict bands, chord ladder, settlement
+ * classes, colony layout), the shared-cap binding bound, and the stake-boundary
+ * lemma — every number docs/DESIGN.md used to assert by hand.
+ */
+export const PAYTABLE_SCHEMA = 'swarm/paytable-v3';
 /** The Reveal Engine lifecycle module this adapter targets (docs/ENGINE.md). */
 export const MODULE_API = 'reveal-engine/staged-survival-v1';
 /** Adapter-owned promise: unchanged identity means unchanged draw behaviour. */
 export const COHORT_MODEL_VERSION = 'swarm-cohort/v1';
+
+/**
+ * Commit-reveal identities. Two phases, because SWARM's transcript depends on
+ * player decisions: phase 1 seals the server seed before the round accepts a
+ * decision, phase 2 seals the settled body — seed, client entropy, resolved
+ * populations, the ordered action log and the per-line credit ledger — at
+ * settlement. Reveal Engine's module contract makes the pair mandatory for any
+ * choice-timed module; see docs/ENGINE.md §4.
+ */
+export const SEED_COMMITMENT_VERSION = 'reveal-engine/stage-seed-commit-v1';
+export const BODY_COMMITMENT_VERSION = 'reveal-engine/stage-body-commit-v1';
+/** Domain tag of the draw sampler. Bumped with 1.2.0 because client entropy joined the payload. */
+export const SAMPLER_DOMAIN = 'reveal-engine/stage-draw-v2';
+/** Domain tag of the live action chain the client accumulates during the round. */
+export const ACTION_CHAIN_DOMAIN = 'reveal-engine/stage-action-chain-v1';
+/** Player-supplied entropy contributed to every draw, in bytes. */
+export const CLIENT_ENTROPY_BYTES = 32;
+/**
+ * The harvest quantum the client exposes. `any` means every legal `k` in
+ * `[0, n]` is reachable from the UI, not only `floor(n/2)`: the proof covers
+ * every `k` and docs/MATH.md §11 publishes a volatility interval whose maximum
+ * is attained by harvesting exactly one organism, so a client that could not
+ * express it would be publishing a range it could not sell.
+ */
+export const HARVEST_QUANTUM = 'any';
 
 /**
  * One uniform draw per organism per generation, over a modulus of 20.
@@ -216,6 +252,12 @@ export const CONFIG = Object.freeze({
   adapterId: ADAPTER_ID,
   adapterVersion: ADAPTER_VERSION,
   paytableSchema: PAYTABLE_SCHEMA,
+  seedCommitmentVersion: SEED_COMMITMENT_VERSION,
+  bodyCommitmentVersion: BODY_COMMITMENT_VERSION,
+  samplerDomain: SAMPLER_DOMAIN,
+  actionChainDomain: ACTION_CHAIN_DOMAIN,
+  clientEntropyBytes: CLIENT_ENTROPY_BYTES,
+  harvestQuantum: HARVEST_QUANTUM,
   drawModulus: DRAW_MODULUS,
   offspring: OFFSPRING,
   seedCount: SEED_COUNT,

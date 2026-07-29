@@ -7,9 +7,9 @@ SWARM does not fit the progressive-information-market core that Reveal Engine
 **Status, stated plainly: this module does not exist in Reveal Engine 0.2.**
 Nothing here is implemented in the engine repository yet. This is the contract
 SWARM is written against; `tools/simulate.mjs` in this repository is a working
-reference implementation of the derivation, the side-bet resolution and the
-settlement ledger, and `tools/lib/model.mjs` is a working reference
-implementation of the pricing.
+reference implementation of the derivation, the two-phase commitment, the
+side-bet resolution, the settlement ledger and the verifier, and
+`tools/lib/model.mjs` is a working reference implementation of the pricing.
 
 ---
 
@@ -30,12 +30,19 @@ SWARM breaks three of those assumptions:
 | The full transcript is fixed at commit time | The player's harvests change **how many draws are consumed per stage**, so the consumed transcript is action-dependent |
 | Continuation is optional and out of scope | Staged continuation *is* the game, and the ride ledger must be first-class |
 
+That third row is the load-bearing one. In Reveal Engine's own vocabulary SWARM
+is a **choice-timed** module (`choiceTiming: 'before-step'`), and the module
+contract makes one thing mandatory for those: a **two-phase** commitment.
+Section 4 is that scheme. Round 2 of this specification shipped phase 1 only and
+asserted that the receipt ledger closed the gap; it does not, and section 4.6
+says so in the same words the finding used.
+
 What SWARM does share with the existing core, and must reuse verbatim rather
 than re-implement: exact `Rational` arithmetic, `payable()` /
 `payableWithinCap()`, the canonical length-prefixed `encodeFields` encoding,
-domain-separated rejection sampling (`uniformBigInt`), the `RevealEngineError`
-code taxonomy, `ENGINE_LIMITS`, and the frame-revision / idempotency / receipt
-discipline of `RoundBook`.
+domain-separated rejection sampling (`uniformBigInt`), constant-time digest
+comparison, the `RevealEngineError` code taxonomy, `ENGINE_LIMITS`, and the
+frame-revision / idempotency / receipt discipline of `RoundBook`.
 
 ---
 
@@ -44,27 +51,43 @@ discipline of `RoundBook`.
 | Identity | Value | Change rule |
 | --- | --- | --- |
 | Module API | `reveal-engine/staged-survival-v1` | New value for any breaking runtime or type contract |
-| Adapter | `swarm-colony-v1` @ `1.1.0` | New `adapterVersion` for any replay-visible change |
+| Adapter | `swarm-colony-v1` @ `1.2.0` | New `adapterVersion` for any replay-visible change |
 | Cohort model | `swarm-cohort/v1` | New value for any change to draw bands or child counts |
-| Commitment | `reveal-engine/stage-commit-v1` | New rounds use current; older values verification-only |
+| Seed pre-commitment | `reveal-engine/stage-seed-commit-v1` | Phase 1. New rounds use current; older values verification-only |
+| Settlement body commitment | `reveal-engine/stage-body-commit-v1` | Phase 2. Same rule |
+| Draw sampler domain | `reveal-engine/stage-draw-v2` | New value for any change to the sampler payload |
+| Action chain domain | `reveal-engine/stage-action-chain-v1` | New value for any change to the live chain |
 | Transcript | `reveal-engine/stage-transcript-v1` | Bounded migration parser, fail closed on unknown |
 | Receipt | `receipt-v2` | Immutable money-movement record; v2 added `line` and `direction` |
 | Snapshot | `stage-book-v1` | Reject unknown versions |
-| Paytable fixture | `swarm/paytable-v2` | Regenerated and re-frozen with any of the above |
+| Paytable fixture | `swarm/paytable-v3` | Regenerated and re-frozen with any of the above |
 
 **Adapter changelog.** `1.1.0` replaced the single round-level max-win multiple
-with **one cap basis per bet line**, gave every side bet its own stake and its
-own declared cap, and bound those caps into the adapter fingerprint. That is a
-change to what a round can credit, so it is replay-visible and takes a new
-adapter version, a new fingerprint and a re-frozen fixture — which is the change
+with **one cap basis per bet line**. `1.2.0` changed the proof surface and the
+derivation:
+
+- player-supplied **client entropy** enters every draw (§4.1, §4.5);
+- the single-phase commitment became the mandatory **two-phase** scheme, with a
+  settlement body that seals the action log (§4.2, §4.3);
+- a **live action chain** is returned with every frame, so the player holds a
+  pre-reveal witness of their own decision log (§4.3);
+- the harvest quantum opened from `floor-half` to **any legal `k`** (§3, and
+  [MATH.md §11](MATH.md), whose published volatility maximum needs it);
+- the wild line became disclosable **one generation behind the player's own**
+  (§5.2), which is what the leak argument actually permits.
+
+Every one of those is replay-visible, so all of them take one new adapter
+version, one new fingerprint and one re-frozen fixture — which is the change
 rule above being used rather than described.
 
 The adapter fingerprint binds: module API, adapter id and version, cohort model
-version, draw modulus, every outcome band `(id, children, weight)` in order,
-seed units, stage count, both thresholds, ladder base and step, target RTP,
-rounding mode, the colony cap, and every side-bet line with its own cap in
-declaration order. Changing any of them changes the fingerprint, and a
-transcript is only verifiable against the fingerprint it was produced under.
+version, **both commitment versions, the sampler domain, the action-chain domain
+and the client-entropy width**, draw modulus, every outcome band
+`(id, children, weight)` in order, seed units, stage count, both thresholds, the
+harvest quantum, ladder base and step, target RTP, rounding mode, the colony cap,
+and every side-bet line with its own cap in declaration order. Changing any of
+them changes the fingerprint, and a transcript is only verifiable against the
+fingerprint it was produced under.
 
 ---
 
@@ -107,10 +130,30 @@ export interface StageThresholds {
 export interface ThinningPolicy {
   /** Whether HARVEST exists at all. */
   readonly allowPartial: boolean;             // true
-  /** The affordance a client should expose. The protocol always accepts any legal k. */
-  readonly clientQuantum: 'floor-half' | 'any';
+  /**
+   * The affordance a client must expose. `any` means every legal k in [0, n] is
+   * reachable from the UI. It is `any` and not `floor-half` because MATH.md §11
+   * publishes a volatility interval whose maximum is attained by harvesting
+   * exactly one organism, and a published range the client cannot reach is a
+   * range the product does not actually offer.
+   */
+  readonly clientQuantum: 'any';
   /** Units are removed from the highest slots and the colony is recompacted. */
   readonly removal: 'highest-slots';
+}
+
+/** Player entropy contributed to the derivation. See section 4.1 and 4.5. */
+export interface EntropyPolicy {
+  /** Width of the player's contribution. Rejected if it is not exactly this. */
+  readonly clientEntropyBytes: number;   // 32
+  /** Mandatory: a round cannot open without one. */
+  readonly required: true;
+  /**
+   * The client generates one by default and the player may replace it before
+   * SEED. It is published in the clear with the round, because its only job is
+   * to be chosen after the seed commitment.
+   */
+  readonly playerEditable: boolean;      // true
 }
 
 /**
@@ -138,6 +181,7 @@ export interface StagedSurvivalDefinition {
   readonly ladder: LadderPolicy;
   readonly thresholds: StageThresholds;
   readonly thinning: ThinningPolicy;
+  readonly entropy: EntropyPolicy;
   readonly sideBets: readonly SideBetDefinition[];
   readonly pricing: {
     readonly targetRtp: Rational;     // 19/20
@@ -161,7 +205,7 @@ export interface StagedSurvivalDefinition {
   readonly lifecycle: {
     /**
      * A round with no player command for this long is reconciled by a forced
-     * BANK (§5.4). There is still no timer inside a live session: this is four
+     * BANK (§5.5). There is still no timer inside a live session: this is four
      * orders of magnitude above any human decision latency.
      */
     readonly abandonedRoundTimeoutHours: number;   // 72
@@ -218,6 +262,15 @@ export function assertLadderIsFair(game: StagedSurvivalDefinition): void;
  * could truncate a credit can be defined at all.
  */
 export function assertRiskIsHeadroom(game: StagedSurvivalDefinition): void;
+
+/**
+ * The proof contract, checked mechanically at definition time. A choice-timed
+ * definition must declare both commitment phases and a client-entropy width, and
+ * `defineStagedSurvival()` refuses to build one that does not — the same refusal
+ * `defineLifecycleModule()` performs in the engine, applied one level down at
+ * the adapter.
+ */
+export function assertCommitmentIsTwoPhase(game: StagedSurvivalDefinition): void;
 ```
 
 `assertLadderIsFair` is the reason this module can be trusted with a new game
@@ -225,15 +278,16 @@ configuration: an adapter whose ladder does not exactly cancel its cohort drift
 cannot be defined at all, so no future title built on this module can ship a
 silently policy-dependent RTP. `assertRiskIsHeadroom` is the reason it can be
 trusted with money: a cap that could bite would break the invariance theorem
-([MATH.md §12](MATH.md)), and the only way to be sure it cannot bite is to prove
-it from the model on every build.
+([MATH.md §12](MATH.md)). `assertCommitmentIsTwoPhase` is the reason it can be
+trusted with a decision: a choice-timed round whose body does not bind its own
+action log has a verifier that verifies nothing about what the player did.
 
 ### 3.2 The SWARM adapter
 
 ```ts
 export const swarmColonyV1 = defineStagedSurvival({
   apiVersion: STAGED_SURVIVAL_API,
-  adapterVersion: '1.1.0',
+  adapterVersion: '1.2.0',
   id: 'swarm-colony-v1',
   seedUnits: 3,
   cohort: {
@@ -248,7 +302,8 @@ export const swarmColonyV1 = defineStagedSurvival({
   },
   ladder: { base: rational(19n, 48n), step: rational(5n, 4n), stages: 18 },
   thresholds: { settleAtOrAbove: 16, maxUnits: 30 },
-  thinning: { allowPartial: true, clientQuantum: 'floor-half', removal: 'highest-slots' },
+  thinning: { allowPartial: true, clientQuantum: 'any', removal: 'highest-slots' },
+  entropy: { clientEntropyBytes: 32, required: true, playerEditable: true },
   sideBets: [
     {
       id: 'FIRST_LIGHT',
@@ -285,7 +340,19 @@ export const swarmColonyV1 = defineStagedSurvival({
 
 ---
 
-## 4. Derivation and commitment
+## 4. Derivation and the two-phase commitment
+
+SWARM's transcript is a function of the player's decisions, so it does not exist
+when the round opens. One commitment cannot cover both "the seed predates every
+decision" and "this settlement is the settlement of that decision log": the
+first must be published before the round, the second cannot be computed until
+after it. The scheme is therefore two-phase, and both phases are mandatory.
+
+| Phase | Published | Binds | Attack it closes |
+| --- | --- | --- | --- |
+| 1 — seed pre-commitment | before the round opens | the server seed, adapter identity and fingerprint, round id, grid shape | the operator choosing a seed after seeing a decision |
+| live — action chain | with every frame, during the round | every frame the client has observed, folded in order | the operator rewriting a log the player already witnessed |
+| 2 — settlement body | at settlement, with the revealed seed | the seed, the client entropy, every resolved population, **the ordered action log**, the terminal, the wild line, every side-bet resolution and the whole per-line credit ledger | one published commitment being settled two mutually inconsistent ways |
 
 ### 4.1 The draw grid
 
@@ -295,6 +362,14 @@ SWARM, `18 x 15 = 270` — indexed by stage and slot:
 ```ts
 export function drawIndex(game: StagedSurvivalDefinition, stage: number, slot: number): number;
 // (stage - 1) * (thresholds.settleAtOrAbove - 1) + (slot - 1)
+
+export interface StageContext {
+  readonly gameId: string;
+  readonly roundId: string;
+  /** 32 bytes of player entropy, lowercase hex. Chosen after phase 1. */
+  readonly clientEntropy: string;
+  readonly proofVersion: 'reveal-engine/stage-draw-v2';
+}
 
 export function stageDraw(
   seedHex: string,
@@ -307,10 +382,18 @@ export function stageDraw(
 ```
 
 `uniformBigInt` is the engine's existing exact rejection sampler: a
-domain-separated HMAC-SHA256 over the canonical field vector
-`['sampler', commitmentVersion, gameId, roundId, label, counter, nonce, modulus]`,
+domain-separated HMAC-SHA256, keyed by the server seed, over the canonical field
+vector
+
+```
+['sampler', samplerDomain, adapterId, adapterVersion, adapterFingerprint,
+ roundId, clientEntropy, label, counter, nonce, modulus]
+```
+
 retried until the 256-bit value falls below `2^256 - (2^256 mod modulus)`. No
-modulo bias, no floats, no wall-clock input.
+modulo bias, no floats, no wall-clock input. **The client entropy is a payload
+field, not a key**, so the server seed remains the only secret and the player's
+contribution is public from the moment the round opens.
 
 At stage `t` with `n` units entering, slots `1 ... n` are consumed. Harvest
 removes the highest slots and recompacts, so the number of draws a stage
@@ -318,17 +401,16 @@ consumes is the population, and the population alone.
 
 **The wild line** is the same grid replayed with an empty action log, so it
 always occupies slots `1 ... W(t)` with `W(t) >= N(t)`, and the player's units
-sit in a *prefix* of the wild line's slots. That containment is why §5.2
-forbids revealing wild-line state early: it is not a spoiler, it is a disclosure
-of draws the player has not yet consumed ([MATH.md §7.3](MATH.md)).
+sit in a *prefix* of the wild line's slots. §5.2 turns that containment into the
+exact rule for when wild-line state may be shown.
 
-### 4.2 Commitment
+### 4.2 Phase 1 — the seed pre-commitment
 
 ```
-commitment = sha256(encodeFields([
-  'Axiom Games SWARM commitment',
-  'reveal-engine/stage-commit-v1',
-  seedBytes,                       // 32 bytes
+seedCommitment = sha256(encodeFields([
+  'Axiom Games SWARM seed pre-commitment',
+  'reveal-engine/stage-seed-commit-v1',
+  seedBytes,                       // 32 bytes, unrevealed
   game.id,
   game.adapterVersion,
   stagedSurvivalFingerprint(game),
@@ -339,45 +421,149 @@ commitment = sha256(encodeFields([
 ]))
 ```
 
-**This commits the seed and the grid shape, not the consumed transcript.** That
-is a deliberate difference from `commit-v2`, and it is sound: the entire grid is
-a deterministic function of the committed seed and the fingerprinted adapter, so
-the operator cannot change a single draw after publication, whatever the player
-does. What the player's actions determine is only *which* committed draws their
-colony meets. The action log is bound separately by the receipt ledger and the
-frame fence (§5), so an operator cannot rewrite history in either direction.
+It binds the seed and the frozen economics and discloses nothing — it is a hash
+of an unrevealed 32-byte seed. It deliberately does **not** bind the client
+entropy, because the entropy does not exist yet, and that ordering is the entire
+point: the seed is sealed first, the player contributes second, and neither side
+can see the other's choice before making its own.
+
+It must be durably published before the round opens and before any
+seed-dependent information reaches the client. The seed is revealed only at
+settlement — including settlement by reconciliation (§5.5).
 
 `adapterFingerprint()` in `tools/simulate.mjs` is the reference implementation
 of `stagedSurvivalFingerprint` for this adapter, binding exactly the field list
-in §2. For `swarm-colony-v1 @ 1.1.0` it is
+in §2. For `swarm-colony-v1 @ 1.2.0` it is
 
 ```
-598cf417489aea9710f37026d6814da8f390fde2db532c5e3ce06fa3760150e4
+e0bd79dff89e025d62a41bf611c2f456f6e6375fa8201af40c6ee0d988e34ecc
 ```
 
 and `tests/derivation.test.mjs` freezes it, so any change to the offspring
-bands, the ladder, the thresholds, the target RTP or any line's cap changes the
-fingerprint and fails the build until the adapter version is bumped with it.
-(The `1.0.0` fingerprint was `0ce06d9c…`; it is listed here only so that a
-transcript produced under it can be identified, never replayed as current.)
+bands, the ladder, the thresholds, the target RTP, the commitment scheme or any
+line's cap changes the fingerprint and fails the build until the adapter version
+is bumped with it. (The `1.0.0` fingerprint was `0ce06d9c…` and the `1.1.0`
+fingerprint was `598cf417…`; they are listed here only so that a transcript
+produced under either can be identified, never replayed as current.)
 
-The commitment must be durably published before the round opens and before any
-seed-dependent information reaches the client. The seed is revealed only at
-settlement — including settlement by reconciliation (§5.4).
+### 4.3 Live — the action chain
 
-### 4.3 Verification algorithm
+Between the two phases the round is running, the seed is still sealed, and the
+player is making decisions. The action chain is the witness they accumulate
+while that is true.
 
-Given `{ commitment, revealedSeed, roundId, adapter, actionLog, receipts }` a
-verifier must:
+```
+chain(0) = seedCommitment
+chain(i) = sha256(encodeFields([
+  'reveal-engine/stage-action-chain-v1',
+  chain(i - 1),
+  i - 1,                 // event index
+  event.kind,            // 'RESOLVE' | 'CONTINUE' | 'HARVEST' | 'BANK'
+  event.generation,
+  event.value,           // resolved population, or units harvested
+]))
+```
+
+The event sequence is exactly what the client observed, in order: one `RESOLVE`
+per generation that resolved, one action event per decision the player made.
+`chain(i)` is returned on the `StageFrame` of command `i`, so a client that
+retains the values it was handed holds a hash chain over its own decision log
+that predates the seed reveal. An operator that later re-writes the log cannot
+produce a chain the player's retained values are a prefix of.
+
+### 4.4 Phase 2 — the settlement body commitment
+
+Published at settlement, together with the revealed seed:
+
+```
+bodyCommitment = sha256(encodeFields([
+  'Axiom Games SWARM settlement body',
+  'reveal-engine/stage-body-commit-v1',
+  seedCommitment,                          // ties phase 2 to phase 1
+  seedBytes,                               // now revealed
+  clientEntropyBytes,
+  game.id, game.adapterVersion, stagedSurvivalFingerprint(game), roundId,
+  colonyStakeUnits,
+  sideBetCount, ...(id, stakeUnits or 0) per declared side bet, in order,
+  resolvedGenerationCount, ...(stage, units) per resolved generation, in order,
+  actionCount, ...(stage, kind, units) per logged action, in order,
+  terminalReason, terminalStage, terminalUnits,
+  wildStageCount, ...wild units per stage, wildPeak, wildTerminal,
+  sideBetResultCount, ...(id, 'WON' | 'LOST' | 'NOT_SELECTED') in order,
+  receiptCount, ...(sequence, kind, line, direction, stage, amountUnits,
+                    unitsHarvested, resolved, theoretical) per receipt, in order,
+  chainTerminal,                           // the last action-chain value
+]))
+```
+
+**This is the phase round 2 did not have, and its absence was the finding.** The
+previous text committed only the seed and the grid shape, and defended the
+omission with "the action log is bound separately by the receipt ledger and the
+frame fence". Nothing supported that: the verifier took the action log as an
+input and reconciled it against the receipt ledger, which is the same
+operator-supplied artifact, and no receipt was signed. One published commitment
+could be settled under many mutually inconsistent logs and every artifact would
+still verify. With the body commitment, two settlements of one seed
+pre-commitment produce two different, publicly distinguishable digests.
+
+`bodyCommitment()` and `actionChain()` in `tools/simulate.mjs` are the reference
+implementations, and `npm run simulate` prints the attack being rejected: the
+same seed settled under two different logs, and the verifier refusing the
+mismatch.
+
+### 4.5 What client entropy is for
+
+Deterministic derivation stops an operator from changing a draw after publishing
+a commitment. It does **not** stop an operator from generating many seeds,
+looking at the grid each one produces, and publishing the convenient one. Reveal
+Engine's own threat model names this and marks it *not closed there*, and
+SWARM's exposure is structurally worse than a generic round: the whole 270-draw
+grid is a pure function of one seed, and because the player's colony occupies a
+prefix of the wild line's slots, a single grind target — draws `(1,1)`, `(1,2)`
+and `(1,3)` all in the DIE band, `P = (2/5)^3 = 0.064`, about 16 attempts —
+simultaneously zeroes the COLONY line, loses FIRST LIGHT, loses SWARM and wins
+only DARK VENT.
+
+Client entropy is the control. The publication order is fixed and it is the
+whole mechanism:
+
+1. the operator publishes `seedCommitment` and binds it to `roundId`;
+2. the client generates 32 bytes (the player may replace them) and sends them
+   with `open()`;
+3. every draw is a function of both.
+
+An operator grinding seeds before step 1 is grinding against an entropy value it
+cannot predict, so the grind buys nothing. An operator that wanted to grind
+*after* step 2 would have to publish a second commitment for a round that
+already has one, which is exactly what a durably published, round-bound
+commitment prevents.
+
+Residual, stated rather than implied: this depends on the publication ordering
+above actually being enforced by the operator's storage, on the entropy being
+generated by the client rather than echoed from the server, and on the player
+(or a third party) retaining the published commitment. §8 lists it with the rest
+of the boundary.
+
+### 4.6 Verification algorithm
+
+Given `{ seedCommitment, bodyCommitment, actionChain, revealedSeed,
+clientEntropy, roundId, adapter, stakeUnits, sideBetStakes, actionLog,
+populations, terminal, sideBetResults, receipts }` a verifier must, in this
+order:
 
 1. Recompute `stagedSurvivalFingerprint(adapter)` and compare with the recorded
    fingerprint. Mismatch -> `ADAPTER_MISMATCH`.
-2. Recompute the commitment from the revealed seed. Mismatch ->
-   `COMMITMENT_MISMATCH`.
-3. Replay: `units := seedUnits`; for each stage in order, consume draws for
-   slots `1 ... units`, map each draw through the cohort bands, sum children,
-   apply the terminal rules (`0` -> EXTINCT, `>= settleAtOrAbove` -> THRESHOLD,
-   `stage === stages` -> FINAL), then apply the action recorded for that stage.
+2. Recompute the **seed pre-commitment** from the revealed seed and the round id
+   and compare it, in constant time, against the one published before the round.
+   Mismatch -> `COMMITMENT_MISMATCH`.
+3. Replay the grid **using the submitted action log and nothing else**:
+   `units := seedUnits`; for each stage in order, consume draws for slots
+   `1 ... units`, map each draw through the cohort bands, sum children, apply the
+   terminal rules (`0` -> EXTINCT, `>= settleAtOrAbove` -> THRESHOLD,
+   `stage === stages` -> FINAL), then apply the logged action for that stage. A
+   log that is out of order, short, long, mislabelled, or that harvests more
+   units than the stage holds is `DERIVATION_FAILED`; resolved populations or a
+   terminal that do not match the submitted ones are `TRANSCRIPT_MISMATCH`.
 4. Recompute every COLONY credit as `floor(stakeUnits * cohortValue(stage, k))`
    with the cumulative cap on the COLONY stake, and compare against the receipt
    ledger lines whose `line` is `COLONY`, for amount and order. Mismatch ->
@@ -389,34 +575,60 @@ verifier must:
    Mismatch -> `TRANSCRIPT_MISMATCH`.
 6. Assert no receipt carries `capped: true`. A cap can only bind if the adapter
    is misconfigured, so a capped receipt is a build failure, not a payout.
+7. Re-derive the **action chain** over the replayed event sequence and compare it
+   in constant time. Mismatch -> `COMMITMENT_MISMATCH`.
+8. Re-seal the **settlement body commitment** over the replayed round — the
+   revealed seed, the client entropy, the resolved populations, the action log,
+   the terminal, the wild line, the side-bet resolutions, the recomputed ledger
+   and the chain terminal — and compare it in constant time against the published
+   body. Mismatch -> `COMMITMENT_MISMATCH`.
 
-Steps 3–6 are exactly what `settleTicket()` in `tools/simulate.mjs` does, which
-is why that file is part of the specification rather than a toy.
+**Step 8 is what makes step 3's input trustworthy.** Without it the action log is
+an assertion; with it, the log is the only free variable in a digest that was
+published at settlement, so a log that was not the log produces a body that is
+not the body. Compare with `constantTimeHexEqual`, never `!==`.
+
+Steps 3–8 are exactly what `verifyRound()` in `tools/simulate.mjs` does, which is
+why that file is part of the specification rather than a toy. It takes the action
+log as an untrusted input and returns a public code, never a stack trace.
 
 ---
 
 ## 5. Lifecycle
 
 ```
-        open()            advance()          advance()               settle()
-IDLE ──────────► STAGED ──────────► STAGED ──────────► ... ──────────► SETTLED
-                   │  ▲                                    ▲
-         harvest() │  └────────────────────────────────────┘
-                   ▼           (harvest never advances the stage)
-                RESOLVED
+  IDLE
+    │  open()                     stake debited, client entropy bound, stage 0
+    ▼
+  STAGED ◄──────────────────┐
+    │                       │  advance()            a stage resolved, still non-terminal
+    │                       │  harvest(k < units)   same stage, new revision, decision open
+    ├───────────────────────┘
+    │
+    │  advance() resolving to EXTINCT / THRESHOLD / FINAL
+    │  harvest(k === units)  ->  terminal BANKED
+    ▼
+  AWAITING_SETTLEMENT
+    │  settle(revealedSeed)  or  reconcile()
+    ▼
+  SETTLED
 ```
 
-States: `IDLE`, `STAGED` (a stage has resolved and the player owes a decision),
-`SETTLED` (terminal). Terminal reasons: `EXTINCT`, `THRESHOLD`, `FINAL`,
-`BANKED`, `RECONCILED`.
+**States.** `IDLE` (no stake), `STAGED` (the round is live and awaiting a player
+command), `AWAITING_SETTLEMENT` (the round has a terminal and owes no further
+decision; the seed is still sealed), `SETTLED` (terminal, seed revealed, body
+commitment published).
+
+**Stage 0 is a `STAGED` state with exactly one legal command.** Immediately after
+`open()` the book holds `stage = 0` and `units = seedUnits`, and generation 1 is
+mandatory ([MATH.md §5](MATH.md) — it is where the entire house edge is taken).
+So at `stage === 0`, `advance()` is legal and `harvest()` fails
+`INVALID_REQUEST`: there is nothing to bank yet, and a client that offered a
+control there would be offering a decision the game does not have.
+
+**Terminal reasons.** `EXTINCT`, `THRESHOLD`, `FINAL`, `BANKED`, `RECONCILED`.
 
 ```ts
-export interface StageContext {
-  readonly gameId: string;
-  readonly roundId: string;
-  readonly proofVersion: 'reveal-engine/stage-commit-v1';
-}
-
 /** One side-bet line on the ticket, with its own stake. */
 export interface SideBetSelection {
   readonly id: string;              // must match a SideBetDefinition
@@ -430,6 +642,12 @@ export interface OpenRequest {
   readonly stakeUnits: bigint;
   /** Zero to three distinct side bets, each carrying its own stake. */
   readonly sideBets: readonly SideBetSelection[];
+  /**
+   * 32 bytes of player entropy, lowercase hex, chosen after the seed
+   * pre-commitment was published. Missing, short, long or non-hex is
+   * INVALID_REQUEST; the round does not open.
+   */
+  readonly clientEntropy: string;
 }
 
 export interface AdvanceRequest {
@@ -440,7 +658,11 @@ export interface AdvanceRequest {
 export interface HarvestRequest {
   readonly idempotencyKey: string;
   readonly expectedFrameRevision: number;
-  /** 0 < units <= current population. `units === population` is a full bank. */
+  /**
+   * 0 < units <= current population. `units === population` is a full BANK and
+   * has its own terminal semantics (§5.3). Every legal k is accepted; the
+   * client exposes every legal k (`thinning.clientQuantum === 'any'`).
+   */
   readonly units: number;
 }
 
@@ -457,9 +679,20 @@ export interface StageFrame {
   readonly unitValue: Rational;             // ladderValue(game, stage)
   readonly colonyValue: Rational;           // unitValue * units
   readonly terminal: 'EXTINCT' | 'THRESHOLD' | 'FINAL' | 'BANKED' | 'RECONCILED' | null;
+  readonly state: 'STAGED' | 'AWAITING_SETTLEMENT' | 'SETTLED';
+  /** The live action-chain value after this frame's event (§4.3). */
+  readonly actionChain: string;
   /**
-   * Deliberately absent: any wild-line or side-bet field. A live frame carries
-   * no information about draws the colony has not consumed (§5.2).
+   * Wild-line population at stage `stage` — the stage the player has just
+   * resolved — and the wild line's peak through that stage. Never a later
+   * stage: §5.2 is the exact rule and the reason it is exact.
+   */
+  readonly wildUnits: number;
+  readonly wildPeakUnits: number;
+  /**
+   * Deliberately absent: any side-bet resolution, any wild-line value for a
+   * stage the player has not resolved, and any credit amount not already on a
+   * receipt.
    */
 }
 
@@ -478,19 +711,43 @@ export interface Receipt {
   readonly unitsHarvested: number;          // COLONY harvests only, else 0
   readonly resolved: 'WON' | 'LOST' | null; // side-bet lines only
   readonly theoretical: Rational | null;    // exact, unrounded; null for a DEBIT
-  readonly capped: boolean;                 // always false; see §4.3 step 6
+  readonly capped: boolean;                 // always false; see §4.6 step 6
+}
+
+/** Every mutating call returns the receipt(s) it produced *and* the new frame. */
+export interface CommandResult<T> {
+  readonly receipts: readonly Receipt[];
+  readonly frame: StageFrame;
+  readonly value: T;
 }
 
 export class StageBook {
-  constructor(game: StagedSurvivalDefinition, context: StageContext, commitment: string);
+  constructor(
+    game: StagedSurvivalDefinition,
+    context: StageContext,
+    seedCommitment: string,
+  );
   readonly frame: StageFrame;
-  open(request: OpenRequest): Promise<readonly Receipt[]>;   // one DEBIT per line
-  advance(request: AdvanceRequest): Promise<StageFrame>;
-  harvest(request: HarvestRequest): Promise<Receipt>;
-  settle(request: SettleRequest): Promise<readonly Receipt[]>;
-  reconcile(request: ReconcileRequest): Promise<readonly Receipt[]>;
+  open(request: OpenRequest): Promise<CommandResult<null>>;        // one DEBIT per line
+  advance(request: AdvanceRequest): Promise<CommandResult<null>>;
+  harvest(request: HarvestRequest): Promise<CommandResult<null>>;  // one COLONY CREDIT
+  settle(request: SettleRequest): Promise<CommandResult<SettlementProof>>;
+  reconcile(request: ReconcileRequest): Promise<CommandResult<SettlementProof>>;
   snapshot(): StageBookSnapshot;            // schema 'stage-book-v1'
   static restore(game: StagedSurvivalDefinition, snapshot: unknown): StageBook;
+}
+
+/** What settlement publishes. Exactly the input set §4.6 verifies. */
+export interface SettlementProof {
+  readonly seedCommitment: string;
+  readonly bodyCommitment: string;
+  readonly actionChain: string;
+  readonly revealedSeed: string;
+  readonly clientEntropy: string;
+  readonly actionLog: readonly { stage: number; kind: string; units: number }[];
+  readonly populations: readonly number[];
+  readonly terminal: string;
+  readonly sideBetResults: readonly { id: string; resolved: string }[];
 }
 ```
 
@@ -499,45 +756,107 @@ export class StageBook {
 - **Frame fence.** Every mutating call carries `expectedFrameRevision`; a stale
   value fails `STALE_FRAME` and mutates nothing.
 - **Idempotency.** Each successful command is bound to its key by a canonical
-  fingerprint of the command payload. An exact retry replays the receipt; a
-  changed payload under the same key fails `IDEMPOTENCY_CONFLICT`.
+  fingerprint of the command payload. An exact retry replays the receipt *and the
+  frame, including its action-chain value*; a changed payload under the same key
+  fails `IDEMPOTENCY_CONFLICT`.
 - **Separate revisions.** Frame revision (price/state) and ledger sequence
   (money) advance independently, so a duplicated advance can never look like a
   money movement and vice versa.
 - **Compute before mutate.** Validate and compute the receipt first, mutate
   state second, so a thrown error cannot leave a half-settled round.
 - **Settlement is proof-bound.** `settle()` accepts only a seed whose
-  commitment matches, and re-derives the entire round before crediting.
+  pre-commitment matches, re-derives the entire round from the logged actions
+  before crediting, and publishes the body commitment atomically with the last
+  receipt.
 - **Advance cannot be initiated by the server.** There is no timer, no
-  auto-advance and no countdown; the stage advances only when the player calls
-  `advance()` or `harvest()`. That is what makes the game latency-insensitive by
-  construction, and it is the reason a slow connection cannot cost a payout.
+  auto-advance, no countdown and no in-round plan the server executes on the
+  player's behalf; the stage advances only when the player calls `advance()` or
+  `harvest()`. That is what makes the game latency-insensitive by construction,
+  and it is the reason a slow connection cannot cost a payout. The only
+  server-initiated transition in the module is abandonment reconciliation, §5.5.
 
-### 5.2 Side-bet reveal rule
+### 5.2 Wild-line disclosure rule
 
-Binding on the protocol, not only on the UI:
+Round 2 forbade every wild-line value from reaching a live client, and justified
+the ban with the leak argument in [MATH.md §7.3](MATH.md). The argument does not
+support a ban that wide, and the cost of the wider rule was real: a player
+holding a 248.798x SWARM bet got no indicator of any kind for the whole round.
+The correct rule is one generation narrower and is stated exactly:
+
+> A response may carry wild-line state for **stage `t` and every earlier stage**
+> once the player's own stage `t` has resolved. It may never carry, or vary its
+> timing with, any wild-line state for a stage the player has not resolved.
+
+**Why that is exactly safe.** The wild line's population at stage `t` is a sum
+over slots `1 ... W(t-1)` of **row `t` only**. The player's own future consumes
+rows `t+1 ... 18`, which are disjoint draws, domain-separated by counter in the
+sampler payload; treating HMAC-SHA256 as a PRF, a function of row `t` gives no
+advantage on any later row. So conditioning on `W(t)` does not change the
+distribution of the player's future at all, and the invariance theorem's
+"adapted to the revealed history" hypothesis still holds
+([MATH.md §7.3](MATH.md) carries the derivation).
+
+**Why one generation further is not safe.** `W(t+1)` is a sum over slots
+`1 ... W(t)` of row `t+1`, and the player's own next population is a partial sum
+of exactly those draws. A wild line that goes to zero at `t+1` proves the
+player's colony is extinct at `t+1`, which makes `BANK` a strictly winning move.
+That is the leak, and it is the only leak.
+
+Binding consequences on the protocol:
 
 - `open()` returns one `DEBIT` receipt per line and nothing else. It must not
   return, log to a client-readable channel, or vary its timing with, any
   seed-dependent value.
-- `advance()` and `harvest()` responses contain no wild-line and no side-bet
-  field. `StageFrame` has no place to put one.
-- Side bets are resolved **only during `settle()` or `reconcile()`**, after the
-  COLONY line has reached a terminal state, and are credited as `SIDE_BET`
-  receipts in the definition order of `game.sideBets`.
-- A player who banks at stage 2 with a live SWARM bet sees the wild line
-  animated *after* their own round is over, from the revealed seed, in the
-  settlement sheet ([DESIGN.md §5](DESIGN.md), screen S8a).
+- `advance()` returns a frame whose `wildUnits` and `wildPeakUnits` are for the
+  stage it just resolved. `harvest()` does not advance the stage, so it returns
+  the same two values it returned for the current stage — a harvest must never
+  reveal anything new about the grid.
+- Responses are constant-shape and constant-work with respect to the wild line:
+  the whole grid is derived at `open()`, so no branch of the response path can be
+  timed to learn a draw.
+- Side bets are **resolved and credited only during `settle()` or
+  `reconcile()`**, in the declaration order of `game.sideBets`. A frame never
+  carries a resolution, only the wild population it is already safe to show.
+  `SWARM` is the one bet whose win condition can be *observed* early — the peak
+  is monotone — and the client may say so; it may not credit it.
+- A player who banks at stage 2 with a live SWARM bet has seen the wild line
+  through stage 2 and no further. The rest of it animates after their own round
+  is over, from the revealed seed, in the settlement sheet
+  ([DESIGN.md §5](DESIGN.md), screen S8a).
 
-The reason is arithmetic, not taste: the wild line's population at stage `t + 1`
-is a sum over slots that contains the player's own next population as a partial
-sum, so an early wild-line reveal tells the player something about draws they
-have not consumed. A wild line that goes to zero proves the player's colony is
-extinct next stage and makes `BANK` a strictly winning move, which is exactly
-the assumption the invariance theorem is built on
-([MATH.md §6.1, §7.3](MATH.md)).
+### 5.3 Terminals, and what a full BANK does
 
-### 5.3 Cap and exposure rules
+The full bank is the most common non-extinct terminal in the game — it is the
+whole of `BANK_FIRST`, the lowest-friction policy — so its semantics are spelled
+out rather than implied.
+
+| Trigger | Terminal | State after the call | Receipts from that call |
+| --- | --- | --- | --- |
+| `harvest({ units: n })` with `n === frame.units` | `BANKED` | `AWAITING_SETTLEMENT` | one `HARVEST` `CREDIT` on `COLONY` for the full colony |
+| `harvest({ units: k })` with `0 < k < frame.units` | `null` | `STAGED`, same stage, revision + 1 | one `HARVEST` `CREDIT` on `COLONY` for `k` units |
+| `advance()` resolving to `0` units | `EXTINCT` | `AWAITING_SETTLEMENT` | none |
+| `advance()` resolving to `>= 16` units | `THRESHOLD` | `AWAITING_SETTLEMENT` | none |
+| `advance()` resolving stage 18 | `FINAL` | `AWAITING_SETTLEMENT` | none |
+
+`AWAITING_SETTLEMENT` is not optional and not cosmetic. **`settle()` is required
+on every path**, including a full bank, because it is the only call that reveals
+the seed, resolves the side bets, and publishes the body commitment — and a round
+whose seed is never revealed is a round nobody can verify.
+
+- After `BANKED`, `settle()` credits **nothing further** on the `COLONY` line: it
+  emits a `SETTLE` `CREDIT` receipt of `0` units carrying the terminal reason, so
+  the ledger has one and only one shape, then one `SIDE_BET` receipt per selected
+  side bet.
+- After `EXTINCT`, the same: a `SETTLE` receipt of `0` units, then the side bets.
+- After `THRESHOLD` or `FINAL`, the `SETTLE` receipt carries
+  `floor(stakeUnits * cohortValue(stage, units))`.
+- `advance()` and `harvest()` on a book in `AWAITING_SETTLEMENT` fail
+  `ROUND_SETTLED` with the terminal attached, so a duplicate tap shows the player
+  their terminal rather than an error.
+- `settle()` is idempotent on its key like every other command, and the second
+  call replays the receipts and the same body commitment.
+
+### 5.4 Cap and exposure rules
 
 - **One cap basis per line.** `payableWithinCap` is applied with *that line's*
   stake as the basis and *that line's* already-credited units subtracted. A
@@ -555,7 +874,7 @@ the assumption the invariance theorem is built on
   `[risk.minStakeUnits, risk.maxStakeUnits]`; each side-bet stake must lie in
   that side bet's own bounds. Duplicate side-bet ids fail `INVALID_REQUEST`.
 
-### 5.4 Abandoned rounds
+### 5.5 Abandoned rounds
 
 "There is no timer" is a statement about play, not a lifecycle policy. Staked
 funds cannot sit in suspense indefinitely and a committed seed cannot stay
@@ -569,13 +888,14 @@ transition:
 - **Action.** `reconcile()` performs a **forced BANK of the entire colony at the
   exact current stage value** — `k = units`, no advance, no extra draw — settles
   with terminal reason `RECONCILED`, resolves any side bets on the wild line,
-  reveals the seed and posts the receipts.
-- **A round already at a terminal.** If the last stage resolved to `EXTINCT`,
-  `THRESHOLD` or `FINAL` and the player simply never returned to see it, there
-  is no decision left to force. `reconcile()` settles at the terminal that
-  actually occurred, with that terminal's reason and that terminal's payout, and
-  the ledger is indistinguishable from the one a returning player would have
-  produced. `RECONCILED` is reserved for rounds that still owed a decision.
+  reveals the seed, publishes the body commitment and posts the receipts.
+- **A round already at a terminal.** If the round is in `AWAITING_SETTLEMENT`
+  because the last stage resolved to `EXTINCT`, `THRESHOLD` or `FINAL` and the
+  player simply never returned to see it, there is no decision left to force.
+  `reconcile()` settles at the terminal that actually occurred, with that
+  terminal's reason and that terminal's payout, and the ledger is
+  indistinguishable from the one a returning player would have produced.
+  `RECONCILED` is reserved for rounds that still owed a decision.
 - **Why a forced bank and not a void or a forced advance.** Every action at
   every state has identical exact value ([MATH.md §6](MATH.md)), so a forced
   bank is exactly EV-neutral: it neither takes value from an absent player nor
@@ -583,11 +903,12 @@ transition:
   from someone who is not there to manage it. A void would have to return the
   stake and unwind a resolved generation the player has already seen; a forced
   advance would expose an absent player to extinction.
-- **Seed consequence.** Reconciliation is a settlement, so the seed is revealed
-  and the round becomes verifiable by the normal §4.3 algorithm. Seed custody
-  therefore has a bounded horizon: no seed outlives its round by more than the
-  abandonment timeout plus the reveal window, and there is no state in which a
-  committed seed can never be published.
+- **Proof consequence.** Reconciliation is a settlement, so it reveals the seed
+  and publishes a body commitment whose action log ends with the forced bank,
+  distinguishable from a player-initiated one by its terminal reason. Seed
+  custody therefore has a bounded horizon: no seed outlives its round by more
+  than the abandonment timeout plus the reveal window, and there is no state in
+  which a committed seed can never be published.
 - **Not a latency-sensitive decision.** 72 hours is four orders of magnitude
   above any human or network decision latency. Nothing about it makes a money
   decision depend on connection speed, which is the property
@@ -613,8 +934,8 @@ adapter:
 3. `assertLadderIsFair` passes: `step * mean === 1` and
    `base * seedUnits * mean === targetRtp`, exactly.
 4. Derivation is deterministic: deriving the same grid twice yields identical
-   draws; deriving with a different `roundId`, `gameId` or fingerprint yields a
-   different grid.
+   draws; deriving with a different `roundId`, `gameId`, `clientEntropy` or
+   fingerprint yields a different grid.
 5. The sampler is unbiased: for a small modulus, the rejection bound
    `2^256 - (2^256 mod modulus)` is respected (assert the bound, do not
    statistically test it).
@@ -627,19 +948,39 @@ adapter:
    strictly below the exposure limit. No cap may be reachable.
 8. Every side bet is priced at exactly `targetRtp`:
    `sideBetMultiplier(id) * sideBetProbability(id) === targetRtp`.
-9. No `advance()` or `harvest()` response, and no `StageFrame`, exposes a
-   wild-line or side-bet value; a replay in which side bets are resolved before
-   the COLONY terminal fails.
-10. `reconcile()` credits exactly `cohortValue(stage, units)` on the COLONY line,
+9. **Two-phase commitment.** `assertCommitmentIsTwoPhase` passes; a definition
+   missing either phase or the entropy policy fails to build. The seed
+   pre-commitment re-derives from the revealed seed. The body commitment
+   re-derives from the replayed round.
+10. **The body binds the log.** Settling one seed pre-commitment under two
+    different action logs produces two different body commitments, and a verifier
+    handed one body with the other log fails `COMMITMENT_MISMATCH` or
+    `TRANSCRIPT_MISMATCH`. This is the check that would have caught the round-2
+    scheme, and it is not optional.
+11. **The chain binds the frames.** Every `chain(i)` returned mid-round is a
+    prefix of the terminal chain value bound into the body.
+12. **Client entropy is live.** Two rounds with the same seed and round id but
+    different client entropy produce different grids, and a round cannot open
+    without entropy of exactly the declared width.
+13. **Wild-line disclosure.** No `advance()` or `harvest()` response, and no
+    `StageFrame`, exposes a wild-line value for a stage the player has not
+    resolved, or any side-bet resolution; a replay in which side bets resolve
+    before the COLONY terminal fails.
+14. **Harvest quantum.** Every `k` in `[0, units]` is accepted, produces the
+    exact credit `floor(stakeUnits * cohortValue(stage, k))`, and a full bank
+    reaches `AWAITING_SETTLEMENT` with terminal `BANKED` and still requires
+    `settle()`.
+15. `reconcile()` credits exactly `cohortValue(stage, units)` on the COLONY line,
     is idempotent, and is refused before the timeout.
-11. Snapshot round-trips: restore validates adapter identity, receipt ordering,
-    per-line cap accounting, and a deterministic checksum, and rejects any
-    unknown schema version.
+16. Snapshot round-trips: restore validates adapter identity, receipt ordering,
+    per-line cap accounting, the action log against the chain, and a
+    deterministic checksum, and rejects any unknown schema version. Anything the
+    snapshot asserts about *what the player did* is re-derived from the receipt
+    log and the chain, never read out of the snapshot.
 
 Checks 6, 7 and 8 are what make this module different from a generic ride
-ledger: the fairness of the whole game reduces to two exactly-checkable
-identities plus one dynamic program per line, and all of them are cheap enough
-to run in CI.
+ledger. Checks 9 to 12 are what make it a *choice-timed* module rather than a
+choice-timed module's shape, and all of them are cheap enough to run in CI.
 
 ---
 
@@ -649,13 +990,18 @@ to run in CI.
 | --- | --- | --- |
 | Exact `Rational`, `payable`, `payableWithinCap` | Yes | Reuse verbatim |
 | `encodeFields`, `uniformBigInt`, error codes, limits | Yes | Reuse verbatim |
+| Constant-time digest comparison | Yes | Reuse verbatim |
+| Two-phase commitment for a choice-timed round | Yes, as a contract | The engine mandates it; SWARM is the first adapter that has to satisfy it |
 | Frame fence, idempotency, receipts, snapshots | Yes, in `RoundBook` | Generalize, do not fork |
+| Client entropy in the sampler payload | **No** | New `EntropyPolicy` and a new sampler domain |
+| Live action chain returned on every frame | **No** | New; the pre-reveal witness of §4.3 |
 | Population-based pricing with no posterior | **No** | New `ladderValue` / `cohortValue` |
-| Action-dependent draw consumption | **No** | New grid indexing and commitment scheme |
+| Action-dependent draw consumption | **No** | New grid indexing |
 | Multi-credit round with a per-line cumulative cap | Partial | `payableWithinCap` exists; the ride ledger and the line attribution do not |
 | Multi-line ticket with per-line cap bases | **No** | New `SideBetDefinition`, `receipt-v2` `line`/`direction` |
 | Mechanical fairness identity check | **No** | New `assertLadderIsFair` |
 | Mechanical risk-headroom check | **No** | New `assertRiskIsHeadroom` |
+| Lagged counterfactual-line disclosure | **No** | New; §5.2 |
 | Server-initiated reconciliation with no in-play timer | **No** | New `reconcile()` |
 | Staged conformance suite | **No** | New, per §6 |
 
@@ -671,7 +1017,30 @@ ledger". `staged-survival` is that ledger, specified.
 This document is a contract, not evidence of an implementation. Until the module
 exists in Reveal Engine and passes §6, SWARM's claims rest on the reference
 implementations in this repository: `tools/lib/model.mjs` for pricing and
-`tools/simulate.mjs` for derivation, side-bet resolution and the settlement
-ledger. Neither is a production round server, neither has been reviewed against
-a jurisdictional requirement, and neither replaces operator wallet integration,
-authenticated storage, seed custody, or any laboratory process.
+`tools/simulate.mjs` for derivation, the two-phase commitment, side-bet
+resolution, the settlement ledger and the verifier.
+
+What the scheme in §4 does **not** close, stated rather than implied:
+
+- **Seed selection before publication.** Client entropy makes grinding useless
+  *provided the publication order in §4.5 holds*. Nothing in this document
+  enforces that order; it is a property of the operator's storage and release
+  process, and it needs auditable seed generation, publication ordering and
+  retention to be worth anything. Reveal Engine's threat model marks seed
+  grinding "not closed here" and this document inherits that boundary rather
+  than quietly dropping it.
+- **Client entropy that is not the client's.** If the client echoes a value the
+  server suggested, the control is gone and nothing in the transcript shows it.
+  A player who wants the property has to set the value themselves, which is why
+  `playerEditable` is `true` and why [DESIGN.md §5](DESIGN.md) puts the control
+  on screen S1 rather than hiding it.
+- **A log the player never witnessed.** The body commitment makes two
+  settlements of one round publicly distinguishable, and the action chain gives
+  the player pre-reveal evidence of their own log. Neither creates a
+  third-party-verifiable log on its own: that needs the player (or an external
+  notary) to retain the chain values they were handed. This is the honest scope
+  of the phrase "verifiable by re-derivation" here.
+- **Everything outside the round.** Neither file is a production round server,
+  neither has been reviewed against a jurisdictional requirement, and neither
+  replaces operator wallet integration, authenticated storage, seed custody, or
+  any laboratory process.

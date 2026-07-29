@@ -25,6 +25,9 @@ import {
 import {
   POLICIES,
   assertRiskPolicy,
+  maximumRoundPayoutBelowPeak,
+  sharedCapBinding,
+  stakeBoundaryIsUnreachable,
   bloomPayoutProfile,
   breakEvenLadder,
   buildKernel,
@@ -49,6 +52,20 @@ import {
   transitionProbability,
   underwaterAfterFirstGeneration,
 } from '../tools/lib/model.mjs';
+import {
+  CHORD_STEPS,
+  MEDUSA_THRESHOLD,
+  bodyRadius,
+  chordLadder,
+  chordThreshold,
+  colonyLayout,
+  layoutRadiusDecimal,
+  settlementClasses,
+  verdictBands,
+  verdictBeatMass,
+  verdictBeats,
+  verdictReach,
+} from '../tools/lib/presentation.mjs';
 import {
   ONE,
   SwarmMathError,
@@ -642,5 +659,166 @@ describe('what FULL BLOOM actually pays', () => {
     // Strictly rarer than "reaches 12", which is the mislabelling this fixes.
     expect(compare(band, reachProbability(12))).toBe(-1);
     expect(() => peakBand(16, 12)).toThrow(SwarmMathError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round-3 additions: the model behind the presentation contracts and the two
+// arithmetic claims docs/MATH.md added (§12.1 and §13.1).
+// ---------------------------------------------------------------------------
+
+describe('the maximum round payout under a population ceiling', () => {
+  it('is monotone in the ceiling and bounded by the unrestricted maximum', () => {
+    const unrestricted = maximumRoundPayout().multiplier;
+    let previous = ZERO;
+    for (let limit = 2; limit <= BLOOM_THRESHOLD; limit += 1) {
+      const value = maximumRoundPayoutBelowPeak(limit);
+      expect(compare(value, previous) >= 0, `limit ${limit}`).toBe(true);
+      expect(compare(value, unrestricted) <= 0, `limit ${limit}`).toBe(true);
+      previous = value;
+    }
+    // Forbidding every population makes the round worth nothing, which is the
+    // degenerate end of the same recursion rather than a special case.
+    expect(toFraction(maximumRoundPayoutBelowPeak(1))).toBe('0/1');
+  });
+
+  it('rejects a ceiling outside the state space', () => {
+    expect(() => maximumRoundPayoutBelowPeak(0)).toThrow(SwarmMathError);
+    expect(() => maximumRoundPayoutBelowPeak(MAX_POPULATION + 2)).toThrow(SwarmMathError);
+    expect(() => maximumRoundPayoutBelowPeak(1.5)).toThrow(SwarmMathError);
+  });
+});
+
+describe('the shared-ticket-ceiling counterfactual', () => {
+  const shared = sharedCapBinding();
+
+  it('costs the rejected design exactly', () => {
+    // The four lines on equal stakes, against one 906x ceiling.
+    expect(toFraction(shared.combined)).toBe(
+      toFraction(add(shared.colonyMaximum, shared.sideTotal)),
+    );
+    expect(compare(shared.combined, shared.ceiling)).toBe(1);
+    expect(toFraction(shared.shortfall)).toBe(
+      toFraction(subtract(shared.combined, shared.ceiling)),
+    );
+  });
+
+  it('bounds how often it would bind, rather than guessing', () => {
+    // RUN cannot reach the threshold at all: its largest total is its largest
+    // single settlement, which is below it.
+    expect(shared.runCanBind).toBe(false);
+    expect(compare(shared.runMaximum, shared.colonyThreshold)).toBe(-1);
+    // The bound is a real bound: the maximum attainable below the peak really is
+    // under the threshold, and the peak above it really is attainable.
+    expect(compare(shared.attainableBelowPeak, shared.colonyThreshold)).toBeLessThanOrEqual(0);
+    expect(
+      compare(maximumRoundPayoutBelowPeak(shared.minimumPeak + 1), shared.colonyThreshold),
+    ).toBe(1);
+    // And it is the wild line's reach probability, which dominates the player's.
+    expect(toFraction(shared.bound)).toBe(toFraction(reachProbability(shared.minimumPeak)));
+    // Orders of magnitude away from the 1-in-261.89 the round-2 text quoted.
+    expect(compare(shared.bound, reachProbability(10))).toBe(-1);
+  });
+});
+
+describe('the stake boundary', () => {
+  it('is unreachable, so a round is never exactly its own stake', () => {
+    const result = stakeBoundaryIsUnreachable();
+    expect(result.ok).toBe(true);
+    expect(result.factor).toBe(19);
+    expect(result.creditsChecked).toBe(MAX_GENERATIONS * MAX_POPULATION);
+  });
+
+  it('is what makes the two settlement classes exhaustive', () => {
+    // policyOutcomeSplit uses `<= 1` for "below the stake" and `> 1` for a
+    // profit; the lemma is why those two are a partition with no ambiguous case.
+    for (const policy of Object.values(POLICIES)) {
+      const split = policyOutcomeSplit(policy.fn);
+      const total = add(add(split.zero, split.subStake), split.profit);
+      expect(toFraction(total), policy.id).toBe('1/1');
+    }
+  });
+});
+
+describe('presentation contracts', () => {
+  it('counts one verdict beat per non-terminal generation', () => {
+    const beats = verdictBeats();
+    const mass = verdictBeatMass(beats);
+    // Every beat is non-terminal by construction: 1 <= m <= 15 and t < 18.
+    for (const beat of beats) {
+      expect(beat.to).toBeGreaterThanOrEqual(1);
+      expect(beat.to).toBeLessThan(BLOOM_THRESHOLD);
+      expect(beat.generation).toBeLessThan(MAX_GENERATIONS);
+    }
+    // A RUN round has one terminal generation, so the beats are the expected
+    // round length minus one. That identity is a real cross-check on both.
+    expect(toFraction(mass)).toBe(toFraction(subtract(expectedGenerations(), ONE)));
+  });
+
+  it('bands the beats exhaustively and monotonically', () => {
+    const bands = verdictBands();
+    const total = bands.reduce((sum, row) => add(sum, row.share), ZERO);
+    expect(toFraction(total)).toBe('1/1');
+    for (const row of bands) expect(compare(row.share, ZERO)).toBe(1);
+  });
+
+  it('proves every chord note reachable, with a strictly decreasing frequency', () => {
+    const ladder = chordLadder();
+    expect(ladder).toHaveLength(CHORD_STEPS);
+    for (const note of ladder) {
+      expect(compare(note.mass, ZERO), `note +${note.step}`).toBe(1);
+      expect(note.reachable, `note +${note.step}`).toBeGreaterThan(0);
+      expect(toFraction(note.threshold)).toBe(toFraction(chordThreshold(note.step)));
+    }
+    for (let index = 1; index < ladder.length; index += 1)
+      expect(compare(ladder[index].share, ladder[index - 1].share)).toBe(-1);
+    expect(() => chordThreshold(CHORD_STEPS)).toThrow(SwarmMathError);
+    expect(() => chordThreshold(-1)).toThrow(SwarmMathError);
+  });
+
+  it('opens the large-gain band at every population, which the ratio bands did not', () => {
+    // Reproduce the round-2 failure directly: under a ratio band, "more than
+    // +50%" needs m > 1.2n, and at n = 13, 14, 15 every such m is FULL BLOOM.
+    const kernel = buildKernel();
+    for (const population of [13, 14, 15]) {
+      const row = kernel[population];
+      let reachable = 0n;
+      for (let m = 1; m < Math.min(BLOOM_THRESHOLD, row.length); m += 1)
+        if (5 * m > 6 * population) reachable += row[m];
+      expect(reachable, `ratio band at n=${population}`).toBe(0n);
+    }
+    // Under the money band it is reachable everywhere, at every population.
+    for (const row of verdictReach()) {
+      expect(row.firstMedusaGeneration, `n=${row.population}`).toBeGreaterThan(0);
+      expect(compare(row.bestDelta, MEDUSA_THRESHOLD), `n=${row.population}`).toBe(1);
+    }
+  });
+
+  it('splits every policy settlement into three exhaustive classes', () => {
+    for (const row of settlementClasses()) {
+      const total = add(add(row.nothing, row.belowStake), row.profit);
+      expect(toFraction(total), row.id).toBe('1/1');
+    }
+    const bankFirst = settlementClasses().find((row) => row.id === 'BANK_FIRST');
+    expect(toFraction(bankFirst.belowStake)).toBe('12/25');
+  });
+
+  it('clamps the body radius at both ends and puts the spiral on distinct radii', () => {
+    const layout = colonyLayout();
+    expect(layout.firstClampedPopulation).toBe(17);
+    expect(toFraction(bodyRadius(17).radius)).toBe('12/1');
+    expect(toFraction(bodyRadius(17).raw)).toBe('58/5');
+    expect(bodyRadius(17).clamped).toBe(true);
+    expect(bodyRadius(16).clamped).toBe(false);
+    expect(bodyRadius(1).clamped).toBe(true);
+    expect(() => bodyRadius(0)).toThrow(SwarmMathError);
+    expect(() => bodyRadius(MAX_POPULATION + 1)).toThrow(SwarmMathError);
+    // R(n) is strictly increasing, so a bigger colony never occupies less space.
+    let previous = 0;
+    for (let population = 1; population <= MAX_POPULATION; population += 1) {
+      const radius = Number(layoutRadiusDecimal(population));
+      expect(radius, `n=${population}`).toBeGreaterThan(previous);
+      previous = radius;
+    }
   });
 });

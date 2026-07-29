@@ -43,9 +43,10 @@ jobs:
       - name: Tests
         run: npm test
 
-      # The adapter fingerprint and the fixture digest are the two values the
-      # whole verification story hangs on. Printing them per Node version is
-      # what turns this matrix into cross-version determinism evidence.
+      # The adapter fingerprint, both commitment phases and the fixture digest
+      # are the values the whole verification story hangs on. Printing them per
+      # Node version is what turns this matrix into cross-version determinism
+      # evidence.
       - name: Determinism receipts
         run: |
           node -e "import('./tools/simulate.mjs').then(m => console.log('fingerprint', m.adapterFingerprint()))"
@@ -54,6 +55,34 @@ jobs:
               const { buildPaytable } = await import('./tools/lib/report.mjs');
               console.log('fixture', c.digest(c.canonicalJson(buildPaytable())));
             })"
+
+      # The round-3 blocker, asserted rather than printed: a settlement
+      # re-published under a different decision log must not verify. If this step
+      # ever passes silently, the two-phase commitment has stopped working.
+      - name: A forged action log is rejected
+        run: |
+          node -e "
+            import('./tools/simulate.mjs').then(async m => {
+              const { POLICIES } = await import('./tools/lib/model.mjs');
+              const args = {
+                seedHex: 'a1053cf9d4e7158153247cb389f5879ed90ff85a6dc0fa12a88249dd9a8df595',
+                roundId: 'swarm-vector-side', clientEntropy: 'c'.repeat(64),
+                stakeUnits: 1000000n, sideBetStakes: { SWARM: 100000n },
+              };
+              const honest = m.settleTicket({ ...args, policy: POLICIES.HALF_EVERY.fn });
+              const other  = m.settleTicket({ ...args, policy: POLICIES.RUN.fn });
+              console.log('seed commitment ', honest.proof.seedCommitment);
+              console.log('body commitment ', honest.proof.bodyCommitment);
+              const ok = m.verifyRound(m.proofBundle(honest));
+              const forged = m.verifyRound({ ...m.proofBundle(other), actionLog: honest.proof.actionLog });
+              console.log('honest ->', ok.code, '| forged ->', forged.code);
+              if (!ok.ok) throw new Error('an honest settlement failed to verify');
+              if (forged.ok) throw new Error('a forged action log verified');
+              if (honest.proof.seedCommitment !== other.proof.seedCommitment)
+                throw new Error('phase 1 should be identical across settlements of one round');
+              if (honest.proof.bodyCommitment === other.proof.bodyCommitment)
+                throw new Error('phase 2 failed to distinguish two decision logs');
+            }).catch(error => { console.error(error.message); process.exit(1); })"
 
       # Independent sanity cross-check of the written rules. Seeded, so a
       # failure here is reproducible rather than flaky.
