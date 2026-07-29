@@ -38,10 +38,38 @@ jobs:
       - name: Verify the generated documentation tables
         run: npm run docs:check
 
-      # Re-derives every published number and compares README.md, docs/MATH.md,
-      # docs/DESIGN.md and docs/ENGINE.md against the enumeration.
+      # The round service is TypeScript, and a type error in a money path is a
+      # bug the test suite might not reach.
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Re-derives every published number, compares README.md, docs/MATH.md,
+      # docs/DESIGN.md and docs/ENGINE.md against the enumeration, and plays
+      # whole rounds through the HTTP API asserting the exact credit at every
+      # step — including handing each settlement to the published reference
+      # verifier in tools/simulate.mjs.
       - name: Tests
         run: npm test
+
+      # The one thing the suite cannot prove by itself: that `npm run dev`
+      # actually serves the game. Node's native type stripping needs 22.18+, so
+      # this runs on the newest version in the matrix only.
+      - name: Server and client boot
+        if: matrix.node == 24
+        run: |
+          npm start &
+          for attempt in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8787/api/config > /tmp/config.json && break
+            sleep 1
+          done
+          node -e "
+            const config = require('/tmp/config.json');
+            if (config.identity.adapterFingerprint !== '3fc7b96ea3546f14169032d070aa48f103de7db048cc8a306cf99227d33d36cf')
+              throw new Error('the served adapter is not the frozen one');
+            console.log('served', config.identity.adapterId, config.identity.adapterVersion, 'on engine', config.identity.engine.version);
+          "
+          curl -fsS http://127.0.0.1:8787/ | grep -q 'SWARM'
+          kill %1
 
       # The adapter fingerprint, both commitment phases and the fixture digest
       # are the values the whole verification story hangs on. Printing them per

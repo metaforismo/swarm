@@ -1173,11 +1173,32 @@ ledger". `staged-survival` is that ledger, specified.
 
 ## 8. Boundary
 
-This document is a contract, not evidence of an implementation. Until the module
-exists in Reveal Engine and passes §6, SWARM's claims rest on the reference
-implementations in this repository: `tools/lib/model.mjs` for pricing and
-`tools/simulate.mjs` for derivation, the two-phase commitment, side-bet
-resolution, the settlement ledger and the verifier.
+**Status against Reveal Engine 0.4.** Since this document was written the engine
+has shipped a lifecycle module named `staged-survival`. It is not this one, and
+its own documentation says so: it resolves a shrinking subset of a fixed entity
+set and "cannot express offspring"
+(`reveal-engine/docs/modules/staged-survival.md` §10), which is the whole of
+SWARM's cohort. Its §10.1 carries an item-by-item verdict against §6 above, and
+the items it marks *not provided* — side bets and per-line cap bases (§6.8, half
+of §6.7), the action chain (§6.11), reconciliation and abandonment (§6.16,
+§6.17) — are exactly the ones SWARM implements above it. So the branching
+population, the ladder, the wild line, the per-line ledger, both commitment
+phases, the chain and the verifier live in this repository's `src/server/`,
+built on the engine primitives §1 requires reused verbatim rather than on a
+module that models a different game. The engine's `staged-survival` is still the
+right neighbour to sit beside: the entropy contract, the fairness identity, the
+cap-unreachability obligation and the choice-timed two-phase scheme are the same
+argument in both, and a future `branching-population` module — which the engine
+names as the honest answer — would replace `src/server/`'s derivation without
+moving a number in this document.
+
+This document is a contract, not evidence of an implementation. Until such a
+module exists in Reveal Engine and passes §6, SWARM's claims rest on the
+reference implementations in this repository: `tools/lib/model.mjs` for pricing
+and `tools/simulate.mjs` for derivation, the two-phase commitment, side-bet
+resolution, the settlement ledger and the verifier — and on the round service in
+`src/server/`, whose every settlement is re-verified by that published verifier
+in the test suite.
 
 What the scheme in §4 does **not** close, stated rather than implied:
 

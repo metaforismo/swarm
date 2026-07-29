@@ -23,19 +23,24 @@ asserted.
 
 | | |
 | --- | --- |
-| Stage | **Specification — build-ready.** Docs, exact paytable, proofs, fixtures and tests. No game client in this repository yet. |
-| Money | Free-play prototype only. No real-money integration exists. |
-| Engine | Consumes a Reveal Engine lifecycle module, `staged-survival`, specified in [docs/ENGINE.md](docs/ENGINE.md) and **not yet implemented** in Reveal Engine 0.2. |
-| Evidence | `npm run verify` locally. Hosted CI (`.github/workflows/ci.yml`) is configured but has never run: nothing has been pushed to the remote, so the cross-version determinism it exists to prove is currently evidenced on one machine only. |
+| Stage | **Playable graybox.** A server-authoritative round service, a portrait browser client, and the specification, exact paytable, proofs and tests they are built from. The information architecture, the flows, the money and the fairness are the real ones; the art is placeholder shapes. Final art, motion polish and sound are a later wave. |
+| Money | Free-play prototype only. In-memory wallet, no real-money integration, no persistence. |
+| Engine | Consumes `@axiom-games/reveal-engine` **0.4** as a package (`vendor/`) for the primitives [docs/ENGINE.md §1](docs/ENGINE.md) requires reused verbatim: exact `Rational` money, `payableWithinCap`, constant-time digest comparison, the error taxonomy, `ENGINE_LIMITS`, and the idempotency and frame-fence discipline. The engine's own `staged-survival` module models a **different** lifecycle — by its own documentation it "cannot express offspring" — so SWARM's branching cohort, ladder, wild line and per-line ledger are implemented in `src/server/` against this repository's contract. [The gap, in full.](#what-the-engine-provides-and-what-it-does-not) |
+| Evidence | `npm run verify` locally. Every settlement the server produces is re-verified by the **published reference verifier** in `tools/simulate.mjs` inside the test suite, so the service and the specification are checked against each other rather than against themselves. Hosted CI (`.github/workflows/ci.yml`) is configured but has never run: nothing has been pushed to the remote, so cross-version determinism is currently evidenced on one machine only. |
 | Certification | None. Not an RNG certificate, not a fairness certificate, not a laboratory or regulatory approval. See [docs/MATH.md §15](docs/MATH.md). |
 
 ```sh
 npm install
+npm run dev              # the whole game at http://127.0.0.1:8787  (Node >= 22.18)
+npm test                 # re-derives every published number, and plays rounds through the API
+npm run verify           # fixture + generated docs + typecheck + tests
 npm run enumerate        # exact paytable, proofs, exact fractions
-npm test                 # re-derives every published number
-npm run verify           # fixture + generated docs + tests
 npm run simulate         # seeded Monte Carlo cross-check and a worked ticket ledger
 ```
+
+`npm run dev` runs the TypeScript server directly, which needs Node's native type
+stripping (**Node 22.18+, 24 or 25**). Everything else, including the whole test
+suite, runs on Node 20.
 
 ---
 
@@ -152,6 +157,80 @@ rather than left for a reader to notice.
 
 ---
 
+## The graybox
+
+```sh
+npm install
+npm run dev            # http://127.0.0.1:8787
+```
+
+One command serves the round service on `/api` and the client from `src/client`.
+The wallet opens at 1,000 free-play credits (`SWARM_OPENING_CREDITS`), the
+abandonment clock is the adapter's 72 hours (`SWARM_ABANDON_TIMEOUT_HOURS`), and
+`PORT` moves the port. Nothing is persisted: restarting the server is a new
+session.
+
+**What is real.** The round lifecycle of [docs/ENGINE.md §5](docs/ENGINE.md), end
+to end: the seed pre-commitment published before a stake exists, client entropy
+generated in the browser and never echoed from the server, a committed 270-draw
+grid, server-authoritative frames with a revision fence, idempotent commands,
+per-line receipts in integer minor units, one harvest commitment per stage, the
+lagged wild-line disclosure, side bets resolved only at settlement, the
+settlement body commitment over the action log, the live action chain, forced
+reconciliation after the timeout, and a verifier that re-derives all eight steps
+of §4.6 in front of the player.
+
+**What is placeholder.** The organisms are flat discs where the gel bells with
+subsurface scattering will go; halation is a box-shadow, not two bloom passes;
+the water is a gradient, not a volumetric; there is no sound; the settlement
+ceremony is timed and tiered but not choreographed; and the environment reveal
+fades rather than dollies. The layout, the type scale, the palette, the beat
+timings and every number are the specified ones.
+
+### The API
+
+| Call | What it does |
+| --- | --- |
+| `GET /api/config` | The adapter identity, the fingerprint, and the whole frozen paytable the client renders its help screen from |
+| `POST /api/rounds` | **Phase 1.** Seals a seed and publishes its pre-commitment. No stake, no entropy, no seed-dependent value |
+| `POST /api/rounds/:id/open` | Binds the client entropy, derives the grid, debits one line per bet. One `DEBIT` receipt per line and nothing else |
+| `POST /api/rounds/:id/advance` | Resolves the next generation. At stage 0 this is the mandatory generation 1 |
+| `POST /api/rounds/:id/harvest` | Credits any legal `k`; `k = units` is a BANK and still owes a `settle()` |
+| `POST /api/rounds/:id/settle` | Reveals the seed, resolves the side bets, publishes the settlement body |
+| `POST /api/rounds/:id/reconcile` | The abandonment rule. `TOO_EARLY` before the timeout |
+| `POST /api/verify` | Runs §4.6 against a submitted proof bundle and returns the eight checks |
+| `GET /api/session` | Balance, signed session result, and the last 50 rounds |
+
+Every mutating call carries an `idempotencyKey` and the `expectedFrameRevision`
+it was fenced to. A retry replays its receipts; a changed payload under the same
+key is `IDEMPOTENCY_CONFLICT`; a stale fence is `STALE_FRAME` and mutates
+nothing.
+
+### What the engine provides, and what it does not
+
+Reveal Engine 0.4 ships a lifecycle module called `staged-survival`, and it is
+not the one [docs/ENGINE.md](docs/ENGINE.md) specifies. Its own documentation
+says why: it resolves a shrinking subset of a fixed entity set and "cannot
+express offspring", which is the whole of SWARM's cohort. So the split is:
+
+| From the engine, imported | Built here, against docs/ENGINE.md |
+| --- | --- |
+| Exact `Rational` arithmetic, `payable` / `payableWithinCap` | The branching cohort, the ladder, the wild line |
+| Constant-time digest comparison, seed normalization, SHA-256 | Both commitment phases and the live action chain |
+| `RevealEngineError`, `ERROR_CODES`, `ENGINE_LIMITS` | The per-line ledger and the per-line cap bases |
+| `commandFingerprint`, `assertIdempotencyKey` | The `StageBook` lifecycle and the abandonment rule |
+| `assertClientEntropy`, `SURVIVAL_LIMITS` from the module | Side-bet pricing and the §4.6 verifier |
+
+`src/server/engine.ts` is that list in code, with the two deviations named: the
+engine does not export `encodeFields` from any subpath, so `src/server/canonical.ts`
+carries a byte-identical port pinned against the reference encoder; and the
+engine's sampler payload has no client-entropy field, so the 11-field payload of
+§4.1 is built here. Both are checked rather than asserted — the tests reproduce
+the frozen adapter fingerprint, the frozen seed pre-commitment and the reference
+implementation's settlement bodies byte for byte.
+
+---
+
 ## Repository map
 
 | Path | What it is |
@@ -160,12 +239,15 @@ rather than left for a reader to notice.
 | [docs/DECISIONS.md](docs/DECISIONS.md) | The design decisions behind the rules above: what was rejected, what it would have cost, and how to reopen it |
 | [docs/MATH.md](docs/MATH.md) | Exact model, paytable, RTP justification, volatility bounds, caps, strategy proof |
 | [docs/ENGINE.md](docs/ENGINE.md) | The `staged-survival` Reveal Engine module and the adapter surface SWARM expects |
+| `src/server/` | The round service: adapter, derivation, commitments, `StageBook`, per-line ledger, verifier, HTTP surface |
+| `src/client/` | The portrait client: stage, value strip, action bar, ceremony, receipt, verify and help sheets |
+| `vendor/` | The Reveal Engine package this repository depends on, exactly as `npm pack` produced it (`npm run engine:pack`) |
 | `tools/enumerate.mjs` | Exhaustive exact enumeration — the proof behind every number |
 | `tools/simulate.mjs` | Reference draw derivation, two-phase commitment, ticket ledger, verifier and seeded Monte Carlo cross-check |
 | `tools/lib/presentation.mjs` | Feedback contracts derived from the model: verdict bands, the chord ladder and its reachability proof, settlement classes, colony layout |
 | `tools/syncdocs.mjs` | Writes the generated tables into the documents; `--check` fails if any is stale |
 | `spec/paytable.v3.json` | Frozen canonical paytable fixture |
-| `tests/` | Vitest suite: re-derives the paytable and asserts the documentation matches it |
+| `tests/` | Vitest suite: re-derives the paytable, asserts the documentation matches it, and plays whole rounds through the API |
 
 ---
 
