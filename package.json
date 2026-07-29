@@ -2,13 +2,15 @@
   "name": "@axiom-games/swarm",
   "version": "0.1.0",
   "private": true,
-  "description": "SWARM — branching-colony instant game: build-ready specification, exact paytable enumeration and proofs",
+  "description": "SWARM \u2014 branching-colony instant game: playable graybox, exact paytable enumeration and proofs",
   "type": "module",
   "license": "UNLICENSED",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
+    "dev": "node --disable-warning=ExperimentalWarning --watch src/server/main.ts",
+    "start": "node --disable-warning=ExperimentalWarning src/server/main.ts",
     "enumerate": "node tools/enumerate.mjs",
     "enumerate:terminals": "node tools/enumerate.mjs --terminals",
     "paytable:write": "node tools/enumerate.mjs --json spec/paytable.v3.json",
@@ -16,11 +18,18 @@
     "docs:sync": "node tools/syncdocs.mjs",
     "docs:check": "node tools/syncdocs.mjs --check",
     "simulate": "node tools/simulate.mjs --rounds 50000 --policy RUN",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "verify": "npm run paytable:check && npm run docs:check && npm test"
+    "engine:pack": "node scripts/pack-engine.mjs",
+    "verify": "npm run paytable:check && npm run docs:check && npm run typecheck && npm test"
   },
   "devDependencies": {
+    "@types/node": "^24.13.3",
+    "typescript": "^5.9.3",
     "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "@axiom-games/reveal-engine": "file:vendor/axiom-games-reveal-engine-0.4.0.tgz"
   }
 }
