@@ -1,0 +1,24 @@
+{
+  "name": "@axiom-games/swarm",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SWARM — branching-colony instant game: build-ready specification, exact paytable enumeration and proofs",
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "enumerate": "node tools/enumerate.mjs",
+    "enumerate:terminals": "node tools/enumerate.mjs --terminals",
+    "paytable:write": "node tools/enumerate.mjs --json spec/paytable.v1.json",
+    "paytable:check": "node tools/enumerate.mjs --check spec/paytable.v1.json",
+    "simulate": "node tools/simulate.mjs --rounds 50000 --policy RUN",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "verify": "npm run paytable:check && npm test"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.10"
+  }
+}
