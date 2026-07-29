@@ -4,9 +4,16 @@
  * Every refusal a client can provoke is one of these codes. They are the codes
  * `docs/ENGINE.md` names — `INVALID_REQUEST`, `STALE_FRAME`,
  * `IDEMPOTENCY_CONFLICT`, `ROUND_SETTLED`, `EXPOSURE_LIMIT`, `TOO_EARLY`, and the
- * verification codes of §4.6 — plus the two a wallet and a router need. Nothing
- * on the wire ever carries a stack trace: a hostile payload gets a code and a
- * path, exactly like a legitimate mistake does.
+ * verification codes of §4.6 — plus the two a wallet and a router need, and
+ * `LIMIT_REACHED` for the player-set session limits of
+ * [DESIGN.md §9.9](../../docs/DESIGN.md). Nothing on the wire ever carries a
+ * stack trace: a hostile payload gets a code and a path, exactly like a
+ * legitimate mistake does.
+ *
+ * `LIMIT_REACHED` is the only refusal in the taxonomy that is *not* a defect on
+ * the client's part. It answers a stake the player's own limit refuses, so it
+ * carries the field that bound it in its path and is rendered as a state rather
+ * than as an error.
  */
 
 export const SWARM_ERROR_CODES = Object.freeze([
@@ -15,6 +22,7 @@ export const SWARM_ERROR_CODES = Object.freeze([
   'IDEMPOTENCY_CONFLICT',
   'ROUND_SETTLED',
   'EXPOSURE_LIMIT',
+  'LIMIT_REACHED',
   'TOO_EARLY',
   'INSUFFICIENT_FUNDS',
   'ROUND_NOT_FOUND',
@@ -67,6 +75,7 @@ const STATUS: Record<SwarmErrorCode, number> = {
   IDEMPOTENCY_CONFLICT: 409,
   ROUND_SETTLED: 409,
   EXPOSURE_LIMIT: 422,
+  LIMIT_REACHED: 403,
   TOO_EARLY: 409,
   INSUFFICIENT_FUNDS: 422,
   ROUND_NOT_FOUND: 404,

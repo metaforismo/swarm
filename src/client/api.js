@@ -52,6 +52,13 @@ export const api = {
   settle: (roundId, body) =>
     request('POST', `/api/rounds/${encodeURIComponent(roundId)}/settle`, body),
   verify: (proof) => request('POST', '/api/verify', { proof }),
+  /**
+   * `docs/DESIGN.md` §9.9. Limits and the reality-check clock are server state,
+   * not client state: a limit a reload clears is not a limit.
+   */
+  limits: () => request('GET', '/api/limits'),
+  setLimit: (field, value) => request('POST', '/api/limits', { [field]: value }),
+  acknowledgeRealityCheck: () => request('POST', '/api/reality-check'),
 };
 
 /**

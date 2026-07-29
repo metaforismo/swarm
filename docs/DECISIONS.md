@@ -166,3 +166,117 @@ a double-tap landing on a money control.
 
 **Reopen if.** The floors are tuned; the rule that they do not vary with the sign
 of the position or the size of the win is not a tuning parameter.
+
+---
+
+## D6 — The wild line is never printed beside the player's own populations
+
+**Decided.** S8a states how much of the completed wild line the player's round
+covered (`generation 1 to 4 of 9`) and lights those bars on the chart. It does
+**not** print the player's own population sequence under the wild line's
+([DESIGN.md §9.8](DESIGN.md)).
+
+**Rejected.** The first build's `YOUR COLONY 5 → 2 → 3 → 2 → 0` row, one line
+below `5 → 4 → 4 → 2 → 0`, in the same type.
+
+**Why.** Every clause of §9.8 permits it — the round is over, the counterfactual
+is completed, no live decision is on screen — and it still violates the section's
+closing sentence, which is the part that was written to survive a future feature:
+the wild line may be shown as the state of a bet, *never as an alternative colony
+they could have had*. Containment ([MATH.md §7.3](MATH.md)) proves the player's
+row can never be the larger one, so the comparison has exactly one possible
+reading. It was the one place in the product where the game itself drew
+it, and it was inherited rather than decided.
+
+**What it costs.** A player who wants to compare the two sequences taps once more:
+their own populations are on the receipt (S8), where they are their own record
+rather than a rival's.
+
+**Reopen if.** Never as a side-by-side. If comprehension testing shows players do
+not understand what the wild line resolves on, the answer is copy on S8a or a
+better harvest-beat caption, not the row.
+
+---
+
+## D7 — Session limits tighten immediately and loosen only after a cool-off
+
+**Decided.** Setting or lowering a stake budget, loss limit or time limit binds on
+the next stake; raising or removing one is scheduled and lands 24 hours later,
+with the pending value and its effective moment published
+([DESIGN.md §9.9](DESIGN.md)). A tightening cancels a pending loosening.
+
+**Rejected.** Symmetric limits, where a change of any kind applies at once.
+
+**Why.** The moment a limit binds is exactly the moment a player wants it gone, so
+a symmetric limit is a limit that is present until it matters. The asymmetry is
+the whole mechanism and it costs a player who genuinely wants to raise one a day's
+wait — a cost paid entirely by the case the control is not for. It is also the
+standard shape of the control wherever it is regulated, so shipping the symmetric
+version would be a deliberate weakening rather than a simplification.
+
+**What it costs.** A player who sets a limit too low in error is held to it for a
+day. Mitigated by presets rather than free entry, by publishing the pending change
+rather than silently dropping it, and by never letting a limit interrupt a round
+already staked.
+
+**Reopen if.** The cool-off length is a tuning parameter and is served from
+configuration. The asymmetry is not.
+
+---
+
+## D8 — The speed-of-play floors are enforced by the server, as waits
+
+**Decided.** All three floors of D5 are enforced by the round service as well as
+by the client, and enforced by **holding** a command until its floor has passed
+rather than by refusing it (`src/server/pacing.ts`).
+
+**Rejected.** (a) Client-only floors, which is what the first build shipped: the
+documented API could be driven at roughly 26 rounds a second, so §9.7's "a whole
+round cannot be chained faster than this" was false of the product and true only
+of one client. (b) Refusing an early command with a typed error, which is smaller
+and faster and turns every floor into a deadline — the exact thing §9.5 forbids.
+
+**Why.** A floor is a statement about the product. A wait keeps it one: the
+command is processed exactly as it would have been, no floor can cost a payout,
+and there is no new error a player has to understand. The client keeps its own
+copy so the *screen* is paced rather than the network, and both read the same
+three numbers from `/api/config`.
+
+**What it costs.** A held connection per early command, which is acceptable at
+free-play scale and would need a queue rather than a sleep at real scale. Tests
+that play dozens of rounds set the floors to zero through the documented service
+option, and the floors themselves are asserted with the defaults and real elapsed
+time.
+
+**Reopen if.** Real-scale deployment. The mechanism changes; the property that a
+floor is never a refusal does not.
+
+---
+
+## D9 — The fairness surface names two module identities, never one
+
+**Decided.** `/api/config` publishes SWARM's module contract
+(`reveal-engine/staged-survival-v1`, owned by [ENGINE.md](ENGINE.md), implemented
+in `src/server/`) and the engine's own identities (`reveal-engine/module-v1`, the
+shipped `staged-survival` 1.0.0) as separate fields with their owners named, and
+the help and verify sheets render both under "Who implements what".
+
+**Rejected.** (a) The first build's single `MODULE reveal-engine/staged-survival-v1`
+row directly above `ENGINE @axiom-games/reveal-engine 0.4.0`. Beside an engine
+name and version, on the panel where a player evaluates fairness, that reads as a
+conformance claim to a module the engine ships — and the module the engine ships
+cannot express this game, by its own documentation. The honesty was real but it
+lived in README prose a player never sees. (b) Renaming the identifier itself. It
+is bound into the adapter fingerprint and therefore into every draw and both
+commitments, so changing it would move every frozen vector in the repository to
+fix a labelling defect.
+
+**Why.** Provenance is a fairness claim. Where the repository is careful about
+what commit-reveal does and does not prove, it has to be equally careful about who
+wrote the lifecycle being proved.
+
+**What it costs.** A longer panel, and a player has to read two rows where they
+read one. Both rows are true.
+
+**Reopen if.** Reveal Engine ships a branching-population module and SWARM adopts
+it. Then there is one identity because there is one implementation.

@@ -8,7 +8,7 @@
  * without the play pattern it belongs to, and the rounding qualifier is mandatory
  * wherever "every way of playing returns the same" is said.
  */
-import { credits, multiple, percent, shortHex, signedCredits, truncate } from './format.js';
+import { credits, duration, elapsed, multiple, percent, shortHex, signedCredits, truncate } from './format.js';
 
 const el = (tag, className, text) => {
   const node = document.createElement(tag);
@@ -16,6 +16,36 @@ const el = (tag, className, text) => {
   if (text !== undefined) node.textContent = text;
   return node;
 };
+
+/**
+ * The help-resource panel of `docs/DESIGN.md` §9.9.
+ *
+ * Independent support organisations, served by `/api/config` so the client
+ * cannot drift from what the operator publishes, and real links rather than
+ * placeholder text: a help resource that does not resolve is not a help
+ * resource, whatever the fidelity of everything around it.
+ */
+function helpResourcesPanel(config) {
+  const node = panel('If gambling stops being fun');
+  node.append(
+    el(
+      'p',
+      'small muted',
+      'SWARM is a free-play prototype and none of these credits are money. These organisations are independent of this game and of Axiom Games, and they help with real gambling wherever you play it.',
+    ),
+  );
+  for (const resource of config.protection?.helpResources ?? []) {
+    const link = el('a', 'resource');
+    link.href = resource.url;
+    link.target = '_blank';
+    link.rel = 'noreferrer noopener';
+    link.append(el('span', null, resource.name));
+    link.append(el('span', 'url', resource.url));
+    link.append(el('span', 'detail', resource.detail));
+    node.append(link);
+  }
+  return node;
+}
 
 function row(key, value, valueClass) {
   const node = el('div', 'row');
@@ -237,6 +267,10 @@ export function verifySheet(config, view, result, witness = []) {
   );
   fragment.append(offline);
 
+  // The screen where a player evaluates fairness is the screen that has to say
+  // who wrote the lifecycle they are verifying.
+  fragment.append(provenancePanel(config));
+
   return fragment;
 }
 
@@ -261,6 +295,8 @@ export function wildSheet(config, view) {
   const peak = Math.max(wild.peak, 1);
   wild.populations.forEach((population, index) => {
     const bar = el('div', 'bar');
+    // The lit bars are the generations the player's own round covered — a window
+    // marker on the *wild* line, not their colony drawn beside it.
     if (index < proof.populations.length) bar.classList.add('player');
     bar.style.height = `${Math.max(2, (population / peak) * 100)}%`;
     bar.title = `generation ${index + 1}: ${population}`;
@@ -270,8 +306,28 @@ export function wildSheet(config, view) {
   chart.append(row('Populations', wild.populations.join(' → ')));
   chart.append(row('Peak', String(wild.peak)));
   chart.append(row('Terminal', wild.terminal));
+  /*
+   * `docs/DESIGN.md` §9.8 permits the completed counterfactual here, and its
+   * closing sentence says what it may never become: "an alternative colony they
+   * could have had". A `YOUR COLONY 5 → 2 → 3 → 2 → 0` row printed directly under
+   * `5 → 4 → 4 → 2 → 0` is the game itself drawing that comparison, in the one
+   * place it had promised not to. It is cut. What replaces it is the fact the bet
+   * actually needed: how much of this line the player's round covered.
+   */
   chart.append(
-    row('Your colony', proof.populations.join(' → ') || '—'),
+    row(
+      'Your round covered',
+      proof.populations.length === 0
+        ? '—'
+        : `generation 1 to ${proof.populations.length} of ${wild.populations.length}`,
+    ),
+  );
+  chart.append(
+    el(
+      'p',
+      'small muted',
+      'The lit bars are the generations your round ran for. This is the line your side bets resolve on, not a colony you could have had: it is never harvested, so it is never the colony you were holding.',
+    ),
   );
   fragment.append(chart);
 
@@ -286,16 +342,39 @@ export function wildSheet(config, view) {
   return fragment;
 }
 
-/** S10 — history and the session summary. Never a positive-only "wins" view. */
-export function historySheet(session) {
+/**
+ * S10 — history and the session summary. Never a positive-only "wins" view.
+ *
+ * This is what the top-bar `MENU` opens, so `docs/DESIGN.md` §9.9's first
+ * requirement lands here: **session timer and net result in the top-bar menu**.
+ * The timer ticks — `onTick` is handed the element so the caller can keep it
+ * live — because a session clock that is only correct at the moment the sheet
+ * opened is a screenshot, not a timer.
+ */
+export function historySheet(session, handlers = {}) {
   const fragment = document.createDocumentFragment();
   const summary = panel('This session');
+  const clock = el('span', 'v', elapsed(session.elapsedMs ?? 0));
+  const clockRow = el('div', 'row');
+  clockRow.append(el('span', 'k', 'Session time'));
+  clockRow.append(clock);
+  summary.append(clockRow);
+  handlers.onTick?.(clock, session);
   summary.append(row('Opening balance', credits(session.openingUnits)));
   summary.append(row('Balance', credits(session.balanceUnits)));
   summary.append(row('Total staked', credits(session.stakedUnits)));
   summary.append(row('Total credited', credits(session.creditedUnits)));
   summary.append(row('Net result', signedCredits(session.netUnits)));
   fragment.append(summary);
+
+  // §9.9: limits reachable in two taps. This sheet is the first (MENU); the
+  // control below is the second.
+  if (handlers.onSaferPlay !== undefined) {
+    const safer = el('button', 'cta ghost', 'LIMITS & SAFER PLAY');
+    safer.type = 'button';
+    safer.addEventListener('click', () => handlers.onSaferPlay());
+    fragment.append(safer);
+  }
 
   const rounds = panel(`Last ${session.history.length} round(s)`);
   if (session.history.length === 0) rounds.append(el('p', 'small muted', 'No rounds yet.'));
@@ -313,6 +392,142 @@ export function historySheet(session) {
       ),
     );
   fragment.append(rounds);
+  return fragment;
+}
+
+/** Presets each limit steps through. `null` is the first stop and means "off". */
+const LIMIT_PRESETS = {
+  budgetUnits: [null, 25n, 50n, 100n, 250n, 500n, 1000n].map((value) =>
+    value === null ? null : value * 1000000n,
+  ),
+  lossUnits: [null, 10n, 25n, 50n, 100n, 250n, 500n].map((value) =>
+    value === null ? null : value * 1000000n,
+  ),
+  timeMinutes: [null, 15, 30, 60, 120, 180, 240],
+};
+
+/**
+ * Safer play — `docs/DESIGN.md` §9.9's limits, reality check and help resources.
+ *
+ * Two taps from the top bar (`MENU` → `LIMITS & SAFER PLAY`) and one from the
+ * free-play marker at the bottom of every screen.
+ *
+ * The asymmetry is the point and it is stated on the screen rather than
+ * discovered: setting or lowering a limit binds on the next stake, while raising
+ * or removing one waits out a cool-off. A limit that can be lifted at the moment
+ * it starts to bind is a limit that protects nobody.
+ */
+export function saferPlaySheet(config, session, handlers = {}) {
+  const fragment = document.createDocumentFragment();
+  const limits = session.limits ?? { pending: [] };
+  const protection = config.protection ?? {};
+
+  const state = panel('This session');
+  const clock = el('span', 'v', elapsed(session.elapsedMs ?? 0));
+  const clockRow = el('div', 'row');
+  clockRow.append(el('span', 'k', 'Session time'));
+  clockRow.append(clock);
+  state.append(clockRow);
+  handlers.onTick?.(clock, session);
+  state.append(row('Total staked', credits(session.stakedUnits)));
+  state.append(row('Net result', signedCredits(session.netUnits)));
+  fragment.append(state);
+
+  const controls = panel('Your limits');
+  controls.append(
+    el(
+      'p',
+      'small muted',
+      `Off by default. Setting or lowering a limit applies to your next stake; raising or removing one takes effect ${protection.limitCoolOffHours ?? 24} hours later. A limit never interrupts a round you have already staked — you can always finish it and bank it.`,
+    ),
+  );
+  for (const definition of protection.limits ?? []) {
+    const presets = LIMIT_PRESETS[definition.field] ?? [null];
+    const current = limits[definition.field] ?? null;
+    const normalized =
+      current === null ? null : definition.kind === 'money' ? BigInt(current) : Number(current);
+    const format = (value) =>
+      value === null ? 'off' : definition.kind === 'money' ? credits(value) : duration(value);
+
+    const block = el('div');
+    block.style.padding = '8px 0';
+    const head = el('div', 'row');
+    head.append(el('span', 'k', definition.label));
+    block.append(head);
+    block.append(el('p', 'small muted', definition.description));
+
+    const stepper = el('div', 'stepper-control');
+    const down = el('button', null, '−');
+    down.type = 'button';
+    down.setAttribute('aria-label', `Lower the ${definition.label.toLowerCase()}`);
+    const value = el('div', 'value', format(normalized));
+    value.style.fontSize = '20px';
+    const up = el('button', null, '+');
+    up.type = 'button';
+    up.setAttribute('aria-label', `Raise the ${definition.label.toLowerCase()}`);
+    const indexOf = () => {
+      const found = presets.findIndex(
+        (preset) => (preset === null) === (normalized === null) && String(preset) === String(normalized),
+      );
+      return found === -1 ? 0 : found;
+    };
+    const step = (direction) => {
+      const next = Math.min(presets.length - 1, Math.max(0, indexOf() + direction));
+      const chosen = presets[next];
+      handlers.onLimit?.(
+        definition.field,
+        chosen === null ? null : definition.kind === 'money' ? chosen.toString() : chosen,
+      );
+    };
+    down.addEventListener('click', () => step(-1));
+    up.addEventListener('click', () => step(1));
+    stepper.append(down, value, up);
+    block.append(stepper);
+
+    const pending = (limits.pending ?? []).find((entry) => entry.field === definition.field);
+    if (pending !== undefined) {
+      const target =
+        pending.value === null
+          ? 'off'
+          : definition.kind === 'money'
+            ? credits(pending.value)
+            : duration(Number(pending.value));
+      block.append(
+        el(
+          'p',
+          'small muted',
+          `Scheduled: ${target}, from ${new Date(pending.effectiveAt).toLocaleString()}. Until then this limit stays where it is. Lowering it again cancels the change.`,
+        ),
+      );
+    }
+    controls.append(block);
+  }
+  fragment.append(controls);
+
+  const check = panel('Reality check');
+  check.append(row('Every', duration(protection.realityCheckMinutes ?? 30)));
+  check.append(row('Since the last one', elapsed(session.realityCheck?.sinceMs ?? 0)));
+  check.append(
+    el(
+      'p',
+      'small muted',
+      'A summary of your session appears between rounds at that interval. It cannot be turned off, and it never appears while a decision is open.',
+    ),
+  );
+  fragment.append(check);
+
+  fragment.append(helpResourcesPanel(config));
+
+  const boundary = panel('What these credits are');
+  boundary.append(
+    el(
+      'p',
+      'small muted',
+      `${protection.freePlayNotice ?? 'FREE-PLAY DEMO CREDITS · NO CASH VALUE'}. The balance is an in-memory number that resets when the server restarts. Nothing here can be deposited, withdrawn or exchanged, and there is no real-money mode behind it.`,
+    ),
+  );
+  fragment.append(boundary);
+
   return fragment;
 }
 
@@ -443,8 +658,6 @@ export function helpSheet(config) {
 
   const fairness = panel('Fairness');
   fairness.append(row('Adapter', `${config.identity.adapterId} @ ${config.identity.adapterVersion}`));
-  fairness.append(row('Module', config.identity.moduleApi));
-  fairness.append(row('Engine', `${config.identity.engine.name} ${config.identity.engine.version}`));
   fairness.append(row('Fingerprint', shortHex(config.identity.adapterFingerprint)));
   fairness.append(row('Paytable', `${config.identity.paytableSchema} · ${shortHex(config.identity.paytableDigest)}`));
   fairness.append(
@@ -456,6 +669,8 @@ export function helpSheet(config) {
   );
   fragment.append(fairness);
 
+  fragment.append(provenancePanel(config));
+
   const boundary = panel('What this is not');
   boundary.append(
     el(
@@ -466,5 +681,37 @@ export function helpSheet(config) {
   );
   fragment.append(boundary);
 
+  fragment.append(helpResourcesPanel(config));
+
   return fragment;
+}
+
+/**
+ * Who built what — on the screen where a player evaluates fairness, not only in
+ * the repository's prose.
+ *
+ * `reveal-engine/staged-survival-v1` is **SWARM's** module contract, specified in
+ * `docs/ENGINE.md` and implemented in this repository. It is not the identity of
+ * the `staged-survival` module Reveal Engine 0.4 ships, and printing it in a row
+ * labelled `MODULE` directly above the engine's name and version claimed a
+ * conformance that does not exist. Both identities are now named with their
+ * owners, and the split is stated in the same panel.
+ */
+function provenancePanel(config) {
+  const engine = config.identity.engine;
+  const contract = config.identity.adapterContract;
+  const node = panel('Who implements what');
+  node.append(row('Game', `${config.identity.adapterId} @ ${config.identity.adapterVersion}`));
+  node.append(row('Its module contract', contract.id));
+  node.append(row('Written by', contract.owner));
+  node.append(row('Implemented by', contract.implementedBy));
+  node.append(row('Engine package', `${engine.name} ${engine.version}`));
+  node.append(row('Engine API', engine.apiVersion));
+  node.append(
+    row('Engine module API', `${engine.moduleApiVersion} · ${engine.shippedModule.id} ${engine.shippedModule.version}`),
+  );
+  node.append(el('p', 'small muted', `From the engine: ${engine.provides}`));
+  node.append(el('p', 'small muted', `Not from the engine: ${engine.doesNotProvide}`));
+  node.append(el('p', 'small muted', contract.note));
+  return node;
 }

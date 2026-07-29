@@ -65,6 +65,18 @@ export { assertIdempotencyKey, commandFingerprint } from '@axiom-games/reveal-en
 export { ENGINE_LIMITS, ERROR_CODES, RevealEngineError } from '@axiom-games/reveal-engine/api';
 
 /**
+ * The engine's own version identities, imported rather than restated.
+ *
+ * These are what the fairness surface publishes as *the engine's*: the API
+ * version of the installed package and the module-API version its lifecycle
+ * modules conform to. SWARM's `MODULE_API` — `reveal-engine/staged-survival-v1`
+ * — is a different string with a different owner: it is the contract identity of
+ * `docs/ENGINE.md`, a module that does not exist in the engine, and publishing
+ * the two side by side is the only way a player can tell them apart.
+ */
+export { ENGINE_API_VERSION, MODULE_API_VERSION } from '@axiom-games/reveal-engine/api';
+
+/**
  * The `staged-survival` lifecycle module's own client-entropy contract.
  *
  * This is the one rule SWARM and the shipped module agree on exactly: 32 bytes of

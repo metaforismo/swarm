@@ -66,7 +66,26 @@ jobs:
             const config = require('/tmp/config.json');
             if (config.identity.adapterFingerprint !== '3fc7b96ea3546f14169032d070aa48f103de7db048cc8a306cf99227d33d36cf')
               throw new Error('the served adapter is not the frozen one');
+            // Provenance: SWARM's module contract and the engine's own identities
+            // are two different things and the running surface must serve both.
+            // A single 'moduleApi' field beside the engine's version reads as a
+            // conformance claim to a module that cannot express this game.
+            if (config.identity.moduleApi !== undefined)
+              throw new Error('the served identity collapsed both module identities into one field');
+            if (config.identity.adapterContract.id !== 'reveal-engine/staged-survival-v1')
+              throw new Error('the adapter contract is not the one docs/ENGINE.md declares');
+            if (config.identity.engine.moduleApiVersion !== 'reveal-engine/module-v1')
+              throw new Error('the engine module API is not the engine\`s own');
+            if (config.identity.engine.shippedModule.id !== 'staged-survival')
+              throw new Error('the shipped engine module is not named');
+            // docs/DESIGN.md §9.7 and §9.9 are product surfaces, so the served
+            // configuration has to carry them.
+            if (config.pacing.roundCycleMs !== 2500 || config.pacing.enforcedBy !== 'server and client')
+              throw new Error('the speed-of-play floors are not served as server-enforced');
+            if (config.protection.realityCheckMinutes !== 30 || config.protection.helpResources.length < 3)
+              throw new Error('the player-protection configuration is missing');
             console.log('served', config.identity.adapterId, config.identity.adapterVersion, 'on engine', config.identity.engine.version);
+            console.log('contract', config.identity.adapterContract.id, '(implemented by', config.identity.adapterContract.implementedBy + ')');
           "
           curl -fsS http://127.0.0.1:8787/ | grep -q 'SWARM'
           kill %1

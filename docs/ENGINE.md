@@ -1192,6 +1192,20 @@ argument in both, and a future `branching-population` module — which the engin
 names as the honest answer — would replace `src/server/`'s derivation without
 moving a number in this document.
 
+**And the running surface has to say so, not just this document.** The identity in
+§2 — `reveal-engine/staged-survival-v1` — is *this document's*, owned here and
+implemented in `src/server/`. It is not the identity of the module Reveal Engine
+0.4 ships, which is `staged-survival` @ `1.0.0` under module API
+`reveal-engine/module-v1`. The first graybox published the first string in a field
+called `moduleApi` and rendered it in a row labelled `MODULE`, directly above the
+engine's package name and version, on the panel where a player evaluates
+fairness — where one version string beside another reads as a conformance claim.
+`/api/config` now publishes both, each with its owner and with the split between
+what the engine provides and what it does not, and the help and verify sheets
+render them. Provenance is a fairness claim: a repository this careful about what
+commit-reveal does not prove has to be equally careful about who wrote the
+lifecycle being proved.
+
 This document is a contract, not evidence of an implementation. Until such a
 module exists in Reveal Engine and passes §6, SWARM's claims rest on the
 reference implementations in this repository: `tools/lib/model.mjs` for pricing

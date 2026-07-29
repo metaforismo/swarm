@@ -17,6 +17,8 @@ import { StageBook, type CommandResult, type StageFrame } from './book.ts';
 import { seedCommitment } from './commitment.ts';
 import { roundContext } from './derivation.ts';
 import { fail } from './errors.ts';
+import { Pacer, parsePacing, type PacingFloors } from './pacing.ts';
+import { SessionProtection } from './protection.ts';
 import type { Settlement } from './settlement.ts';
 import { Wallet } from './wallet.ts';
 
@@ -39,6 +41,16 @@ export interface ServiceOptions {
   readonly maxLiveRounds?: number;
   /** Bound on settled rounds kept for the history view. */
   readonly historyLimit?: number;
+  /**
+   * `docs/DESIGN.md` §9.7's speed-of-play floors, enforced server-side as waits.
+   * Measured on the real wall clock, not on `clock` — see `./pacing.ts`. Tests
+   * that drive many rounds set them to zero.
+   */
+  readonly pacing?: Partial<PacingFloors>;
+  /** `docs/DESIGN.md` §9.9's reality-check interval. Default 30 minutes. */
+  readonly realityCheckMinutes?: number;
+  /** How long a *loosened* session limit waits before it binds. Default 24 hours. */
+  readonly limitCoolOffHours?: number;
 }
 
 export interface RoundRecord {
@@ -70,6 +82,10 @@ export class RoundService {
   readonly wallet: Wallet;
   readonly startedAt: number;
   readonly abandonedRoundTimeoutHours: number;
+  /** §9.7's floors, and the gate that enforces them. */
+  readonly pacer: Pacer;
+  /** §9.9's limits, reality check and help resources. */
+  readonly protection: SessionProtection;
   readonly #clock: () => number;
   readonly #seedSource: (roundId: string) => string;
   readonly #roundIdSource: (counter: number) => string;
@@ -90,6 +106,28 @@ export class RoundService {
     this.#maxLiveRounds = options.maxLiveRounds ?? 64;
     this.#historyLimit = options.historyLimit ?? 50;
     this.startedAt = this.#clock();
+    this.pacer = new Pacer(parsePacing(options.pacing));
+    this.protection = new SessionProtection({
+      clock: this.#clock,
+      startedAt: this.startedAt,
+      realityCheckMinutes: options.realityCheckMinutes,
+      limitCoolOffHours: options.limitCoolOffHours,
+    });
+  }
+
+  /**
+   * The binding session limit, if the player set one that now refuses a stake of
+   * `ticketUnits`. Published in the session view so the client can show a locked
+   * state instead of provoking a refusal to find out (`docs/DESIGN.md` §9.9).
+   *
+   * The default probe is the **smallest legal ticket**, not zero. "Is a stake of
+   * nothing refused?" is never the question a stake budget answers — under a
+   * budget of exactly what has been staked, a zero probe reports no limit while
+   * every real stake is refused, and the client would render an unlocked screen
+   * in front of a locked session.
+   */
+  limitReached(ticketUnits = SWARM.risk.minStakeUnits): { field: string; message: string; path: string } | null {
+    return this.protection.reached(ticketUnits, this.wallet.stakedUnits, this.wallet.netUnits);
   }
 
   get now(): number {
@@ -172,6 +210,10 @@ export class RoundService {
     const total =
       request.stakeUnits +
       (request.sideBets ?? []).reduce((sum, selection) => sum + selection.stakeUnits, 0n);
+    // A player-set limit is checked before the wallet and before the grid: the
+    // one thing a limit refuses is a stake, and it refuses it before any money
+    // moves and before a seed-dependent value exists (`docs/DESIGN.md` §9.9).
+    this.protection.assertMayStake(total, this.wallet.stakedUnits, this.wallet.netUnits);
     this.wallet.assertCanAfford(total);
     const context = roundContext(roundId, request.clientEntropy);
     const book = new StageBook(context, record.seed, record.seedCommitment);
@@ -247,6 +289,8 @@ export class RoundService {
 
   #closeRound(record: RoundRecord, result: CommandResult<Settlement>): void {
     this.wallet.post(result.receipts);
+    // The settlement hold (§9.7): the next round cannot open inside it.
+    this.pacer.settled(record.roundId);
     const settlement = result.value;
     record.settledAt = this.#clock();
     record.lastCommandAt = record.settledAt;
@@ -278,6 +322,7 @@ export class RoundService {
       // transcript: there is nothing to settle, so it is simply dropped.
       if (record.book === null) {
         this.#rounds.delete(record.roundId);
+        this.pacer.forget(record.roundId);
         continue;
       }
       const result = record.book.reconcile(`reconcile:${record.roundId}`);
@@ -294,7 +339,9 @@ export class RoundService {
       .sort((left, right) => (left.settledAt as number) - (right.settledAt as number));
     while (settled.length > this.#historyLimit) {
       const oldest = settled.shift();
-      if (oldest !== undefined) this.#rounds.delete(oldest.roundId);
+      if (oldest === undefined) continue;
+      this.#rounds.delete(oldest.roundId);
+      this.pacer.forget(oldest.roundId);
     }
   }
 }

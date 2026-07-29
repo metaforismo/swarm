@@ -45,8 +45,10 @@
 
         <!-- value strip: yield, colony value, the stake line, side-bet chips -->
         <section class="strip" aria-label="Colony value">
+          <!-- The yield line spans the strip: it is a one-line reading (§5) and a
+               side-bet chip beside it must not be able to fold it onto two. -->
+          <div class="yield" id="yield">YIELD —</div>
           <div class="strip-main">
-            <div class="yield" id="yield">YIELD —</div>
             <div class="colony-value" id="colony-value">—</div>
             <div class="delta" id="delta"></div>
             <div class="position" id="position"></div>
@@ -72,8 +74,20 @@
           <div class="ladder-chip" id="ladder-chip"></div>
         </footer>
 
+        <!-- The free-play marker: on every screen, over every overlay, and the
+             one-tap route to the safer-play sheet (§9.9). -->
+        <button
+          class="freeplay"
+          id="freeplay"
+          type="button"
+          aria-label="Free-play demo credits, no cash value. Open safer play: session limits, reality check and help resources."
+        >
+          <span id="freeplay-text">FREE-PLAY DEMO CREDITS · NO CASH VALUE</span>
+          <span class="freeplay-link">SAFER PLAY</span>
+        </button>
+
         <!-- S0 — first-round explainer ------------------------------------- -->
-        <section class="overlay" id="s0" hidden aria-label="How SWARM works">
+        <section class="overlay vent-idle" id="s0" hidden aria-label="How SWARM works">
           <h1>SWARM</h1>
           <div class="panel">
             <h2 style="margin-top: 0">1 · Every generation</h2>
@@ -98,11 +112,20 @@
         </section>
 
         <!-- S1 — stake &amp; seed ------------------------------------------- -->
-        <section class="overlay" id="s1" hidden aria-label="Stake and seed">
+        <section class="overlay vent-idle" id="s1" hidden aria-label="Stake and seed">
           <h1>SEED A COLONY</h1>
           <p class="small">
             Three organisms at a vent in the dark. Generation 1 resolves without a decision.
           </p>
+
+          <!-- A session limit the player set is a state, not an error (§9.9). -->
+          <div class="panel locked" id="limit-lock" hidden>
+            <div class="label">Session limit reached</div>
+            <p class="small" id="limit-lock-copy" style="margin: 8px 0 0"></p>
+            <button class="cta ghost" id="limit-lock-open" type="button" style="margin-top: 10px">
+              Limits &amp; safer play
+            </button>
+          </div>
 
           <div class="panel">
             <div class="label">Colony stake</div>
@@ -205,6 +228,25 @@
             <button id="open-verify" type="button">Verify</button>
             <button id="open-wild" type="button" hidden>Wild line</button>
           </div>
+        </section>
+
+        <!-- Reality check — every 30 minutes, between rounds, never at a decision -->
+        <section class="overlay vent-idle" id="reality" hidden aria-label="Reality check">
+          <div class="spacer" style="flex: 1"></div>
+          <h1>YOU HAVE BEEN PLAYING FOR</h1>
+          <div class="reality-clock" id="reality-elapsed">0:00</div>
+          <div class="panel">
+            <div class="row"><span class="k">Total staked</span><span class="v" id="reality-staked">—</span></div>
+            <div class="row"><span class="k">Total returned</span><span class="v" id="reality-credited">—</span></div>
+            <div class="row"><span class="k">Net result</span><span class="v" id="reality-net">—</span></div>
+          </div>
+          <p class="small">
+            These are free-play credits with no cash value. This check appears every
+            <span id="reality-interval">30</span> minutes and cannot be turned off.
+          </p>
+          <div class="spacer" style="flex: 1"></div>
+          <button class="cta" id="reality-continue" type="button">CONTINUE PLAYING</button>
+          <button class="cta ghost" id="reality-limits" type="button">Limits &amp; safer play</button>
         </section>
 
         <!-- sheets: receipt · verify · wild line · history · help ----------- -->

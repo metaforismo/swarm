@@ -13,8 +13,14 @@ import { fileURLToPath } from 'node:url';
 import { toDecimal } from '../../tools/lib/rational.mjs';
 import { GRID_SIZE, SLOTS, SWARM, adapterFingerprint } from './adapter.ts';
 import type { StageFrame } from './book.ts';
-import type { Rational } from './engine.ts';
+import { ENGINE_API_VERSION, MODULE_API_VERSION, type Rational } from './engine.ts';
+import {
+  STAGED_SURVIVAL_MODULE_ID,
+  STAGED_SURVIVAL_MODULE_VERSION,
+} from '@axiom-games/reveal-engine/modules/staged-survival';
 import { fail } from './errors.ts';
+import type { PacingFloors } from './pacing.ts';
+import { HELP_RESOURCES } from './protection.ts';
 import { PAYTABLE, SIDE_BETS } from './paytable.ts';
 import type { Receipt, Settlement } from './settlement.ts';
 import type { HistoryEntry } from './service.ts';
@@ -224,17 +230,52 @@ export function parseProofBundle(input: unknown): ProofBundle {
  * enumerated one: the source is `spec/paytable.v3.json`, the frozen artifact CI
  * compares byte for byte against a fresh enumeration.
  */
-export function wireConfig(options: { abandonedRoundTimeoutHours: number }): Record<string, unknown> {
+export function wireConfig(options: {
+  abandonedRoundTimeoutHours: number;
+  pacing: PacingFloors;
+  realityCheckMinutes: number;
+  limitCoolOffHours: number;
+}): Record<string, unknown> {
   return {
+    /**
+     * Identity, and the one place a player can read who implemented what.
+     *
+     * `adapterContract.id` is `reveal-engine/staged-survival-v1`. It is **SWARM's
+     * own** contract identifier — the module `docs/ENGINE.md` specifies and this
+     * repository implements — and it is *not* the identity of the
+     * `staged-survival` module Reveal Engine 0.4 actually ships, which is
+     * `staged-survival` @ `1.0.0` under module API `reveal-engine/module-v1` and
+     * which by its own documentation cannot express offspring. Both are served,
+     * with their owners named, because on a fairness panel one version string
+     * beside another reads as a conformance claim unless it says otherwise.
+     */
     identity: {
       adapterId: SWARM.id,
       adapterVersion: SWARM.adapterVersion,
-      moduleApi: SWARM.apiVersion,
+      adapterContract: {
+        id: SWARM.apiVersion,
+        owner: 'SWARM — docs/ENGINE.md',
+        implementedBy: 'this repository, src/server/',
+        note: "SWARM's own module contract. Not a conformance claim to a module the engine ships.",
+      },
       cohortModel: SWARM.cohort.modelVersion,
       adapterFingerprint: adapterFingerprint(),
       paytableSchema: PAYTABLE.schema,
       paytableDigest: FIXTURE_DIGEST,
-      engine: { name: ENGINE_PACKAGE.name, version: ENGINE_PACKAGE.version },
+      engine: {
+        name: ENGINE_PACKAGE.name,
+        version: ENGINE_PACKAGE.version,
+        apiVersion: ENGINE_API_VERSION,
+        moduleApiVersion: MODULE_API_VERSION,
+        shippedModule: {
+          id: STAGED_SURVIVAL_MODULE_ID,
+          version: STAGED_SURVIVAL_MODULE_VERSION,
+        },
+        provides:
+          'Exact rational arithmetic, the payable and per-line cap money path, the canonical field encoding, SHA-256 and constant-time digest comparison, the idempotency discipline and the error taxonomy.',
+        doesNotProvide:
+          'The round lifecycle. The engine ships a staged-survival module that resolves a shrinking subset of a fixed set and, by its own documentation, cannot express offspring — so SWARM’s branching colony, the ladder, the wild line, both commitment phases, the action chain, the per-line ledger and the verifier are implemented in this repository against docs/ENGINE.md.',
+      },
       proof: SWARM.proof,
     },
     money: {
@@ -269,9 +310,44 @@ export function wireConfig(options: { abandonedRoundTimeoutHours: number }): Rec
     /**
      * `docs/DESIGN.md` §9.7. The floors are a speed-of-play control, never a
      * deadline on a decision: no floor can cost a payout, and nothing in the game
-     * is timed.
+     * is timed. The server holds every round command to the same three values —
+     * see `./pacing.ts` — so they are properties of the product rather than of
+     * one client.
      */
-    pacing: { roundCycleMs: 2500, decisionDeadPeriodMs: 350, settlementHoldMs: 600 },
+    pacing: {
+      roundCycleMs: options.pacing.roundCycleMs,
+      decisionDeadPeriodMs: options.pacing.decisionDeadPeriodMs,
+      settlementHoldMs: options.pacing.settlementHoldMs,
+      enforcedBy: 'server and client',
+    },
+    /** `docs/DESIGN.md` §9.9's player-protection surfaces. */
+    protection: {
+      realityCheckMinutes: options.realityCheckMinutes,
+      limitCoolOffHours: options.limitCoolOffHours,
+      limits: [
+        {
+          field: 'budgetUnits',
+          label: 'Stake budget',
+          kind: 'money',
+          description:
+            'The most this session may put at risk in total. Free play has no deposits, so this is the deposit limit’s stand-in.',
+        },
+        {
+          field: 'lossUnits',
+          label: 'Loss limit',
+          kind: 'money',
+          description: 'The largest net loss this session may reach before further stakes are refused.',
+        },
+        {
+          field: 'timeMinutes',
+          label: 'Time limit',
+          kind: 'minutes',
+          description: 'How long this session may run before further stakes are refused.',
+        },
+      ],
+      helpResources: HELP_RESOURCES,
+      freePlayNotice: 'FREE-PLAY DEMO CREDITS · NO CASH VALUE',
+    },
     ladder: PAYTABLE.ladder,
     sideBets: SIDE_BETS.map((bet) => ({
       id: bet.id,

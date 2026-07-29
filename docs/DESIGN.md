@@ -1341,6 +1341,21 @@ Three rules go with them, and they are the point rather than the numbers:
   the game's own pitch is that it has no clock, and a control that makes rounds
   faster is a control that makes them more frequent.
 
+**Where they are enforced, because "cannot" is a claim about the product and not
+about one client.** The table above says a round *cannot* be chained faster than
+2,500 ms. A floor that lives only in the client is not that claim: anything
+speaking the documented API is not bound by it, and the first build of this game
+could be driven at roughly 26 rounds a second through `/api`. So all three floors
+are enforced by the round service as well —
+[ENGINE.md §5](ENGINE.md), `src/server/pacing.ts` — and enforced as a **wait,
+never a refusal**. A command that arrives inside a floor is held until the floor
+has passed and then processed exactly as it would have been. That is the only
+implementation compatible with §9.5: a refusal would be a deadline on a decision
+by another name, and no floor may ever cost a payout. The client keeps its own
+copies of the same three values so that the *screen* is paced rather than the
+network, which is why `/api/config` publishes them: one set of numbers, two
+places that honour them, and neither able to drift from the other.
+
 ### 9.8 The wild line is a bet's state, not a colony you could have had
 
 Round 3 shipped a **live wild-line ghost**: a dimmed trace of "the colony as it
@@ -1382,11 +1397,93 @@ placed, and never as an alternative colony they could have had.** A number that
 says "your SWARM bet has reached 7 of 10" is the first; a colony drawn beside
 theirs that is always bigger is the second.
 
+**And S8a has to obey the closing sentence too.** The first build of S8a printed
+`YOUR COLONY 5 → 2 → 3 → 2 → 0` directly beneath the wild line's
+`5 → 4 → 4 → 2 → 0`. Every clause above permits it — the round is over, the
+counterfactual is completed, nothing sits beside a live decision — and it is
+still the one place in the product where the game itself draws the comparison the
+closing sentence forbids, in the same type, one row apart — and containment
+([MATH.md §7.3](MATH.md)) proves the player's row can never be the larger one, so
+the comparison has exactly one possible reading. The row is **cut**. What S8a states instead is the fact the bet actually
+needs: how far along this line the player's own round ran — `generation 1 to 4 of
+9` — with the covered generations lit on the chart. That is a window on the line
+being resolved, not a second colony; the player's own populations remain one tap
+away on the receipt (S8), where they are their own record rather than a rival's.
+
 ### 9.9 Player protection surfaces
 
 Session timer and net result in the top bar menu, reality check every 30 minutes,
 deposit/loss/time limits reachable in two taps, and a visible link to help
 resources. No bonus buy, no jackpot teaser, no "almost" messaging.
+
+Round 3 left that as one sentence, and one sentence is not a specification: the
+first build shipped the net result and nothing else. The rest of this section is
+what each of those four actually is, because a responsible-design requirement
+that cannot be built from its own wording is a requirement that will not be built.
+
+**Where they live.** The top bar carries `BALANCE`, the signed session result and
+`MENU`, and it stays live on every screen — including S1, the settlement and every
+sheet. A menu that only exists while a round is running is missing on the one
+screen a player sits on between rounds. `MENU` opens the session sheet (S10):
+session time, opening balance, balance, total staked, total credited, signed net
+result, and the last 50 rounds. The clock ticks while the sheet is open and runs
+on the **server's** session clock, because a device clock is not evidence of
+anything. That sheet's own `LIMITS & SAFER PLAY` control is the second tap.
+
+**The free-play mapping, stated rather than implied.** There are no deposits in
+this game — the wallet is an in-memory free-play balance — so the deposit limit
+maps to a **stake budget**: the most this session may put at risk in total. The
+loss limit is on the signed session result and the time limit is on elapsed
+session time. All three are off by default: a limit the player did not choose is
+not a protection, it is a house rule.
+
+| Limit | Binds when | Refuses |
+| --- | --- | --- |
+| Stake budget | `total staked + this ticket > budget` | the ticket |
+| Loss limit | `net result ≤ −limit` | the next ticket |
+| Time limit | `elapsed ≥ limit` | the next ticket |
+
+**Tightening is immediate; loosening waits.** Setting a limit or lowering one
+binds on the next stake. Raising or removing one is scheduled and lands after a
+cool-off — 24 hours by default, published beside the pending value so the player
+is never waiting on something invisible. A limit that can be lifted at the moment
+it starts to bind protects nobody, and the moment it binds is exactly the moment
+it will be lifted. A tightening while a loosening is pending cancels the pending
+change: the player who just lowered a limit is not also asking to raise it later.
+
+**A limit refuses a stake and nothing else.** It never touches a round that is
+already staked. A player who is mid-round when a limit binds finishes that round
+and banks it — stopping them from settling money they have already committed
+would be a worse outcome than the one the limit exists to prevent, and it would
+be the only place in the game where a rule can cost a payout (§9.5). The refusal
+is server-side, typed (`LIMIT_REACHED`), and published in the session view *before*
+it is provoked, so S1 renders a locked state with the reason and the sheet rather
+than a control that fails when tapped.
+
+**The reality check.** Every 30 minutes of session time: elapsed time, total
+staked, total returned, signed net result, and the reminder that these are
+free-play credits. It cannot be turned off — an interval control is a speed
+control (§9.7) — and it is shown **between rounds**, never over a live decision
+and never over the settlement ceremony, whose job §7.1 governs. Its clock is the
+server's and an acknowledgement restarts it, so a reload does not clear it and a
+player mid-round when it falls due sees it once, at the next stake, rather than
+twice.
+
+**The free-play marker and the help resources.** A persistent strip at the foot of
+every screen, above every overlay: `FREE-PLAY DEMO CREDITS · NO CASH VALUE`, plus
+`SAFER PLAY`. A player who never opens help must still be told that an amber
+balance of 1,000.00 is not money, and §9.9's "visible link to help resources"
+means visible — a row inside a menu the player never opens is not a link they can
+see. Tapping the strip opens the safer-play sheet, which carries the limits, the
+reality-check state and the resources themselves: independent support
+organisations with real, resolving links, never an operator page. The resource
+list is served by the operator (`/api/config`) rather than compiled into the
+client, so it cannot drift from what the operator publishes.
+
+**What is deliberately not here.** No age gate: this is a free-play prototype with
+no account, no deposit and no jurisdiction, and an age gate that gates nothing is
+theatre. No self-exclusion register either, for the same reason — the link to
+GAMSTOP is real and the register is not ours to run.
 
 ---
 

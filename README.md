@@ -25,7 +25,8 @@ asserted.
 | --- | --- |
 | Stage | **Playable graybox.** A server-authoritative round service, a portrait browser client, and the specification, exact paytable, proofs and tests they are built from. The information architecture, the flows, the money and the fairness are the real ones; the art is placeholder shapes. Final art, motion polish and sound are a later wave. |
 | Money | Free-play prototype only. In-memory wallet, no real-money integration, no persistence. |
-| Engine | Consumes `@axiom-games/reveal-engine` **0.4** as a package (`vendor/`) for the primitives [docs/ENGINE.md §1](docs/ENGINE.md) requires reused verbatim: exact `Rational` money, `payableWithinCap`, constant-time digest comparison, the error taxonomy, `ENGINE_LIMITS`, and the idempotency and frame-fence discipline. The engine's own `staged-survival` module models a **different** lifecycle — by its own documentation it "cannot express offspring" — so SWARM's branching cohort, ladder, wild line and per-line ledger are implemented in `src/server/` against this repository's contract. [The gap, in full.](#what-the-engine-provides-and-what-it-does-not) |
+| Engine | Consumes `@axiom-games/reveal-engine` **0.4** as a package (`vendor/`) for the primitives [docs/ENGINE.md §1](docs/ENGINE.md) requires reused verbatim: exact `Rational` money, `payableWithinCap`, constant-time digest comparison, the error taxonomy, `ENGINE_LIMITS`, and the idempotency and frame-fence discipline. The engine's own `staged-survival` module models a **different** lifecycle — by its own documentation it "cannot express offspring" — so SWARM's branching cohort, ladder, wild line and per-line ledger are implemented in `src/server/` against this repository's contract. The game says this on screen as well as here: the help and verify sheets carry a **"Who implements what"** panel naming both module identities and their owners. [The gap, in full.](#what-the-engine-provides-and-what-it-does-not) |
+| Responsible design | [docs/DESIGN.md §9](docs/DESIGN.md) is implemented, not deferred: the §9.7 speed-of-play floors are enforced by the **server** as waits rather than refusals, and §9.9's four surfaces — session timer and net result in the top-bar menu, a reality check every 30 minutes, stake-budget/loss/time limits two taps away, and a persistent free-play marker that opens the help resources from any screen — are server state with the limit cool-off published. |
 | Evidence | `npm run verify` locally. Every settlement the server produces is re-verified by the **published reference verifier** in `tools/simulate.mjs` inside the test suite, so the service and the specification are checked against each other rather than against themselves. Hosted CI (`.github/workflows/ci.yml`) is configured but has never run: nothing has been pushed to the remote, so cross-version determinism is currently evidenced on one machine only. |
 | Certification | None. Not an RNG certificate, not a fairness certificate, not a laboratory or regulatory approval. See [docs/MATH.md §15](docs/MATH.md). |
 
@@ -170,6 +171,11 @@ abandonment clock is the adapter's 72 hours (`SWARM_ABANDON_TIMEOUT_HOURS`), and
 `PORT` moves the port. Nothing is persisted: restarting the server is a new
 session.
 
+Two more exist so a reviewer can watch the §9.9 surfaces work inside one sitting
+rather than waiting half an hour: `SWARM_REALITY_CHECK_MINUTES` (default 30, set
+it to `0` to have the check fall due immediately) and `SWARM_LIMIT_COOLOFF_HOURS`
+(default 24, the wait before a *loosened* limit binds).
+
 **What is real.** The round lifecycle of [docs/ENGINE.md §5](docs/ENGINE.md), end
 to end: the seed pre-commitment published before a stake exists, client entropy
 generated in the browser and never supplied by the server before `open()` — it is
@@ -182,12 +188,26 @@ settlement body commitment over the action log, the live action chain, forced
 reconciliation after the timeout, and a verifier that re-derives all eight steps
 of §4.6 in front of the player.
 
+Also real, and server-side rather than decorative: the speed-of-play floors of
+[§9.7](docs/DESIGN.md) (the service holds a command until its floor has passed —
+a wait, never a refusal, so no floor can cost a payout), and all four player
+protection surfaces of [§9.9](docs/DESIGN.md) — a live session timer and signed
+net result in the top-bar menu, a reality check every 30 minutes shown between
+rounds, stake-budget / loss / time limits two taps from the menu which tighten
+immediately and loosen only after a published cool-off, and a persistent
+`FREE-PLAY DEMO CREDITS · NO CASH VALUE` marker on every screen that opens the
+help resources in one tap.
+
 **What is placeholder.** The organisms are flat discs where the gel bells with
 subsurface scattering will go; halation is a box-shadow, not two bloom passes;
-the water is a gradient, not a volumetric; there is no sound; the settlement
-ceremony is timed and tiered but not choreographed; and the environment reveal
-fades rather than dollies. The layout, the type scale, the palette, the beat
-timings and every number are the specified ones.
+the water is a gradient, not a volumetric; the S1 vent is a radial gradient
+standing in for a lit chimney; there is no sound; the settlement ceremony is
+timed and tiered but not choreographed; and the environment reveal fades rather
+than dollies. The layout, the type scale, the palette, the beat timings and every
+number are the specified ones, and every screen [DESIGN.md §5](docs/DESIGN.md)
+and [§9](docs/DESIGN.md) specify exists — including the responsible-design
+surfaces, which are behaviour rather than art and are therefore not deferrable to
+the art wave.
 
 ### The API
 
@@ -201,7 +221,18 @@ timings and every number are the specified ones.
 | `POST /api/rounds/:id/settle` | Reveals the seed, resolves the side bets, publishes the settlement body |
 | `POST /api/rounds/:id/reconcile` | The abandonment rule. `TOO_EARLY` before the timeout |
 | `POST /api/verify` | Runs §4.6 against a submitted proof bundle and returns the eight checks |
-| `GET /api/session` | Balance, signed session result, and the last 50 rounds |
+| `GET /api/session` | Balance, signed session result, elapsed session time, the reality-check state, the active limits, and the last 50 rounds |
+| `GET/POST /api/limits` | The §9.9 session limits. A tightening applies to the next stake; a loosening is scheduled and the pending value and its effective moment are published |
+| `POST /api/reality-check` | Acknowledges a shown reality check and restarts its clock |
+
+Round commands are also held to [§9.7](docs/DESIGN.md)'s speed-of-play floors by
+the service — 2,500 ms round cycle, 350 ms decision dead period, 600 ms
+settlement hold — as a **wait rather than a refusal**, so an early command is
+processed exactly as it would have been and no floor can cost a payout. They are
+not configurable from the environment: a floor an operator can switch off is not
+a floor. A stake refused by a limit the player set answers `LIMIT_REACHED` with
+the field that bound it, and the session view publishes that state *before* it is
+provoked so the client renders a locked screen rather than a control that fails.
 
 Every **player** command carries an `idempotencyKey` and the
 `expectedFrameRevision` it was fenced to. A retry replays its receipts; a changed
@@ -227,6 +258,17 @@ express offspring", which is the whole of SWARM's cohort. So the split is:
 | `commandFingerprint`, `assertIdempotencyKey` | The `StageBook` lifecycle and the abandonment rule |
 | `assertClientEntropy`, `SURVIVAL_LIMITS` from the module | Side-bet pricing and the §4.6 verifier |
 
+The game states this split on screen, not only here. `/api/config` publishes
+SWARM's module contract and the engine's own identities as separate fields with
+their owners named, and the help and verify sheets render both under **"Who
+implements what"**. The first graybox published one field called `moduleApi`,
+rendered as a row labelled `MODULE` directly above the engine's name and version:
+beside an engine version, on the panel where a player evaluates fairness, that
+reads as a conformance claim to a module that provably cannot express this game.
+The identifier itself is unchanged — it is bound into the adapter fingerprint and
+therefore into every draw — but nothing on the fairness surface claims it belongs
+to the engine any more.
+
 `src/server/engine.ts` is that list in code, with the two deviations named: the
 engine does not export `encodeFields` from any subpath, so `src/server/canonical.ts`
 carries a byte-identical port pinned against the reference encoder; and the
@@ -245,8 +287,8 @@ implementation's settlement bodies byte for byte.
 | [docs/DECISIONS.md](docs/DECISIONS.md) | The design decisions behind the rules above: what was rejected, what it would have cost, and how to reopen it |
 | [docs/MATH.md](docs/MATH.md) | Exact model, paytable, RTP justification, volatility bounds, caps, strategy proof |
 | [docs/ENGINE.md](docs/ENGINE.md) | The `staged-survival` Reveal Engine module and the adapter surface SWARM expects |
-| `src/server/` | The round service: adapter, derivation, commitments, `StageBook`, per-line ledger, verifier, HTTP surface |
-| `src/client/` | The portrait client: stage, value strip, action bar, ceremony, receipt, verify and help sheets |
+| `src/server/` | The round service: adapter, derivation, commitments, `StageBook`, per-line ledger, verifier, HTTP surface, the §9.7 pacing floors and the §9.9 protection state |
+| `src/client/` | The portrait client: stage, value strip, action bar, ceremony, receipt, verify, help and safer-play sheets |
 | `vendor/` | The Reveal Engine package this repository depends on, exactly as `npm pack` produced it (`npm run engine:pack`) |
 | `tools/enumerate.mjs` | Exhaustive exact enumeration — the proof behind every number |
 | `tools/simulate.mjs` | Reference draw derivation, two-phase commitment, ticket ledger, verifier and seeded Monte Carlo cross-check |

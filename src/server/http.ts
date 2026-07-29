@@ -10,6 +10,12 @@
  * refused, a stake that is not an integer string of minor units is refused, and
  * every failure is one of the public codes in `./errors.ts` with a path — never a
  * stack trace.
+ *
+ * Two responsible-design surfaces are enforced here rather than in the client,
+ * because a rule that only exists in the client is not a rule: `docs/DESIGN.md`
+ * §9.7's speed-of-play floors hold every round command until its floor has
+ * passed (a wait, never a refusal — no floor can cost a payout), and §9.9's
+ * session limits refuse a stake with `LIMIT_REACHED` and nothing else.
  */
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
@@ -88,10 +94,42 @@ async function handle(
   // segments[0] === 'api'
   try {
     if (method === 'GET' && segments[1] === 'config' && segments.length === 2)
-      return sendJson(response, 200, wireConfig({ abandonedRoundTimeoutHours: service.abandonedRoundTimeoutHours }));
+      return sendJson(
+        response,
+        200,
+        wireConfig({
+          abandonedRoundTimeoutHours: service.abandonedRoundTimeoutHours,
+          pacing: service.pacer.floors,
+          realityCheckMinutes: service.protection.realityCheckMinutes,
+          limitCoolOffHours: service.protection.limitCoolOffHours,
+        }),
+      );
 
     if (method === 'GET' && segments[1] === 'session' && segments.length === 2) {
       service.sweep();
+      return sendJson(response, 200, sessionOf(service));
+    }
+
+    // `docs/DESIGN.md` §9.9. Limits live on the server because a limit a reload
+    // clears is not a limit; the reality check restarts from an acknowledgement
+    // for the same reason.
+    if (segments[1] === 'limits' && segments.length === 2) {
+      if (method === 'GET') return sendJson(response, 200, limitsOf(service));
+      if (method === 'POST') {
+        const body = await readJson(request);
+        service.protection.set(body);
+        return sendJson(response, 200, { ...limitsOf(service), session: sessionOf(service) });
+      }
+      return sendError(response, new SwarmError('METHOD_NOT_ALLOWED', 'Use GET or POST on limits'));
+    }
+
+    if (segments[1] === 'reality-check' && segments.length === 2) {
+      if (method !== 'POST')
+        return sendError(
+          response,
+          new SwarmError('METHOD_NOT_ALLOWED', 'Use POST to acknowledge a reality check'),
+        );
+      service.protection.acknowledgeRealityCheck();
       return sendJson(response, 200, sessionOf(service));
     }
 
@@ -132,6 +170,7 @@ async function handle(
 
       const body = await readJson(request);
       if (command === 'open') {
+        await hold(service.pacer.admitOpen(roundId));
         const result = service.open(roundId, {
           idempotencyKey: readKey(body.idempotencyKey),
           expectedFrameRevision: readRevision(body.expectedFrameRevision),
@@ -145,6 +184,7 @@ async function handle(
         });
       }
       if (command === 'advance') {
+        await hold(service.pacer.admitCommand(roundId));
         const result = service.advance(roundId, {
           idempotencyKey: readKey(body.idempotencyKey),
           expectedFrameRevision: readRevision(body.expectedFrameRevision),
@@ -157,6 +197,7 @@ async function handle(
       if (command === 'harvest') {
         const units = body.units;
         if (!Number.isSafeInteger(units)) fail('INVALID_REQUEST', 'units must be an integer', '$.units');
+        await hold(service.pacer.admitCommand(roundId));
         const result = service.harvest(roundId, {
           idempotencyKey: readKey(body.idempotencyKey),
           expectedFrameRevision: readRevision(body.expectedFrameRevision),
@@ -168,6 +209,7 @@ async function handle(
         });
       }
       if (command === 'settle') {
+        await hold(service.pacer.admitCommand(roundId));
         const result = service.settle(roundId, {
           idempotencyKey: readKey(body.idempotencyKey),
           expectedFrameRevision: readRevision(body.expectedFrameRevision),
@@ -196,8 +238,17 @@ async function handle(
   }
 }
 
+/**
+ * The session view: the money, the clock, and the state of every §9.9 surface.
+ *
+ * `elapsedMs` is served rather than left to the client to subtract, because the
+ * session timer §9.9 asks for is the server's session and a client clock can be
+ * anything. `limitReached` is published so the client renders a locked state
+ * instead of provoking a refusal to discover one.
+ */
 function sessionOf(service: RoundService): Record<string, unknown> {
   const wallet = service.wallet;
+  const reached = service.limitReached();
   return {
     balanceUnits: wallet.balanceUnits.toString(),
     openingUnits: wallet.openingUnits.toString(),
@@ -206,8 +257,33 @@ function sessionOf(service: RoundService): Record<string, unknown> {
     netUnits: wallet.netUnits.toString(),
     startedAt: service.startedAt,
     now: service.now,
+    elapsedMs: service.protection.elapsedMs,
+    realityCheck: service.protection.realityCheck(),
+    limits: wireLimits(service),
+    limitReached: reached === null ? null : { field: reached.field, message: reached.message },
     history: service.history.map(wireHistory),
   };
+}
+
+function wireLimits(service: RoundService): Record<string, unknown> {
+  const limits = service.protection.limits;
+  return {
+    budgetUnits: limits.budgetUnits === null ? null : limits.budgetUnits.toString(),
+    lossUnits: limits.lossUnits === null ? null : limits.lossUnits.toString(),
+    timeMinutes: limits.timeMinutes,
+    pending: service.protection.pending,
+    coolOffHours: service.protection.limitCoolOffHours,
+  };
+}
+
+function limitsOf(service: RoundService): Record<string, unknown> {
+  return { limits: wireLimits(service) };
+}
+
+/** §9.7's floors: a wait before the command runs, never a refusal of it. */
+function hold(milliseconds: number): Promise<void> {
+  if (!(milliseconds > 0)) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function roundView(service: RoundService, roundId: string): Record<string, unknown> {

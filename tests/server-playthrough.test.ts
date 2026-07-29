@@ -50,6 +50,11 @@ async function start(
     seedSource: () => fixture.seed,
     roundIdSource: () => fixture.roundId,
     clock: () => clock.now,
+    // `docs/DESIGN.md` §9.7's floors are real elapsed time on a real clock, and a
+    // suite that plays dozens of rounds would spend minutes waiting them out. They
+    // are switched off here and asserted on their own, with default settings, in
+    // "the speed-of-play floors" below.
+    pacing: { roundCycleMs: 0, decisionDeadPeriodMs: 0, settlementHoldMs: 0 },
     ...options,
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
@@ -700,6 +705,23 @@ describe('the served configuration', () => {
     expect(config.identity.adapterVersion).toBe('1.3.0');
     expect(config.identity.adapterFingerprint).toBe(reference.adapterFingerprint());
     expect(config.identity.engine.name).toBe('@axiom-games/reveal-engine');
+    /*
+     * Provenance, and the round-2 finding it closes.
+     *
+     * `reveal-engine/staged-survival-v1` is SWARM's own module contract
+     * (`docs/ENGINE.md` §2), not the identity of the module Reveal Engine 0.4
+     * ships. Publishing it in a field called `moduleApi`, beside the engine's name
+     * and version, read as a conformance claim to a module that provably cannot
+     * express this game. Both identities are now served, each with its owner, and
+     * this test is what stops the two collapsing back into one string.
+     */
+    expect(config.identity.adapterContract.id).toBe('reveal-engine/staged-survival-v1');
+    expect(config.identity.adapterContract.owner).toContain('SWARM');
+    expect(config.identity.adapterContract.implementedBy).toContain('this repository');
+    expect(config.identity.moduleApi).toBeUndefined();
+    expect(config.identity.engine.moduleApiVersion).toBe('reveal-engine/module-v1');
+    expect(config.identity.engine.shippedModule).toEqual({ id: 'staged-survival', version: '1.0.0' });
+    expect(config.identity.engine.doesNotProvide).toContain('cannot express offspring');
     expect(config.rules.targetRtp.fraction).toBe('19/20');
     expect(config.rules.offspring.map((band: any) => `${band.id}:${band.band}:${band.percent}`)).toEqual([
       'DIE:0-7:40',
@@ -719,7 +741,28 @@ describe('the served configuration', () => {
     const bankFirst = config.published.policies.find((policy: any) => policy.id === 'BANK_FIRST');
     expect(bankFirst.bloomOneIn).toBe('never');
     expect(bankFirst.profitRate).toBe('0.4560000000');
-    expect(config.pacing).toEqual({ roundCycleMs: 2500, decisionDeadPeriodMs: 350, settlementHoldMs: 600 });
+    // This harness runs with the floors off; the published values are the
+    // service's own, so the assertion is on the shape and on `enforcedBy`.
+    expect(config.pacing.enforcedBy).toBe('server and client');
+    const defaults = (await get((await start(FIXTURE_A, { pacing: undefined })).base, '/api/config')).json;
+    expect(defaults.pacing).toEqual({
+      roundCycleMs: 2500,
+      decisionDeadPeriodMs: 350,
+      settlementHoldMs: 600,
+      enforcedBy: 'server and client',
+    });
+    // §9.9's surfaces are configuration too: the client renders them from here.
+    expect(defaults.protection.realityCheckMinutes).toBe(30);
+    expect(defaults.protection.limitCoolOffHours).toBe(24);
+    expect(defaults.protection.limits.map((limit: any) => limit.field)).toEqual([
+      'budgetUnits',
+      'lossUnits',
+      'timeMinutes',
+    ]);
+    expect(defaults.protection.helpResources.length).toBeGreaterThanOrEqual(3);
+    for (const resource of defaults.protection.helpResources)
+      expect(resource.url).toMatch(/^https:\/\//u);
+    expect(defaults.protection.freePlayNotice).toContain('NO CASH VALUE');
   });
 
   it('serves the client shell', async () => {
@@ -731,6 +774,253 @@ describe('the served configuration', () => {
     expect(html).toContain('SWARM');
     // No path traversal out of the client root.
     expect((await fetch(`${base}/../package.json`)).status).toBe(404);
+  });
+});
+
+/**
+ * `docs/DESIGN.md` §9.7 states the floors as properties of the product — "a whole
+ * round cannot be chained faster than this, however much is skipped". Round 2's
+ * review found them only in `src/client/app.js`, and chained about 26 rounds a
+ * second through the documented API. These run with the real defaults and real
+ * elapsed time, which is why they are the only slow tests in the suite.
+ */
+describe('the speed-of-play floors', () => {
+  const spread = (fixture: { roundId: string }) => ({
+    pacing: undefined,
+    roundIdSource: (counter: number) => `${fixture.roundId}-${counter}`,
+  });
+
+  const stake = async (base: string, roundId: string) =>
+    post(base, `/api/rounds/${roundId}/open`, {
+      idempotencyKey: key(),
+      expectedFrameRevision: 0,
+      stakeUnits: '1000000',
+      sideBets: [],
+      clientEntropy: ENTROPY,
+    });
+
+  it('holds a chained round to the 2,500 ms cycle floor', async () => {
+    const { base } = await start(FIXTURE_A, spread(FIXTURE_A));
+    const first = (await post(base, '/api/rounds')).json.roundId as string;
+    const second = (await post(base, '/api/rounds')).json.roundId as string;
+
+    const startedAt = Date.now();
+    const one = await stake(base, first);
+    const two = await stake(base, second);
+    const gap = Date.now() - startedAt;
+
+    // A wait, never a refusal: both stakes are accepted, the second one late.
+    expect(one.status).toBe(200);
+    expect(two.status).toBe(200);
+    expect(gap).toBeGreaterThanOrEqual(2500);
+  }, 20000);
+
+  it('holds a decision to the 350 ms dead period', async () => {
+    /*
+     * The floor runs from the moment the *server* admits a command, not from the
+     * moment its response reaches the caller: the dead period is "the gap between
+     * watching and deciding", and the watching starts when the frame is produced.
+     * A caller that fires the next command the instant the previous response
+     * lands therefore observes the floor minus one round trip, so the interval
+     * asserted here is cumulative — measured from before the first command — which
+     * is exactly the claim §9.7 makes and is immune to how slow the process is.
+     *
+     * The A/B against an unpaced service is what separates "held" from "merely
+     * slow", and it is preceded by a discarded warm-up run: without one, the
+     * first grid derivation in a cold process costs a few hundred milliseconds
+     * and lands entirely on whichever side goes first.
+     *
+     * FIXTURE_B rides to generation 18, so two generations are always there to
+     * resolve, and it keeps its own round id because one round is enough.
+     */
+    const run = async (harness: Harness): Promise<number> => {
+      const roundId = (await post(harness.base, '/api/rounds')).json.roundId as string;
+      const startedAt = Date.now();
+      const opened = await stake(harness.base, roundId);
+      expect(opened.status).toBe(200);
+      let frame = opened.json.frame;
+      for (let step = 0; step < 2; step += 1) {
+        const advanced = await post(harness.base, `/api/rounds/${roundId}/advance`, {
+          idempotencyKey: key(),
+          expectedFrameRevision: frame.revision,
+        });
+        expect(advanced.status).toBe(200);
+        expect(advanced.json.frame.state).toBe('STAGED');
+        frame = advanced.json.frame;
+      }
+      return Date.now() - startedAt;
+    };
+
+    await run(await start(FIXTURE_B)); // warm-up, discarded
+    const unpaced = await run(await start(FIXTURE_B));
+    const paced = await run(await start(FIXTURE_B, { pacing: undefined }));
+
+    // Two dead periods after the open's own: a stake and two resolutions cannot
+    // be chained inside 700 ms.
+    expect(paced).toBeGreaterThanOrEqual(700);
+    expect(paced - unpaced).toBeGreaterThanOrEqual(500);
+  }, 20000);
+});
+
+/**
+ * `docs/DESIGN.md` §9.9. Round 2's review found this section almost entirely
+ * unimplemented and undisclosed; these are the four surfaces, on the server,
+ * because a limit a reload clears is not a limit.
+ */
+describe('the player-protection surfaces', () => {
+  const spread = (fixture: { roundId: string }, extra: Record<string, unknown> = {}) => ({
+    roundIdSource: (counter: number) => `${fixture.roundId}-${counter}`,
+    ...extra,
+  });
+
+  const stake = async (base: string, roundId: string, units = '1000000') =>
+    post(base, `/api/rounds/${roundId}/open`, {
+      idempotencyKey: key(),
+      expectedFrameRevision: 0,
+      stakeUnits: units,
+      sideBets: [],
+      clientEntropy: ENTROPY,
+    });
+
+  it('refuses a stake past the budget the player set — and only a stake', async () => {
+    const { base } = await start(FIXTURE_A, spread(FIXTURE_A));
+    await post(base, '/api/limits', { budgetUnits: '1500000' });
+
+    const first = (await post(base, '/api/rounds')).json.roundId as string;
+    const opened = await stake(base, first);
+    expect(opened.status).toBe(200);
+
+    const second = (await post(base, '/api/rounds')).json.roundId as string;
+    const refused = await stake(base, second);
+    expect(refused.status).toBe(403);
+    expect(refused.json.error.code).toBe('LIMIT_REACHED');
+    expect(refused.json.error.path).toBe('$.limits.budgetUnits');
+
+    // A limit never interrupts a round that is already staked: the player can
+    // always finish it and bank it.
+    const advanced = await post(base, `/api/rounds/${first}/advance`, {
+      idempotencyKey: key(),
+      expectedFrameRevision: opened.json.frame.revision,
+    });
+    expect(advanced.status).toBe(200);
+  });
+
+  it('publishes the locked state instead of making the client provoke it', async () => {
+    const { base } = await start(FIXTURE_A, spread(FIXTURE_A));
+    expect((await get(base, '/api/session')).json.limitReached).toBeNull();
+    await post(base, '/api/limits', { budgetUnits: '0' });
+    const session = (await get(base, '/api/session')).json;
+    // Probed at the *smallest legal ticket*: "is a stake of nothing refused" is
+    // never the question a budget answers.
+    expect(session.limitReached.field).toBe('budgetUnits');
+  });
+
+  it('applies a tightening at once and holds a loosening for the cool-off', async () => {
+    const harness = await start(FIXTURE_A, spread(FIXTURE_A, { limitCoolOffHours: 24 }));
+    const { base, clock } = harness;
+
+    // Off → 5.00: a tightening, and it binds now.
+    await post(base, '/api/limits', { lossUnits: '5000000' });
+    expect((await get(base, '/api/limits')).json.limits.lossUnits).toBe('5000000');
+
+    // 5.00 → 10.00: a loosening, and it waits.
+    const raised = (await post(base, '/api/limits', { lossUnits: '10000000' })).json;
+    expect(raised.limits.lossUnits).toBe('5000000');
+    expect(raised.limits.pending).toEqual([
+      { field: 'lossUnits', value: '10000000', effectiveAt: clock.now + 24 * 60 * 60 * 1000 },
+    ]);
+
+    // A tightening while a loosening is pending cancels it: the player who just
+    // lowered a limit is not also asking to raise it later.
+    const lowered = (await post(base, '/api/limits', { lossUnits: '2000000' })).json;
+    expect(lowered.limits.lossUnits).toBe('2000000');
+    expect(lowered.limits.pending).toEqual([]);
+
+    // Removing it entirely waits out the cool-off, then lands on its own.
+    await post(base, '/api/limits', { lossUnits: null });
+    expect((await get(base, '/api/limits')).json.limits.lossUnits).toBe('2000000');
+    clock.now += 24 * 60 * 60 * 1000;
+    const released = (await get(base, '/api/limits')).json;
+    expect(released.limits.lossUnits).toBeNull();
+    expect(released.limits.pending).toEqual([]);
+  });
+
+  it('refuses further stakes once the loss limit binds', async () => {
+    const { base } = await start(FIXTURE_C, spread(FIXTURE_C));
+    await post(base, '/api/limits', { lossUnits: '500000' });
+    const roundId = (await post(base, '/api/rounds')).json.roundId as string;
+    const opened = await stake(base, roundId);
+    expect(opened.status).toBe(200);
+    // FIXTURE_C goes extinct: the round returns nothing, so the session is down a
+    // whole credit and past a half-credit loss limit.
+    let frame = opened.json.frame;
+    while (frame.state === 'STAGED') {
+      const next = await post(base, `/api/rounds/${roundId}/advance`, {
+        idempotencyKey: key(),
+        expectedFrameRevision: frame.revision,
+      });
+      frame = next.json.frame;
+    }
+    await post(base, `/api/rounds/${roundId}/settle`, {
+      idempotencyKey: key(),
+      expectedFrameRevision: frame.revision,
+    });
+    const session = (await get(base, '/api/session')).json;
+    expect(BigInt(session.netUnits)).toBeLessThan(-500000n);
+    expect(session.limitReached.field).toBe('lossUnits');
+
+    const another = (await post(base, '/api/rounds')).json.roundId as string;
+    const refused = await stake(base, another);
+    expect(refused.status).toBe(403);
+    expect(refused.json.error.path).toBe('$.limits.lossUnits');
+  });
+
+  it('falls due for a reality check on the server clock, and restarts on acknowledgement', async () => {
+    const harness = await start(FIXTURE_A, spread(FIXTURE_A, { realityCheckMinutes: 30 }));
+    const { base, clock } = harness;
+    const before = (await get(base, '/api/session')).json;
+    expect(before.realityCheck).toMatchObject({ intervalMinutes: 30, due: false });
+
+    clock.now += 30 * 60 * 1000 + 1;
+    const due = (await get(base, '/api/session')).json;
+    expect(due.realityCheck.due).toBe(true);
+    expect(due.elapsedMs).toBeGreaterThanOrEqual(30 * 60 * 1000);
+
+    const acknowledged = (await post(base, '/api/reality-check')).json;
+    expect(acknowledged.realityCheck.due).toBe(false);
+    expect(acknowledged.realityCheck.sinceMs).toBe(0);
+    // A reload does not clear it: the clock is the server's.
+    clock.now += 29 * 60 * 1000;
+    expect((await get(base, '/api/session')).json.realityCheck.due).toBe(false);
+    clock.now += 61 * 1000;
+    expect((await get(base, '/api/session')).json.realityCheck.due).toBe(true);
+  });
+
+  it('refuses a malformed limit with a typed code and a path', async () => {
+    const { base } = await start(FIXTURE_A, spread(FIXTURE_A));
+    for (const [body, path] of [
+      [{ timeMinutes: -5 }, '$.timeMinutes'],
+      [{ timeMinutes: 1.5 }, '$.timeMinutes'],
+      [{ timeMinutes: 100000 }, '$.timeMinutes'],
+      [{ lossUnits: 'lots' }, '$.lossUnits'],
+      [{ lossUnits: 1000000 }, '$.lossUnits'],
+      [{ budgetUnits: '-1' }, '$.budgetUnits'],
+      [{ budgetUnits: '9'.repeat(30) }, '$.budgetUnits'],
+    ] as const) {
+      const response = await post(base, '/api/limits', body);
+      expect(response.status).toBe(400);
+      expect(response.json.error.code).toBe('INVALID_REQUEST');
+      expect(response.json.error.path).toBe(path);
+      expect(JSON.stringify(response.json)).not.toContain('at ');
+    }
+    // The limits state is untouched by every one of them.
+    expect((await get(base, '/api/limits')).json.limits).toMatchObject({
+      budgetUnits: null,
+      lossUnits: null,
+      timeMinutes: null,
+    });
+    const wrongMethod = await call(base, 'GET', '/api/reality-check');
+    expect(wrongMethod.json.error.code).toBe('METHOD_NOT_ALLOWED');
   });
 });
 

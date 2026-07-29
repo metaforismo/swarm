@@ -14,8 +14,15 @@
  * exposure, which is a pure function of the colony value the server sent.
  */
 import { ApiError, api, commandKey, generateClientSeed, isClientSeed } from './api.js';
-import { credits, multiple, percent, shortHex, signedCredits, truncate } from './format.js';
-import { helpSheet, historySheet, receiptSheet, verifySheet, wildSheet } from './sheets.js';
+import { credits, elapsed, multiple, percent, shortHex, signedCredits, truncate } from './format.js';
+import {
+  helpSheet,
+  historySheet,
+  receiptSheet,
+  saferPlaySheet,
+  verifySheet,
+  wildSheet,
+} from './sheets.js';
 import { Stage } from './stage.js';
 
 const UNIT = 1000000n;
@@ -84,6 +91,16 @@ const dom = {
   sheetTitle: $('sheet-title'),
   sheetBody: $('sheet-body'),
   toast: $('toast'),
+  freeplay: $('freeplay'),
+  freeplayText: $('freeplay-text'),
+  limitLock: $('limit-lock'),
+  limitLockCopy: $('limit-lock-copy'),
+  reality: $('reality'),
+  realityElapsed: $('reality-elapsed'),
+  realityStaked: $('reality-staked'),
+  realityCredited: $('reality-credited'),
+  realityNet: $('reality-net'),
+  realityInterval: $('reality-interval'),
 };
 
 const state = {
@@ -108,6 +125,18 @@ const state = {
    */
   acceptsInput: false,
   k: 1,
+  /**
+   * §9.9's reality check. The server owns the clock — a check a reload resets is
+   * not a check — and this only remembers whether one is owed, so it can be shown
+   * at a safe moment rather than on top of a live decision.
+   */
+  realityDue: false,
+  /** The screen the reality check hands control back to. */
+  afterReality: 's1',
+  /** Offset between this device's clock and the server's, for the session timer. */
+  clockSkewMs: 0,
+  /** Interval handle for whichever session clock is currently on screen. */
+  ticker: null,
 };
 
 const stage = new Stage(dom.stage);
@@ -151,6 +180,13 @@ async function guard(action) {
     return await action();
   } catch (error) {
     if (error instanceof ApiError) {
+      // A limit the player set is not a defect and is not shown as an error code:
+      // the session is refreshed and S1 renders the locked state (§9.9).
+      if (error.code === 'LIMIT_REACHED') {
+        toast(error.message);
+        renderSession(await api.session().catch(() => null));
+        return null;
+      }
       toast(`${error.code}: ${error.message}`);
       if (error.code === 'STALE_FRAME' || error.code === 'ROUND_SETTLED') await resyncRound();
     } else {
@@ -171,6 +207,45 @@ function renderSession(session) {
   const net = BigInt(session.netUnits);
   dom.sessionNet.textContent = signedCredits(net);
   dom.sessionNet.dataset.sign = net > 0n ? 'up' : 'flat';
+  if (typeof session.now === 'number') state.clockSkewMs = session.now - Date.now();
+  if (session.realityCheck?.due === true) state.realityDue = true;
+  renderLimitLock();
+}
+
+/** Elapsed session time on the server's clock, not this device's. */
+function sessionElapsedMs() {
+  const session = state.session;
+  if (session === null || session === undefined) return 0;
+  return Math.max(0, Date.now() + state.clockSkewMs - session.startedAt);
+}
+
+/**
+ * A limit the player set, when it binds, is a **state**: S1 says which limit and
+ * offers the sheet, and `SEED COLONY` stops being a control rather than becoming
+ * a control that fails (`docs/DESIGN.md` §9.9).
+ */
+function renderLimitLock() {
+  const reached = state.session?.limitReached ?? null;
+  dom.limitLock.hidden = reached === null;
+  dom.seed.disabled = reached !== null;
+  if (reached !== null) dom.limitLockCopy.textContent = reached.message;
+}
+
+/** Keeps a session clock in a sheet ticking for as long as that sheet is open. */
+function tickClock(node) {
+  stopTicking();
+  state.ticker = setInterval(() => {
+    if (!node.isConnected) {
+      stopTicking();
+      return;
+    }
+    node.textContent = elapsed(sessionElapsedMs());
+  }, 1000);
+}
+
+function stopTicking() {
+  if (state.ticker !== null) clearInterval(state.ticker);
+  state.ticker = null;
 }
 
 // ------------------------------------------------------------------ S1
@@ -300,7 +375,55 @@ function screen(name) {
   dom.s1.hidden = name !== 's1';
   dom.settlement.hidden = name !== 'settlement';
   dom.stepper.hidden = name !== 'stepper';
+  dom.reality.hidden = name !== 'reality';
   if (name !== 'sheet') dom.sheet.hidden = true;
+  if (name !== 'reality') stopTicking();
+}
+
+/**
+ * `docs/DESIGN.md` §9.9's reality check, shown **between rounds**.
+ *
+ * It never lands on a live decision or on the settlement ceremony: a summary of
+ * the session pushed on top of a payout is a different object — it would be
+ * reading a result back at the player at the moment §7.1 governs — so it is shown
+ * where the next stake is chosen, before the stake is chosen.
+ */
+function realityCheckOr(next) {
+  if (!state.realityDue || state.session === null) {
+    screen(next);
+    return;
+  }
+  state.realityDue = false;
+  state.afterReality = next;
+  const session = state.session;
+  dom.realityElapsed.textContent = elapsed(sessionElapsedMs());
+  dom.realityStaked.textContent = credits(session.stakedUnits);
+  dom.realityCredited.textContent = credits(session.creditedUnits);
+  dom.realityNet.textContent = signedCredits(session.netUnits);
+  dom.realityInterval.textContent = String(session.realityCheck?.intervalMinutes ?? 30);
+  screen('reality');
+  tickClock(dom.realityElapsed);
+  void api.acknowledgeRealityCheck().then(renderSession).catch(() => {});
+}
+
+/**
+ * While no round is live, the session clock is still running, so the reality
+ * check has to be able to fall due on a screen nobody is sending commands from.
+ * One poll a minute, and only between rounds.
+ */
+function pollSessionBetweenRounds() {
+  setInterval(() => {
+    if (state.frame !== null && state.frame?.state === 'STAGED') return;
+    if (!dom.s1.hidden || !dom.s0.hidden) {
+      void api
+        .session()
+        .then((session) => {
+          renderSession(session);
+          if (state.realityDue && !dom.s1.hidden) realityCheckOr('s1');
+        })
+        .catch(() => {});
+    }
+  }, 60000);
 }
 
 async function seedColony() {
@@ -713,17 +836,50 @@ async function newRound() {
   await guard(async () => {
     await prepareRound();
     renderStakePanel();
-    screen('s1');
+    realityCheckOr('s1');
   });
 }
 
 // ------------------------------------------------------------------ sheets
 
-function openSheet(title, fragment) {
+function openSheet(title, fragment, keepScroll = false) {
+  const scroll = dom.sheet.scrollTop;
   dom.sheetTitle.textContent = title;
   dom.sheetBody.replaceChildren(fragment);
   dom.sheet.hidden = false;
-  dom.sheet.scrollTop = 0;
+  // A sheet that re-renders in place — the limits sheet after a change — keeps the
+  // player where they were. Only a newly opened sheet starts at the top.
+  dom.sheet.scrollTop = keepScroll ? scroll : 0;
+}
+
+/** MENU → session; the session sheet's own control → safer play. Two taps (§9.9). */
+async function openSession() {
+  const session = await api.session();
+  renderSession(session);
+  openSheet(
+    'Session & history',
+    historySheet(session, { onTick: tickClock, onSaferPlay: () => void openSaferPlay() }),
+  );
+}
+
+async function openSaferPlay(keepScroll = false) {
+  const session = await api.session();
+  renderSession(session);
+  openSheet(
+    'Safer play',
+    saferPlaySheet(state.config, session, {
+      onTick: tickClock,
+      onLimit: (field, value) => {
+        void guard(async () => {
+          const updated = await api.setLimit(field, value);
+          renderSession(updated.session);
+          await openSaferPlay(true);
+          return null;
+        });
+      },
+    }),
+    keepScroll,
+  );
 }
 
 async function openVerify() {
@@ -775,11 +931,8 @@ function wireStake() {
   });
   dom.seed.addEventListener('click', () => void seedColony());
   $('s1-help').addEventListener('click', () => openSheet('Help & paytable', helpSheet(state.config)));
-  $('s1-history').addEventListener('click', async () => {
-    const session = await api.session();
-    renderSession(session);
-    openSheet('Session & history', historySheet(session));
-  });
+  $('s1-history').addEventListener('click', () => void guard(openSession));
+  $('limit-lock-open').addEventListener('click', () => void guard(openSaferPlay));
 }
 
 function wireActions() {
@@ -866,12 +1019,17 @@ function renderStepper() {
 }
 
 function wireSheets() {
-  dom.menu.addEventListener('click', async () => {
-    const session = await api.session();
-    renderSession(session);
-    openSheet('Session & history', historySheet(session));
+  dom.menu.addEventListener('click', () => void guard(openSession));
+  // The free-play marker is the visible link to help resources §9.9 asks for, on
+  // every screen and one tap from every screen.
+  dom.freeplay.addEventListener('click', () => void guard(openSaferPlay));
+  $('reality-continue').addEventListener('click', () => screen(state.afterReality ?? 's1'));
+  $('reality-limits').addEventListener('click', () => {
+    screen(state.afterReality ?? 's1');
+    void guard(openSaferPlay);
   });
   $('sheet-close').addEventListener('click', () => {
+    stopTicking();
     dom.sheet.hidden = true;
   });
   dom.newRound.addEventListener('click', () => void newRound());
@@ -884,7 +1042,7 @@ function wireSheets() {
   );
   dom.s0done.addEventListener('click', () => {
     localStorage.setItem(STORAGE_EXPLAINER, '1');
-    screen('s1');
+    realityCheckOr('s1');
   });
 }
 
@@ -895,6 +1053,9 @@ async function boot() {
   dom.legend.textContent = state.config.rules.offspring
     .map((band) => `${band.id} ${band.percent}%`)
     .join(' · ');
+  // The persistent free-play marker, from the server rather than hard-coded here.
+  dom.freeplayText.textContent =
+    state.config.protection?.freePlayNotice ?? 'FREE-PLAY DEMO CREDITS · NO CASH VALUE';
   renderSession(await api.session());
   wireStake();
   wireActions();
@@ -936,7 +1097,12 @@ async function boot() {
 
   await prepareRound();
   renderStakePanel();
-  screen(localStorage.getItem(STORAGE_EXPLAINER) === null ? 's0' : 's1');
+  const first = localStorage.getItem(STORAGE_EXPLAINER) === null ? 's0' : 's1';
+  // The explainer is shown before a round and never after a loss (§5, S0), so a
+  // reality check that is already due waits behind it rather than in front of it.
+  if (first === 's0') screen('s0');
+  else realityCheckOr('s1');
+  pollSessionBetweenRounds();
 }
 
 boot().catch((error) => {
