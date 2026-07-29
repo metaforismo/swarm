@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>SWARM — Axiom Games</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='9' fill='%2339F5C8'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <div class="device">
+      <main class="frame" id="frame">
+        <!-- top bar: balance · session · menu ------------------------------ -->
+        <header class="topbar">
+          <button class="balance" id="balance" type="button" aria-label="Free-play balance and session">
+            <span class="label">Balance</span>
+            <strong id="balance-value">—</strong>
+          </button>
+          <div>
+            <div class="label" style="text-align: right">Session</div>
+            <div class="session-net" id="session-net">—</div>
+          </div>
+          <button class="menu-button" id="menu" type="button">Menu</button>
+        </header>
+
+        <!-- the vent stage: the colony is the only light source ------------ -->
+        <section class="stage" id="stage" aria-label="Vent stage">
+          <div class="environment" id="environment" aria-hidden="true">
+            <div class="rock"></div>
+            <div class="chimney"></div>
+            <div class="silt"></div>
+            <div class="plankton"></div>
+          </div>
+          <div class="vent" aria-hidden="true"></div>
+          <div class="flash" id="flash" aria-hidden="true"></div>
+          <div class="ghosts" id="ghosts" aria-hidden="true"></div>
+          <div class="colony" id="colony" role="img" aria-live="polite" aria-label="Colony"></div>
+          <div class="legend" id="legend">DIE 40% · HOLD 40% · SPLIT 20%</div>
+          <div class="stage-note" id="stage-note"></div>
+        </section>
+
+        <!-- value strip: yield, colony value, the stake line, side-bet chips -->
+        <section class="strip" aria-label="Colony value">
+          <div class="strip-main">
+            <div class="yield" id="yield">YIELD —</div>
+            <div class="colony-value" id="colony-value">—</div>
+            <div class="delta" id="delta"></div>
+            <div class="position" id="position"></div>
+          </div>
+          <div class="chips" id="chips"></div>
+          <div class="stakeline" aria-hidden="true">
+            <div class="fill" id="stakeline-fill"></div>
+            <div class="tick" id="stakeline-tick" style="left: 14.6%"></div>
+          </div>
+        </section>
+
+        <!-- action bar: BANK primary, always, above or below the stake ------ -->
+        <section class="actionbar" id="actionbar" aria-label="Decision">
+          <button class="act primary" id="bank" type="button">BANK<small id="bank-sub"></small></button>
+          <button class="act secondary" id="harvest" type="button">
+            HARVEST<small id="harvest-sub"></small>
+          </button>
+          <button class="act tertiary" id="next" type="button">NEXT<small id="next-sub"></small></button>
+        </section>
+
+        <footer class="footer">
+          <div class="dots" id="dots" aria-label="Generations"></div>
+          <div class="ladder-chip" id="ladder-chip"></div>
+        </footer>
+
+        <!-- S0 — first-round explainer ------------------------------------- -->
+        <section class="overlay" id="s0" hidden aria-label="How SWARM works">
+          <h1>SWARM</h1>
+          <div class="panel">
+            <h2 style="margin-top: 0">1 · Every generation</h2>
+            <p>Each organism independently <strong>dies</strong>, <strong>holds</strong> or <strong>splits</strong>.</p>
+            <p class="mono">DIE 40% · HOLD 40% · SPLIT 20%</p>
+          </div>
+          <div class="panel">
+            <h2 style="margin-top: 0">2 · Your colony is money</h2>
+            <p>
+              It is worth its size times a yield that climbs 25% a generation.
+              <strong>It can go down.</strong>
+            </p>
+          </div>
+          <div class="panel">
+            <h2 style="margin-top: 0">3 · Bank whenever you like</h2>
+            <p>
+              Or harvest part and let the rest run. Every way of playing returns the same
+              <strong>95%</strong> on average, before rounding.
+            </p>
+          </div>
+          <button class="cta" id="s0-done" type="button">START</button>
+        </section>
+
+        <!-- S1 — stake &amp; seed ------------------------------------------- -->
+        <section class="overlay" id="s1" hidden aria-label="Stake and seed">
+          <h1>SEED A COLONY</h1>
+          <p class="small">
+            Three organisms at a vent in the dark. Generation 1 resolves without a decision.
+          </p>
+
+          <div class="panel">
+            <div class="label">Colony stake</div>
+            <div class="stepper-control" style="margin-top: 8px">
+              <button id="stake-down" type="button" aria-label="Lower stake">−</button>
+              <div class="value" id="stake-value">1.00</div>
+              <button id="stake-up" type="button" aria-label="Raise stake">+</button>
+            </div>
+            <div class="row">
+              <span class="k">Range</span><span class="v" id="stake-range">—</span>
+            </div>
+          </div>
+
+          <button class="cta ghost" id="sidebets-toggle" type="button">+ SIDE BETS</button>
+          <div class="panel" id="sidebets" hidden>
+            <p class="small">
+              Side bets are optional and off by default. Each carries its own stake, its own
+              ceiling and the same 95%. They resolve at settlement, on the colony that is never
+              harvested — harvesting cannot lose you one.
+            </p>
+            <div id="sidebet-rows"></div>
+            <div class="row">
+              <span class="k">Total at risk</span><span class="v" id="total-at-risk">1.00</span>
+            </div>
+            <div id="profit-rates" class="small muted"></div>
+          </div>
+
+          <button class="cta ghost" id="fairness-toggle" type="button">FAIRNESS</button>
+          <div class="panel" id="fairness" hidden>
+            <div class="label">Server commitment</div>
+            <div class="mono" id="server-commitment">—</div>
+            <div class="linkrow">
+              <button id="copy-commitment" type="button">Copy</button>
+            </div>
+            <div class="label" style="margin-top: 10px">Your client seed</div>
+            <div class="mono" id="client-seed">—</div>
+            <div class="linkrow">
+              <button id="regenerate-seed" type="button">Regenerate</button>
+              <button id="edit-seed" type="button">Edit</button>
+            </div>
+            <p class="small" style="margin-top: 10px">
+              The server sealed its seed before you chose yours, so neither side can pick the
+              other's. Change yours if you like — every value gives exactly the same odds.
+            </p>
+          </div>
+
+          <div class="spacer" style="flex: 1"></div>
+          <button class="cta" id="seed" type="button">SEED COLONY</button>
+          <div class="linkrow">
+            <button id="s1-help" type="button">Help &amp; paytable</button>
+            <button id="s1-history" type="button">History</button>
+          </div>
+        </section>
+
+        <!-- harvest stepper: every legal k, one tap away -------------------- -->
+        <section class="overlay" id="stepper" hidden aria-label="Harvest amount">
+          <h1>HARVEST</h1>
+          <p class="small">
+            Choosing <span class="mono">k</span> changes the shape of the round, not its expected
+            return. Every credit is rounded down to the nearest 0.000001.
+          </p>
+          <div class="panel">
+            <div class="stepper-control">
+              <button id="k-down" type="button" aria-label="Harvest fewer">−</button>
+              <div class="value" id="k-value">1</div>
+              <button id="k-up" type="button" aria-label="Harvest more">+</button>
+            </div>
+            <input
+              id="k-range"
+              type="range"
+              min="1"
+              max="2"
+              value="1"
+              step="1"
+              style="width: 100%; margin-top: 12px"
+              aria-label="Organisms to harvest"
+            />
+            <div class="row">
+              <span class="k">Credits now</span><span class="v" id="k-credit">—</span>
+            </div>
+            <div class="row">
+              <span class="k">Colony left</span><span class="v" id="k-left">—</span>
+            </div>
+          </div>
+          <button class="cta" id="k-commit" type="button">HARVEST</button>
+          <button class="cta ghost" id="k-cancel" type="button">Cancel</button>
+        </section>
+
+        <!-- S7 — settlement ceremony --------------------------------------- -->
+        <section class="overlay ceremony" id="settlement" hidden aria-label="Settlement">
+          <div class="spacer"></div>
+          <div class="terminal" id="settlement-terminal">—</div>
+          <div class="headline" id="settlement-headline">—</div>
+          <div class="net" id="settlement-net">—</div>
+          <p class="small" id="settlement-copy"></p>
+          <div class="spacer"></div>
+          <button class="cta" id="new-round" type="button">NEW ROUND</button>
+          <div class="linkrow">
+            <button id="open-receipt" type="button">Receipt</button>
+            <button id="open-verify" type="button">Verify</button>
+            <button id="open-wild" type="button" hidden>Wild line</button>
+          </div>
+        </section>
+
+        <!-- sheets: receipt · verify · wild line · history · help ----------- -->
+        <section class="overlay" id="sheet" hidden aria-label="Sheet">
+          <h1 id="sheet-title">—</h1>
+          <div id="sheet-body"></div>
+          <button class="cta ghost" id="sheet-close" type="button">Close</button>
+        </section>
+
+        <div class="toast" id="toast" hidden></div>
+      </main>
+    </div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,876 @@
+/*
+ * SWARM — graybox styling.
+ *
+ * The palette, the type direction and the layout are `docs/DESIGN.md` §5, §6.1 and
+ * §6.6, at placeholder fidelity: real information architecture, real hierarchy,
+ * real colours, flat shapes where the gel bodies, the volumetrics and the
+ * halation passes will go.
+ *
+ * Two rules from §6.1 are enforced here rather than left to a component:
+ * red is not in the palette — loss is darkness, a signed number and the removal
+ * of light — and AMBER means "yours, banked, safe" and appears nowhere else.
+ */
+
+:root {
+  --abyss: #02040a;
+  --trench: #061019;
+  --silt: #0a1b28;
+  --basalt: #123240;
+  --crust: #1e4a56;
+  --lumen: #39f5c8;
+  --lumen-high: #7cffe3;
+  --lumen-deep: #0fb894;
+  --plankton: #5b8cff;
+  --medusa: #b06cff;
+  --amber: #ffc978;
+  --ember: #ff9e6b;
+  --ash: #8a97a6;
+  --foam: #e6f4f1;
+  --mist: #9fb6bd;
+
+  --numerals: ui-monospace, 'SF Mono', 'Space Grotesk', 'Basis Grotesque Mono', Menlo, monospace;
+  --ui: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --panel: color-mix(in srgb, var(--foam) 8%, transparent);
+  --panel-stroke: color-mix(in srgb, var(--lumen) 20%, transparent);
+  --radius: 16px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--abyss);
+  color: var(--foam);
+  font-family: var(--ui);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------------- device */
+
+.device {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100dvh;
+  background:
+    radial-gradient(120% 80% at 50% 120%, #071019 0%, var(--abyss) 60%),
+    var(--abyss);
+  padding: 0;
+}
+
+/* The 390 x 844 pt reference frame. Landscape and desktop letterbox it. */
+.frame {
+  position: relative;
+  width: min(100vw, 430px);
+  height: min(100dvh, 940px);
+  display: grid;
+  grid-template-rows: 56px minmax(0, 1fr) 104px 96px 34px;
+  overflow: hidden;
+  background: var(--abyss);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--crust) 40%, transparent);
+}
+
+/* ---------------------------------------------------------------- top bar */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--crust) 35%, transparent);
+}
+
+.label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mist);
+}
+
+.balance {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+
+.balance strong {
+  font-family: var(--numerals);
+  font-variant-numeric: tabular-nums;
+  font-size: 17px;
+  color: var(--amber);
+  letter-spacing: 0.01em;
+}
+
+.session-net {
+  font-family: var(--numerals);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--mist);
+  text-align: right;
+}
+
+.session-net[data-sign='up'] {
+  color: var(--foam);
+}
+
+.menu-button {
+  border: 1px solid var(--panel-stroke);
+  border-radius: 10px;
+  padding: 7px 11px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mist);
+  min-height: 34px;
+}
+
+/* ---------------------------------------------------------------- stage */
+
+.stage {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(80% 50% at 50% 108%, color-mix(in srgb, var(--ember) 22%, transparent) 0%, transparent 60%),
+    linear-gradient(180deg, var(--abyss) 0%, var(--trench) 78%, #040a11 100%);
+  touch-action: manipulation;
+  --exposure: 0.146;
+  --environment: 0;
+}
+
+/* The environment: silt, chimney and plankton, always there and always unlit
+   until the colony is worth 9.895833x (docs/DESIGN.md §7.2). */
+.environment {
+  position: absolute;
+  inset: 0;
+  opacity: var(--environment);
+  transition: opacity 700ms cubic-bezier(0.2, 0, 0, 1);
+  pointer-events: none;
+}
+
+.environment .silt {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 18%;
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--basalt) 70%, transparent));
+}
+
+.environment .chimney {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 120px;
+  height: 34%;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--basalt) 85%, transparent));
+  clip-path: polygon(38% 0, 62% 0, 78% 100%, 22% 100%);
+}
+
+.environment .rock {
+  position: absolute;
+  inset: 40% 0 18% 0;
+  background:
+    radial-gradient(40% 60% at 18% 60%, color-mix(in srgb, var(--crust) 40%, transparent), transparent 70%),
+    radial-gradient(45% 55% at 82% 45%, color-mix(in srgb, var(--crust) 26%, transparent), transparent 70%);
+  filter: blur(4px);
+}
+
+.environment .plankton {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, var(--plankton) 40%, transparent 45%);
+  background-size: 44px 44px;
+  opacity: 0.16;
+}
+
+.vent {
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  width: 96px;
+  height: 24px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--ember) 60%, transparent), transparent 70%);
+  filter: blur(3px);
+}
+
+.colony,
+.ghosts {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* An organism: a placeholder disc where the gel bell will go. Its light is its
+   value — halation scales with the frame's exposure (§6.3). */
+.organism {
+  position: absolute;
+  border-radius: 50%;
+  translate: -50% -50%;
+  background: radial-gradient(circle at 36% 30%, var(--lumen-high) 0%, var(--lumen) 46%, var(--lumen-deep) 100%);
+  box-shadow:
+    0 0 calc(10px + 42px * var(--exposure)) color-mix(in srgb, var(--lumen) 45%, transparent),
+    0 0 6px color-mix(in srgb, var(--lumen-high) 60%, transparent);
+  transition:
+    left 400ms cubic-bezier(0.2, 0, 0, 1),
+    top 400ms cubic-bezier(0.2, 0, 0, 1),
+    width 400ms cubic-bezier(0.2, 0, 0, 1),
+    height 400ms cubic-bezier(0.2, 0, 0, 1),
+    opacity 400ms ease,
+    filter 250ms ease;
+  animation: breathe 1.25s ease-in-out infinite alternate;
+}
+
+.organism::after {
+  content: '';
+  position: absolute;
+  inset: 34%;
+  border-radius: 50%;
+  background: var(--lumen-high);
+  opacity: 0.85;
+}
+
+@keyframes breathe {
+  from {
+    filter: brightness(0.92);
+  }
+  to {
+    filter: brightness(1.06);
+  }
+}
+
+.organism[data-outcome='DIE'] {
+  opacity: 0;
+  filter: brightness(0.2) saturate(0.2);
+  translate: -50% 20%;
+}
+
+.organism[data-outcome='HOLD'] {
+  filter: brightness(1.15);
+}
+
+.organism[data-outcome='SPLIT'] {
+  filter: brightness(1.05);
+}
+
+.organism.harvested {
+  background: radial-gradient(circle at 36% 30%, #ffe6bb 0%, var(--amber) 55%, #d99f4d 100%);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--amber) 45%, transparent);
+  opacity: 0;
+  transition: all 400ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* The wild line, drawn for 400 ms at a harvest and never as a standing rival
+   colony (§9.8). No halation, no light, no money. */
+.wild-ghost {
+  position: absolute;
+  border-radius: 50%;
+  translate: -50% -50%;
+  border: 1px solid color-mix(in srgb, var(--plankton) 60%, transparent);
+  background: color-mix(in srgb, var(--plankton) 22%, transparent);
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
+.ghosts.showing .wild-ghost {
+  opacity: 1;
+}
+
+.legend {
+  position: absolute;
+  top: 12px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-family: var(--numerals);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--mist);
+  pointer-events: none;
+}
+
+.stage-note {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 14px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--mist);
+  pointer-events: none;
+}
+
+.stage-note strong {
+  color: var(--foam);
+  font-weight: 600;
+}
+
+.flash {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(60% 40% at 50% 100%, color-mix(in srgb, var(--ember) 40%, transparent), transparent 70%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.flash.on {
+  animation: flash 120ms ease-out;
+}
+
+@keyframes flash {
+  from {
+    opacity: 0.9;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.medusa-rim .organism {
+  box-shadow:
+    0 0 26px color-mix(in srgb, var(--medusa) 60%, transparent),
+    0 0 8px var(--lumen-high);
+}
+
+/* ---------------------------------------------------------------- value strip */
+
+.strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: start;
+  gap: 4px 10px;
+  padding: 8px 14px 8px;
+  border-top: 1px solid color-mix(in srgb, var(--crust) 35%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--crust) 35%, transparent);
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--silt) 55%, transparent));
+}
+
+.strip .yield {
+  font-family: var(--numerals);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--mist);
+}
+
+.strip .colony-value {
+  font-family: var(--numerals);
+  font-variant-numeric: tabular-nums;
+  font-size: 32px;
+  line-height: 34px;
+  letter-spacing: -0.01em;
+}
+
+.strip .position {
+  font-family: var(--numerals);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--mist);
+}
+
+.strip .stakeline {
+  grid-column: 1 / -1;
+}
+
+.strip .delta {
+  font-family: var(--numerals);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  line-height: 16px;
+  color: var(--mist);
+  min-height: 16px;
+}
+
+.strip .delta[data-band='gain'],
+.strip .delta[data-band='large-gain'] {
+  color: var(--foam);
+}
+
+.strip .delta[data-band='large-gain'] {
+  color: var(--medusa);
+}
+
+/* The 1.00x stake line: a static reference, never an animated target (§9.2). */
+.stakeline {
+  position: relative;
+  height: 4px;
+  margin-top: 4px;
+  background: color-mix(in srgb, var(--crust) 45%, transparent);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.stakeline .fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: var(--lumen-deep);
+  transition: width 380ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.stakeline .tick {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 1px;
+  background: var(--mist);
+}
+
+.chips {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-end;
+  justify-content: flex-start;
+}
+
+.chip {
+  font-family: var(--numerals);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  padding: 3px 7px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--crust) 70%, transparent);
+  color: var(--mist);
+  white-space: nowrap;
+}
+
+.chip[data-state='WON'] {
+  color: var(--amber);
+  border-color: color-mix(in srgb, var(--amber) 50%, transparent);
+}
+
+.chip[data-state='LOST'] {
+  color: var(--ash);
+  opacity: 0.7;
+}
+
+/* ---------------------------------------------------------------- action bar */
+
+.actionbar {
+  display: grid;
+  grid-template-columns: 1.15fr 1.3fr 0.85fr;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 14px;
+}
+
+/* Hierarchy never changes with the sign of the position (§9.2). */
+.act {
+  min-height: 54px;
+  border-radius: 14px;
+  font-family: var(--numerals);
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  transition: opacity 150ms ease;
+}
+
+.act small {
+  font-size: 11px;
+  opacity: 0.75;
+  letter-spacing: 0.02em;
+}
+
+.act.primary {
+  background: var(--lumen);
+  color: #04231d;
+  font-weight: 700;
+}
+
+.act.secondary {
+  border: 1px solid var(--lumen);
+  color: var(--lumen);
+}
+
+.act.tertiary {
+  border: 1px solid color-mix(in srgb, var(--crust) 80%, transparent);
+  color: var(--mist);
+}
+
+.act[disabled],
+.act[aria-disabled='true'] {
+  opacity: 0.28;
+  cursor: default;
+}
+
+.actionbar.inert .act {
+  pointer-events: none;
+  opacity: 0.45;
+}
+
+.actionbar.single {
+  grid-template-columns: 1fr;
+}
+
+/* ---------------------------------------------------------------- footer */
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 14px 8px;
+}
+
+.dots {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--crust) 80%, transparent);
+}
+
+.dot.done {
+  background: var(--lumen-deep);
+}
+
+.dot.current {
+  background: var(--lumen);
+  box-shadow: 0 0 8px var(--lumen);
+}
+
+.ladder-chip {
+  font-family: var(--numerals);
+  font-size: 11px;
+  color: var(--mist);
+  letter-spacing: 0.04em;
+}
+
+/* ---------------------------------------------------------------- overlays */
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, rgba(2, 4, 10, 0.94), rgba(2, 4, 10, 0.99));
+  backdrop-filter: blur(10px);
+  padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.overlay[hidden],
+[hidden] {
+  display: none !important;
+}
+
+.overlay h1 {
+  font-size: 22px;
+  margin: 0 0 4px;
+  letter-spacing: 0.06em;
+}
+
+.overlay h2 {
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mist);
+  margin: 18px 0 8px;
+}
+
+.overlay p {
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--mist);
+  margin: 0 0 10px;
+}
+
+.overlay p strong {
+  color: var(--foam);
+}
+
+.panel {
+  border: 1px solid var(--panel-stroke);
+  background: var(--panel);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.row + .row {
+  border-top: 1px solid color-mix(in srgb, var(--crust) 30%, transparent);
+}
+
+.row .k {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mist);
+}
+
+.row .v {
+  font-family: var(--numerals);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  text-align: right;
+}
+
+.stepper-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.stepper-control button {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--panel-stroke);
+  font-size: 20px;
+  color: var(--foam);
+}
+
+.stepper-control .value {
+  font-family: var(--numerals);
+  font-variant-numeric: tabular-nums;
+  font-size: 30px;
+}
+
+.cta {
+  width: 100%;
+  min-height: 56px;
+  border-radius: 14px;
+  background: var(--lumen);
+  color: #04231d;
+  font-family: var(--numerals);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin-top: 6px;
+}
+
+.cta.ghost {
+  background: none;
+  border: 1px solid var(--panel-stroke);
+  color: var(--foam);
+  font-weight: 500;
+}
+
+.cta[disabled] {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.linkrow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.linkrow button {
+  border: 1px solid var(--panel-stroke);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mist);
+  min-height: 40px;
+}
+
+.mono {
+  font-family: var(--numerals);
+  font-size: 12px;
+  word-break: break-all;
+  color: var(--foam);
+}
+
+.muted {
+  color: var(--mist);
+}
+
+.small {
+  font-size: 12px;
+  line-height: 17px;
+}
+
+table.data {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--numerals);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+table.data th {
+  text-align: left;
+  font-family: var(--ui);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mist);
+  font-weight: 500;
+  padding: 4px 6px 4px 0;
+}
+
+table.data td {
+  padding: 4px 6px 4px 0;
+  border-top: 1px solid color-mix(in srgb, var(--crust) 25%, transparent);
+  white-space: nowrap;
+}
+
+table.data td.num {
+  text-align: right;
+}
+
+.scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ---------------------------------------------------------------- settlement */
+
+.ceremony {
+  align-items: stretch;
+  justify-content: center;
+  text-align: center;
+  gap: 8px;
+}
+
+.ceremony .headline {
+  font-family: var(--numerals);
+  font-variant-numeric: tabular-nums;
+  font-size: 56px;
+  line-height: 60px;
+  margin: 4px 0;
+}
+
+.ceremony[data-tier='T0-loss'] .headline,
+.ceremony[data-tier='T-nil'] .headline {
+  color: var(--mist);
+  font-size: 40px;
+  line-height: 44px;
+}
+
+.ceremony[data-tier='T0-win'] .headline,
+.ceremony[data-tier='T1'] .headline,
+.ceremony[data-tier='T2'] .headline,
+.ceremony[data-tier='T3'] .headline {
+  color: var(--amber);
+}
+
+.ceremony .net {
+  font-family: var(--numerals);
+  font-variant-numeric: tabular-nums;
+  font-size: 22px;
+}
+
+.ceremony .terminal {
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--mist);
+}
+
+.ceremony .spacer {
+  flex: 1;
+}
+
+/* ---------------------------------------------------------------- misc */
+
+.toast {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 120px;
+  z-index: 9;
+  border-radius: 12px;
+  border: 1px solid var(--panel-stroke);
+  background: rgba(6, 16, 25, 0.95);
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--foam);
+}
+
+.verify-step {
+  display: flex;
+  gap: 8px;
+  padding: 7px 0;
+  border-top: 1px solid color-mix(in srgb, var(--crust) 25%, transparent);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.verify-step .mark {
+  font-family: var(--numerals);
+  color: var(--lumen);
+}
+
+.verify-step[data-ok='false'] .mark {
+  color: var(--ash);
+}
+
+.verify-step .detail {
+  font-family: var(--numerals);
+  color: var(--mist);
+  word-break: break-all;
+}
+
+.wildline {
+  display: flex;
+  gap: 4px;
+  align-items: flex-end;
+  height: 84px;
+  padding-top: 6px;
+}
+
+.wildline .bar {
+  flex: 1;
+  background: color-mix(in srgb, var(--plankton) 45%, transparent);
+  border-radius: 2px 2px 0 0;
+  min-height: 2px;
+}
+
+.wildline .bar.player {
+  background: color-mix(in srgb, var(--lumen) 55%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .organism,
+  .wild-ghost,
+  .stakeline .fill,
+  .environment {
+    transition-duration: 1ms !important;
+    animation: none !important;
+  }
+}
