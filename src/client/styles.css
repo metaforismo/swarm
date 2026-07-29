@@ -381,9 +381,13 @@ button {
 .strip .position {
   font-family: var(--numerals);
   font-variant-numeric: tabular-nums;
-  font-size: 11px;
-  letter-spacing: 0.04em;
+  font-size: 10px;
+  line-height: 14px;
+  letter-spacing: 0.02em;
   color: var(--mist);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .strip .stakeline {
@@ -393,10 +397,11 @@ button {
 .strip .delta {
   font-family: var(--numerals);
   font-variant-numeric: tabular-nums;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 16px;
   color: var(--mist);
   min-height: 16px;
+  white-space: nowrap;
 }
 
 .strip .delta[data-band='gain'],
