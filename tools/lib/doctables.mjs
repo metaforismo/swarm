@@ -11,14 +11,47 @@
  * Long exact values (the SWARM side bet probability is a 200-digit fraction)
  * are published as a SHA-256 digest of the canonical `numerator/denominator`
  * string plus a truncated decimal. The full exact value is in
- * `spec/paytable.v1.json`.
+ * `spec/paytable.v2.json`.
  */
 
-import { digest } from './canonical.mjs';
+import { canonicalJson, digest } from './canonical.mjs';
 import { buildPaytable } from './report.mjs';
+
+/** Where the frozen fixture lives, relative to the repository root. */
+export const FIXTURE_PATH = 'spec/paytable.v2.json';
 
 /** Values longer than this are published as digest + decimal instead of inline. */
 export const INLINE_FRACTION_LIMIT = 44;
+
+/**
+ * The volatility ladder in docs/MATH.md §10. Only the `style` and `feel` strings
+ * are editorial; every number in the rendered row comes from the enumeration.
+ */
+export const VOLATILITY_ROWS = Object.freeze([
+  { id: 'BANK_FIRST', style: 'Low', feel: 'Grinding, near-flat, one decision' },
+  { id: 'HALF_EVERY', style: 'Medium', feel: 'Frequent small credits, long tail kept alive' },
+  { id: 'HALF_AT_2X', style: 'Medium-high', feel: 'Locks a profit, rides the rest' },
+  { id: 'STOP_AT_10X', style: 'High', feel: 'Rare, chunky wins' },
+  { id: 'RUN', style: 'Extreme', feel: 'Nothing, or 17.57x and up' },
+]);
+
+/** Thousands separators for an integer string, so prose and tables agree. */
+function grouped(digits) {
+  if (typeof digits !== 'string' || !/^\d+$/u.test(digits))
+    throw new Error(`Expected an integer string, got ${digits}`);
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/gu, ',');
+}
+
+/** Renders a `0.xxxxxxxxxx` probability as a two-decimal percentage, truncated. */
+function percent(decimal) {
+  if (typeof decimal !== 'string' || !/^\d+\.\d+$/u.test(decimal))
+    throw new Error(`Expected a decimal probability string, got ${decimal}`);
+  const [whole, fraction] = decimal.split('.');
+  const digits = `${whole}${fraction}`;
+  const shifted = `${digits.slice(0, whole.length + 2)}.${digits.slice(whole.length + 2)}`;
+  const [head, tail] = shifted.split('.');
+  return `${String(Number.parseInt(head, 10))}.${(tail ?? '').padEnd(2, '0').slice(0, 2)}`;
+}
 
 export function fractionCell(fraction) {
   if (typeof fraction !== 'string') throw new Error('fraction must be a string');
@@ -37,6 +70,16 @@ function table(header, rows) {
 
 export function renderBlocks(paytable = buildPaytable()) {
   const blocks = {};
+
+  blocks.identity = table(
+    ['Identity', 'Value'],
+    [
+      ['Adapter', `\`${paytable.adapterId}\` @ \`${paytable.adapterVersion}\``],
+      ['Paytable schema', `\`${paytable.schema}\``],
+      ['Frozen fixture', `\`${FIXTURE_PATH}\``],
+      ['Fixture sha256', `\`${digest(canonicalJson(paytable))}\``],
+    ],
+  );
 
   blocks.offspring = table(
     ['Outcome', 'Children', 'Draw band', 'Probability', 'Percent'],
@@ -100,18 +143,127 @@ export function renderBlocks(paytable = buildPaytable()) {
   );
 
   blocks.policies = table(
-    ['Policy', 'Exact RTP', 'Standard deviation', 'Hit rate', 'Description'],
+    [
+      'Policy',
+      'Exact RTP',
+      'Standard deviation',
+      'Profit rate `P(>stake)`',
+      'Hit rate `P(>0)`',
+      'Description',
+    ],
     paytable.policies.map((row) => [
       `\`${row.id}\``,
       `\`${row.rtp}\``,
       row.standardDeviation,
+      row.profitRate,
       row.hitRate,
       row.label,
     ]),
   );
 
+  blocks.volatility = table(
+    ['Style', 'Policy', 'SD', 'Profit rate', 'Hit rate', 'Feel'],
+    VOLATILITY_ROWS.map(({ id, style, feel }) => {
+      const row = paytable.policies.find((entry) => entry.id === id);
+      if (!row) throw new Error(`Unknown policy in the volatility table: ${id}`);
+      return [
+        style,
+        `\`${row.id}\``,
+        row.standardDeviation.slice(0, 4),
+        `${percent(row.profitRate)}%`,
+        `${percent(row.hitRate)}%`,
+        feel,
+      ];
+    }),
+  );
+
+  blocks['volatility-bounds'] = table(
+    ['Bound over every adapted policy', 'Standard deviation', 'Attained by'],
+    [
+      [
+        'Minimum',
+        paytable.varianceBounds.minimum.standardDeviation,
+        'Banking the whole colony at the first decision (`BANK_FIRST`)',
+      ],
+      [
+        'Maximum',
+        paytable.varianceBounds.maximum.standardDeviation,
+        `Harvesting exactly one organism at population ${
+          paytable.varianceBounds.maximum.harvests[0].population
+        } to stay under FULL BLOOM (${paytable.varianceBounds.maximum.harvestStates} states)`,
+      ],
+    ],
+  );
+
+  blocks.risk = table(
+    ['Bet line', 'Cap basis', 'Largest credit the line can owe', 'Declared cap', 'Headroom'],
+    paytable.risk.lines.map((row) => [
+      `\`${row.line}\``,
+      row.basis,
+      `${row.maximumCreditDecimal}x`,
+      `${row.capMultiple}x`,
+      `${row.headroom}x`,
+    ]),
+  );
+
+  blocks.bloom = table(
+    ['FULL BLOOM payout', 'Value'],
+    [
+      [
+        'Smallest possible',
+        `${paytable.bloom.smallest}x (generation ${paytable.bloom.smallestGeneration}, ${paytable.bloom.smallestPopulation} organisms)`,
+      ],
+      ['Median', `${paytable.bloom.median}x`],
+      ['Largest possible', `${paytable.bloom.largest}x`],
+      ['Share paying under 20x', `${percent(paytable.bloom.shareBelow20x)}%`],
+      ['Share paying under 50x', `${percent(paytable.bloom.shareBelow50x)}%`],
+      ['Share paying under 100x', `${percent(paytable.bloom.shareBelow100x)}%`],
+      [
+        `Share paying less than the smallest generation-18 settlement (${paytable.bloom.smallestFinal}x)`,
+        `${percent(paytable.bloom.shareBelowSmallestFinal)}%`,
+      ],
+      ['Frequency', `1 in ${paytable.bloom.oneIn}`],
+    ],
+  );
+
+  blocks.feedback = table(
+    [
+      'Population `n`',
+      'P(value falls)',
+      'P(falls **and** at least one split)',
+      'P(falls **and** two or more splits)',
+      'P(at least one split \\| value falls)',
+    ],
+    paytable.feedback.map((row) => [
+      String(row.population),
+      `${percent(row.falls)}%`,
+      `${percent(row.fallsWithSplit)}%`,
+      `${percent(row.fallsWithTwoSplits)}%`,
+      `${percent(row.splitGivenFalls)}%`,
+    ]),
+  );
+
+  blocks['break-even'] = table(
+    ['Generation', 'Organism value', 'Organisms needed to be worth more than the stake', 'A colony of 3 is worth'],
+    paytable.breakEven.map((row) => [
+      String(row.generation),
+      row.organismValue,
+      String(row.aboveStake),
+      `${row.colonyOfThree}x`,
+    ]),
+  );
+
   blocks.sidebets = table(
-    ['Bet', 'Resolves on', 'Probability', 'One in', 'Multiplier (exact)', 'Multiplier', 'RTP'],
+    [
+      'Bet',
+      'Resolves on',
+      'Probability',
+      'One in',
+      'Multiplier (exact)',
+      'Multiplier',
+      'Own cap',
+      'RTP',
+    ],
     paytable.sideBets.map((row) => [
       `**${row.label}**`,
       row.description,
@@ -119,6 +271,7 @@ export function renderBlocks(paytable = buildPaytable()) {
       row.oneIn,
       fractionCell(row.multiplier),
       `${row.multiplierDecimal}x`,
+      `${row.capMultiple}x`,
       `\`${row.rtp}\``,
     ]),
   );
@@ -137,11 +290,30 @@ export function renderBlocks(paytable = buildPaytable()) {
       ],
       ['Probability of that settlement', paytable.structuralMaximum.scientific],
       [
-        'Largest total one round can credit',
+        'Largest total the COLONY line can credit',
         `\`${paytable.roundMaximum.multiplier}\` = ${paytable.roundMaximum.decimal}x`,
       ],
-      ['Declared max-win multiple', `${paytable.roundMaximum.declaredMaxWinMultiple}x (never binds)`],
+      [
+        'Declared COLONY cap, on the colony stake',
+        `${paytable.roundMaximum.declaredMaxWinMultiple}x (proven never to bind)`,
+      ],
+      [
+        'Worst-case ticket liability at the stake bounds',
+        `${grouped(paytable.risk.ticket.worstCaseExposureCredits)} credits, admitted below ${grouped(paytable.risk.ticket.admissionLimitCredits)}`,
+      ],
       ['FULL BLOOM frequency', `1 in ${paytable.terminalCategories.BLOOM.oneIn}`],
+      [
+        'FULL BLOOM payout range',
+        `${paytable.bloom.smallest}x to ${paytable.bloom.largest}x, median ${paytable.bloom.median}x`,
+      ],
+      [
+        'Standard deviation, proven interval over every policy',
+        `${paytable.varianceBounds.minimum.standardDeviation} to ${paytable.varianceBounds.maximum.standardDeviation}`,
+      ],
+      [
+        'Rounds left below the stake by the mandatory generation 1',
+        `\`${paytable.underwater.afterGenerationOne}\` = ${percent(paytable.underwater.afterGenerationOneDecimal)}%`,
+      ],
       ['Expected generations per RUN round', paytable.totals.expectedGenerations],
       ['Draw grid per round', `${paytable.config.drawGridSize} draws`],
     ],

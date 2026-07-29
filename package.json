@@ -11,12 +11,14 @@
   "scripts": {
     "enumerate": "node tools/enumerate.mjs",
     "enumerate:terminals": "node tools/enumerate.mjs --terminals",
-    "paytable:write": "node tools/enumerate.mjs --json spec/paytable.v1.json",
-    "paytable:check": "node tools/enumerate.mjs --check spec/paytable.v1.json",
+    "paytable:write": "node tools/enumerate.mjs --json spec/paytable.v2.json",
+    "paytable:check": "node tools/enumerate.mjs --check spec/paytable.v2.json",
+    "docs:sync": "node tools/syncdocs.mjs",
+    "docs:check": "node tools/syncdocs.mjs --check",
     "simulate": "node tools/simulate.mjs --rounds 50000 --policy RUN",
     "test": "vitest run",
     "test:watch": "vitest",
-    "verify": "npm run paytable:check && npm test"
+    "verify": "npm run paytable:check && npm run docs:check && npm test"
   },
   "devDependencies": {
     "vitest": "^4.1.10"

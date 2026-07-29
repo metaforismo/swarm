@@ -23,14 +23,18 @@
  * Usage:
  *   node tools/enumerate.mjs                     full report
  *   node tools/enumerate.mjs --terminals         also print every terminal state
- *   node tools/enumerate.mjs --json spec/paytable.v1.json   write the frozen fixture
- *   node tools/enumerate.mjs --check spec/paytable.v1.json  verify the frozen fixture
+ *   node tools/enumerate.mjs --json spec/paytable.v2.json   write the frozen fixture
+ *   node tools/enumerate.mjs --check spec/paytable.v2.json  verify the frozen fixture
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { canonicalJson, digest } from './lib/canonical.mjs';
 import { buildPaytable } from './lib/report.mjs';
-import { MAX_WIN_MULTIPLE, UNITS_PER_CREDIT, structuralMaxMultiplier } from './lib/config.mjs';
+import {
+  COLONY_MAX_WIN_MULTIPLE,
+  UNITS_PER_CREDIT,
+  structuralMaxMultiplier,
+} from './lib/config.mjs';
 import { payableUnits } from './lib/model.mjs';
 import { toDecimal, toFraction } from './lib/rational.mjs';
 
@@ -111,12 +115,18 @@ function printReport(paytable, options) {
   for (const row of paytable.reach)
     console.log(`  ${pad(row.threshold, 7)}   ${padEnd(row.scientific, 18)} ${row.oneIn}`);
 
-  console.log(HEAD('8. Decision policies — exact RTP, variance and hit rate'));
-  console.log('  policy           exact RTP   sd         hit rate      description');
+  console.log(HEAD('8. Decision policies — exact RTP, variance, profit rate and hit rate'));
+  console.log('  policy           exact RTP   sd         P(>stake)     P(>0)         description');
   for (const row of paytable.policies)
     console.log(
-      `  ${padEnd(row.id, 15)} ${padEnd(row.rtp, 10)} ${pad(row.standardDeviation, 9)}  ${pad(row.hitRate, 12)}  ${row.label}`,
+      `  ${padEnd(row.id, 15)} ${padEnd(row.rtp, 10)} ${pad(row.standardDeviation, 9)}  ${pad(row.profitRate, 12)}  ${pad(row.hitRate, 12)}  ${row.label}`,
     );
+  console.log(
+    `  proven SD interval over every adapted policy: ${paytable.varianceBounds.minimum.standardDeviation} .. ${paytable.varianceBounds.maximum.standardDeviation}`,
+  );
+  console.log(
+    `  the maximum is attained by harvesting one organism at population ${paytable.varianceBounds.maximum.harvests[0].population} (${paytable.varianceBounds.maximum.harvestStates} states)`,
+  );
 
   console.log(HEAD('9. Strategy invariance proof (backward induction, exact)'));
   console.log(`  decision states checked : ${paytable.proof.statesChecked}`);
@@ -133,24 +143,58 @@ function printReport(paytable, options) {
     );
   }
 
-  console.log(HEAD('11. Cap and payable boundary'));
+  console.log(HEAD('11. Caps, per bet line, each on its own stake'));
   const structural = structuralMaxMultiplier();
   console.log(`  largest single settlement : ${toFraction(structural)} = ${toDecimal(structural, 6)}x`);
   console.log(
     `  reached at                : generation ${paytable.structuralMaximum.generation}, population ${paytable.structuralMaximum.population}, p = ${paytable.structuralMaximum.scientific}`,
   );
+  console.log('  line          basis                largest owed   cap     headroom');
+  for (const line of paytable.risk.lines)
+    console.log(
+      `  ${padEnd(line.line, 12)}  ${padEnd(line.basis, 18)}  ${pad(`${line.maximumCreditDecimal}x`, 12)}  ${pad(`${line.capMultiple}x`, 6)}  ${pad(`${line.headroom}x`, 10)}`,
+    );
   console.log(
-    `  largest round total       : ${paytable.roundMaximum.multiplier} = ${paytable.roundMaximum.decimal}x (harvest-farming a colony held under FULL BLOOM)`,
+    `  worst ticket at the declared stake bounds : ${paytable.risk.ticket.worstCaseExposureCredits} credits, admission limit ${paytable.risk.ticket.admissionLimitCredits} credits (binds: ${paytable.risk.ticket.binds})`,
   );
-  console.log(`  declared maxWinMultiple   : ${MAX_WIN_MULTIPLE}x  (cap binds: ${paytable.roundMaximum.capBinds})`);
   const stake = UNITS_PER_CREDIT;
-  const worst = payableUnits(stake, structural);
+  const worst = payableUnits(stake, structural, 0n, COLONY_MAX_WIN_MULTIPLE);
   console.log(
-    `  1.000000 credit staked at the maximum credits ${worst.credited} units (capped=${worst.capped}); floor loss < 1 unit = 1e-6 credits`,
+    `  1.000000 credit staked at the maximum credits ${worst.credited} units (capped=${worst.capped})`,
+  );
+  console.log(
+    `  floor loss <= ${paytable.roundingBound.maximumLossUnits} units per round = ${paytable.roundingBound.relativeAtMinimumStake} of the minimum stake (${paytable.roundingBound.relativeAtMinimumStakePercentagePoints} percentage points of RTP)`,
+  );
+
+  console.log(HEAD('12. Outcome-feedback honesty (evidence for docs/DESIGN.md §6.5)'));
+  console.log('  pop  P(value falls)  P(falls & split)  P(falls & 2 splits)  P(split | falls)');
+  for (const row of paytable.feedback)
+    console.log(
+      `  ${pad(row.population, 3)}  ${pad(row.falls, 13)}  ${pad(row.fallsWithSplit, 16)}  ${pad(row.fallsWithTwoSplits, 19)}  ${pad(row.splitGivenFalls, 16)}`,
+    );
+  console.log(
+    `  rounds left below the stake by the mandatory generation 1 : ${paytable.underwater.afterGenerationOne} = ${paytable.underwater.afterGenerationOneDecimal}`,
+  );
+  console.log(
+    `    of which extinct ${paytable.underwater.extinct}, alive but under the stake ${paytable.underwater.aliveBelowStake}`,
+  );
+
+  console.log(HEAD('13. FULL BLOOM payout profile (celebration must scale with this)'));
+  console.log(
+    `  smallest ${paytable.bloom.smallest}x (generation ${paytable.bloom.smallestGeneration}, ${paytable.bloom.smallestPopulation} organisms)   median ${paytable.bloom.median}x   largest ${paytable.bloom.largest}x`,
+  );
+  console.log(
+    `  under 20x: ${paytable.bloom.shareBelow20x}   under 50x: ${paytable.bloom.shareBelow50x}   under 100x: ${paytable.bloom.shareBelow100x}`,
+  );
+  console.log(
+    `  paying less than the smallest generation-18 settlement (${paytable.bloom.smallestFinal}x): ${paytable.bloom.shareBelowSmallestFinal}`,
+  );
+  console.log(
+    `  near-miss band ${paytable.nearMiss.band} organisms: ${paytable.nearMiss.decimal} (1 in ${paytable.nearMiss.oneIn})`,
   );
 
   if (options.terminals) {
-    console.log(HEAD('12. Every terminal state'));
+    console.log(HEAD('14. Every terminal state'));
     console.log('  gen  pop  reason   multiplier                probability');
     for (const row of paytable.terminals)
       console.log(

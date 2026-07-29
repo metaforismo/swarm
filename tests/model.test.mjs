@@ -1,30 +1,43 @@
 import { describe, expect, it } from 'vitest';
 import {
   BLOOM_THRESHOLD,
+  COLONY_MAX_WIN_MULTIPLE,
   DRAW_MODULUS,
   MAX_GENERATIONS,
   MAX_POPULATION,
-  MAX_WIN_MULTIPLE,
+  MAX_SIDE_BET_STAKE_UNITS,
+  MAX_STAKE_UNITS,
+  MAX_TICKET_EXPOSURE_UNITS,
+  MIN_STAKE_UNITS,
   OFFSPRING,
   SEED_COUNT,
+  SIDE_BET_MAX_WIN_MULTIPLES,
   TARGET_RTP,
   UNITS_PER_CREDIT,
   assertConfig,
   colonyMultiplier,
+  maximumTicketExposureUnits,
   offspringPmf,
   organismValue,
   structuralMaxMultiplier,
+  ticketExposureUnits,
 } from '../tools/lib/config.mjs';
 import {
   POLICIES,
   assertRiskPolicy,
+  bloomPayoutProfile,
+  breakEvenLadder,
   buildKernel,
   enumerateWildLine,
   evaluatePolicy,
   expectedGenerations,
   extinctionByGeneration,
+  extremalRoundVariance,
+  feedbackHonesty,
   maximumRoundPayout,
   payableUnits,
+  peakBand,
+  policyOutcomeSplit,
   populationDistribution,
   proveStrategyInvariance,
   reachProbability,
@@ -34,6 +47,7 @@ import {
   survivalCurve,
   terminalCategories,
   transitionProbability,
+  underwaterAfterFirstGeneration,
 } from '../tools/lib/model.mjs';
 import {
   ONE,
@@ -45,6 +59,7 @@ import {
   multiply,
   power,
   rat,
+  subtract,
   sum,
   toFraction,
 } from '../tools/lib/rational.mjs';
@@ -52,7 +67,7 @@ import {
 describe('configuration', () => {
   it('is internally consistent', () => {
     expect(assertConfig()).toBe(true);
-    expect(assertRiskPolicy()).toBe(true);
+    expect(assertRiskPolicy().ok).toBe(true);
   });
 
   it('has offspring weights that tile the draw modulus in order', () => {
@@ -314,13 +329,63 @@ describe('strategy invariance', () => {
   });
 });
 
-describe('caps', () => {
-  it('keeps the declared cap above every reachable round total', () => {
+describe('caps, one basis per bet line', () => {
+  it('keeps the declared colony cap above every reachable round total', () => {
     const { multiplier } = maximumRoundPayout();
-    expect(compare(multiplier, rat(MAX_WIN_MULTIPLE))).toBe(-1);
+    expect(compare(multiplier, rat(COLONY_MAX_WIN_MULTIPLE))).toBe(-1);
     // A round total can exceed the largest single settlement, which is exactly
     // why the cap is set from the round maximum and not from the settlement.
     expect(compare(multiplier, structuralMaxMultiplier())).toBe(1);
+  });
+
+  it('keeps every side bet strictly below its own cap', () => {
+    for (const bet of sideBets()) {
+      expect(compare(bet.multiplier, rat(bet.capMultiple)), bet.id).toBe(-1);
+      expect(bet.capMultiple).toBe(SIDE_BET_MAX_WIN_MULTIPLES[bet.id]);
+    }
+  });
+
+  it('would bind if the lines shared one basis, which is why they do not', () => {
+    // The regression this exists for: summing the lines against the colony cap
+    // owes more than 906x on equal stakes, so a shared basis short-pays.
+    let owed = maximumRoundPayout().multiplier;
+    for (const bet of sideBets()) owed = add(owed, bet.multiplier);
+    expect(compare(owed, rat(COLONY_MAX_WIN_MULTIPLE))).toBe(1);
+    // Per line, every one of them has strictly positive headroom.
+    for (const line of assertRiskPolicy().lines)
+      expect(compare(subtract(rat(line.capMultiple), line.maximumCredit), ZERO), line.line).toBe(1);
+  });
+
+  it('pays a side bet in full even when the colony line is at its maximum', () => {
+    // The 99.6% short-pay from a shared basis: a small colony bet next to a
+    // large side bet. Each line is settled on its own stake, so both pay fully.
+    const colonyStake = MIN_STAKE_UNITS; // 0.10 credits
+    const swarm = sideBets().find((bet) => bet.id === 'SWARM');
+    const swarmStake = MAX_SIDE_BET_STAKE_UNITS; // 100.00 credits
+    const colony = payableUnits(
+      colonyStake,
+      maximumRoundPayout().multiplier,
+      0n,
+      COLONY_MAX_WIN_MULTIPLE,
+    );
+    const side = payableUnits(swarmStake, swarm.multiplier, 0n, swarm.capMultiple);
+    expect(colony.capped).toBe(false);
+    expect(side.capped).toBe(false);
+    // The full exact price of the line, floored — not 90.60 credits, which is
+    // what a shared 906x basis on a 0.10 colony stake would have paid.
+    const exact = multiply(rat(swarmStake), swarm.multiplier);
+    expect(side.credited).toBe(exact.numerator / exact.denominator);
+    expect(side.credited).toBeGreaterThan(colonyStake * COLONY_MAX_WIN_MULTIPLE);
+  });
+
+  it('applies the cumulative cap on that line\'s own stake basis', () => {
+    const stake = UNITS_PER_CREDIT;
+    const huge = rat(COLONY_MAX_WIN_MULTIPLE * 2n);
+    const first = payableUnits(stake, huge, 0n, COLONY_MAX_WIN_MULTIPLE);
+    expect(first.capped).toBe(true);
+    expect(first.credited).toBe(stake * COLONY_MAX_WIN_MULTIPLE);
+    const second = payableUnits(stake, huge, first.credited, COLONY_MAX_WIN_MULTIPLE);
+    expect(second.credited).toBe(0n);
   });
 
   it('never truncates the largest single settlement', () => {
@@ -329,27 +394,50 @@ describe('caps', () => {
     expect(payable.credited).toBe(527355936n);
   });
 
-  it('applies the cumulative cap on the original stake basis', () => {
-    const stake = UNITS_PER_CREDIT;
-    const huge = rat(MAX_WIN_MULTIPLE * 2n);
-    const first = payableUnits(stake, huge);
-    expect(first.capped).toBe(true);
-    expect(first.credited).toBe(stake * MAX_WIN_MULTIPLE);
-    const second = payableUnits(stake, huge, first.credited);
-    expect(second.credited).toBe(0n);
-  });
-
   it('floors every credit, losing less than one minor unit', () => {
     const payable = payableUnits(3n, rat(1n, 2n));
     expect(payable.credited).toBe(1n);
     expect(toFraction(payable.theoretical)).toBe('3/2');
   });
 
-  it('rejects hostile stakes', () => {
+  it('rejects hostile stakes and cap multiples', () => {
     expect(() => payableUnits(0n, ONE)).toThrow(SwarmMathError);
     expect(() => payableUnits(-5n, ONE)).toThrow(SwarmMathError);
     expect(() => payableUnits(1000000, ONE)).toThrow(SwarmMathError);
     expect(() => payableUnits(1n, ONE, -1n)).toThrow(SwarmMathError);
+    expect(() => payableUnits(1n, ONE, 0n, 0n)).toThrow(SwarmMathError);
+    expect(() => payableUnits(1n, ONE, 0n, 906)).toThrow(SwarmMathError);
+  });
+});
+
+describe('ticket exposure', () => {
+  it('sums each line at its own ceiling', () => {
+    const stake = UNITS_PER_CREDIT;
+    expect(ticketExposureUnits(stake, {})).toBe(stake * COLONY_MAX_WIN_MULTIPLE);
+    expect(ticketExposureUnits(stake, { SWARM: stake })).toBe(
+      stake * COLONY_MAX_WIN_MULTIPLE + stake * SIDE_BET_MAX_WIN_MULTIPLES.SWARM,
+    );
+  });
+
+  it('keeps the worst admissible ticket strictly below the operator limit', () => {
+    expect(maximumTicketExposureUnits()).toBeLessThan(MAX_TICKET_EXPOSURE_UNITS);
+    expect(maximumTicketExposureUnits()).toBe(
+      MAX_STAKE_UNITS * COLONY_MAX_WIN_MULTIPLE +
+        MAX_SIDE_BET_STAKE_UNITS *
+          Object.values(SIDE_BET_MAX_WIN_MULTIPLES).reduce((total, cap) => total + cap, 0n),
+    );
+  });
+
+  it('rejects out-of-bounds and unknown lines', () => {
+    expect(() => ticketExposureUnits(0n, {})).toThrow(SwarmMathError);
+    expect(() => ticketExposureUnits(MAX_STAKE_UNITS + 1n, {})).toThrow(SwarmMathError);
+    expect(() => ticketExposureUnits(UNITS_PER_CREDIT, { NOPE: UNITS_PER_CREDIT })).toThrow(
+      /No such side bet/u,
+    );
+    expect(() => ticketExposureUnits(UNITS_PER_CREDIT, { SWARM: 1n })).toThrow(SwarmMathError);
+    expect(() =>
+      ticketExposureUnits(UNITS_PER_CREDIT, { SWARM: MAX_SIDE_BET_STAKE_UNITS + 1n }),
+    ).toThrow(SwarmMathError);
   });
 });
 
@@ -359,7 +447,7 @@ describe('side bets', () => {
     expect(bets).toHaveLength(3);
     for (const bet of bets) {
       expect(toFraction(bet.rtp), bet.id).toBe('19/20');
-      expect(compare(bet.multiplier, rat(MAX_WIN_MULTIPLE))).toBe(-1);
+      expect(compare(bet.multiplier, rat(bet.capMultiple))).toBe(-1);
       expect(compare(bet.probability, ZERO)).toBe(1);
       expect(compare(bet.probability, ONE)).toBe(-1);
     }
@@ -376,5 +464,183 @@ describe('side bets', () => {
     // The wild line is a pure function of the model, so two evaluations agree
     // exactly and no policy input exists to perturb them.
     expect(toFraction(sideBets()[2].probability)).toBe(toFraction(reachProbability(10)));
+  });
+});
+
+describe('profit rate versus hit rate', () => {
+  it('splits every bundled policy into zero, sub-stake and profit, summing to one', () => {
+    for (const policy of Object.values(POLICIES)) {
+      const split = policyOutcomeSplit(policy.fn);
+      expect(toFraction(add(add(split.zero, split.subStake), split.profit)), policy.id).toBe('1/1');
+      // The forward split and the backward induction must agree on P(zero).
+      expect(toFraction(split.zero), policy.id).toBe(
+        toFraction(evaluatePolicy(policy.fn).zeroProbability),
+      );
+      // A profit is a strict subset of a hit.
+      expect(compare(split.profit, split.hitRate), policy.id).toBeLessThanOrEqual(0);
+    }
+  });
+
+  it('shows the gap the published hit rate used to hide', () => {
+    const split = policyOutcomeSplit(POLICIES.BANK_FIRST.fn);
+    // 8/125 nothing, 60/125 a fraction of the stake, 57/125 an actual profit.
+    expect(toFraction(split.zero)).toBe('8/125');
+    expect(toFraction(split.subStake)).toBe('12/25');
+    expect(toFraction(split.profit)).toBe('57/125');
+    expect(toFraction(split.hitRate)).toBe('117/125');
+  });
+
+  it('collapses the above-threshold region so the enumeration stays finite', () => {
+    // Every harvest adds at least c(1) of a stake, so only a handful of banked
+    // values can sit at or below one stake. If this ever explodes, the exactness
+    // claim is at risk and the test says so.
+    for (const policy of Object.values(POLICIES))
+      expect(policyOutcomeSplit(policy.fn).peakStates, policy.id).toBeLessThan(64);
+  });
+
+  it('agrees with a brute-force distribution for a single-credit policy', () => {
+    // BANK_FIRST pays exactly c(1)*n for the generation-1 population, so the
+    // profit rate is the mass of populations worth more than the stake.
+    let profit = ZERO;
+    for (const entry of populationDistribution(1))
+      if (compare(colonyMultiplier(1, entry.population), ONE) > 0)
+        profit = add(profit, entry.probability);
+    expect(toFraction(profit)).toBe(toFraction(policyOutcomeSplit(POLICIES.BANK_FIRST.fn).profit));
+  });
+
+  it('rejects an illegal policy', () => {
+    expect(() => policyOutcomeSplit((_t, n) => n + 1)).toThrow(/out-of-range harvest/u);
+    expect(() => policyOutcomeSplit('nope')).toThrow(SwarmMathError);
+  });
+});
+
+describe('volatility is a proven interval, not a sample', () => {
+  const maximum = extremalRoundVariance('max');
+  const minimum = extremalRoundVariance('min');
+
+  it('brackets every bundled policy', () => {
+    for (const policy of Object.values(POLICIES)) {
+      const { variance } = evaluatePolicy(policy.fn);
+      expect(compare(variance, minimum.variance), policy.id).toBeGreaterThanOrEqual(0);
+      expect(compare(variance, maximum.variance), policy.id).toBeLessThanOrEqual(0);
+    }
+  });
+
+  it('brackets adversarial policies the bundle does not contain', () => {
+    const policies = {
+      trimBelowBloom: (_t, n) => (n >= 15 ? 1 : 0),
+      harvestAllButOne: (_t, n) => n - 1,
+      bankIfGrew: (_t, n) => (n > 3 ? 0 : n),
+      greedyTail: (t, n) => (t > 14 ? 0 : Math.floor(n / 4)),
+      randomLooking: (t, n) => (t * 7 + n * 13) % (n + 1),
+    };
+    for (const [name, fn] of Object.entries(policies)) {
+      const { variance } = evaluatePolicy(fn);
+      expect(compare(variance, minimum.variance), name).toBeGreaterThanOrEqual(0);
+      expect(compare(variance, maximum.variance), name).toBeLessThanOrEqual(0);
+    }
+  });
+
+  it('is strictly wider than the RUN policy at the top and equals BANK_FIRST at the bottom', () => {
+    // RUN is close to the maximum but is not the maximum: trimming one organism
+    // at 15 dodges the FULL BLOOM force-settle and buys a heavier tail.
+    expect(compare(maximum.variance, evaluatePolicy(POLICIES.RUN.fn).variance)).toBe(1);
+    expect(toFraction(minimum.variance)).toBe(
+      toFraction(evaluatePolicy(POLICIES.BANK_FIRST.fn).variance),
+    );
+    expect(maximum.harvests.every((entry) => entry.population === BLOOM_THRESHOLD - 1)).toBe(true);
+    expect(maximum.harvests.every((entry) => entry.harvest === 1)).toBe(true);
+  });
+
+  it('rejects an unknown mode', () => {
+    expect(() => extremalRoundVariance('sideways')).toThrow(SwarmMathError);
+  });
+});
+
+describe('the value process is not monotone', () => {
+  it('leaves 68/125 of rounds below the stake after the mandatory generation', () => {
+    const underwater = underwaterAfterFirstGeneration();
+    expect(toFraction(underwater.underwater)).toBe('68/125');
+    expect(toFraction(underwater.extinct)).toBe('8/125');
+    expect(toFraction(underwater.aliveBelow)).toBe('12/25');
+    expect(
+      toFraction(add(underwater.underwater, underwater.aboveWater)),
+    ).toBe('1/1');
+  });
+
+  it('agrees with the break-even ladder', () => {
+    const ladder = breakEvenLadder();
+    expect(ladder).toHaveLength(MAX_GENERATIONS);
+    // Three organisms is the break-even colony at generations 1 and 2, which is
+    // exactly why a first generation of 1 or 2 leaves the player underwater.
+    expect(ladder[0].above).toBe(3);
+    expect(ladder[1].above).toBe(3);
+    expect(ladder[5].above).toBe(1);
+    for (const row of ladder) {
+      expect(compare(multiply(row.organismValue, rat(BigInt(row.above))), ONE), row.generation)
+        .toBe(1);
+      if (row.above > 1)
+        expect(compare(multiply(row.organismValue, rat(BigInt(row.above - 1))), ONE)).toBeLessThan(1);
+    }
+  });
+
+  it('fires a split on a value-losing generation often enough to matter', () => {
+    const rows = feedbackHonesty([3, 5, 8, 12, 15]);
+    for (const row of rows) {
+      expect(toFraction(add(add(row.falls, row.flat), row.rises)), `n=${row.population}`).toBe('1/1');
+      // The joint can never exceed either marginal.
+      expect(compare(row.fallsWithSplit, row.falls)).toBeLessThanOrEqual(0);
+      expect(compare(row.fallsWithSplit, row.anySplit)).toBeLessThanOrEqual(0);
+      expect(compare(row.fallsWithTwoSplits, row.fallsWithSplit)).toBeLessThanOrEqual(0);
+    }
+    // The specific figure docs/DESIGN.md §6.5 is built on.
+    const eight = rows.find((row) => row.population === 8);
+    expect(compare(eight.fallsWithSplit, rat(36n, 100n))).toBe(1);
+    expect(compare(eight.splitGivenFalls, rat(69n, 100n))).toBe(1);
+  });
+
+  it('computes the value direction from the exact ladder step, not a threshold', () => {
+    // A generation loses value exactly when 5m < 4n. Cross-check n = 4 by hand:
+    // it falls for m in {0, 1, 2, 3} and rises from m = 4 upward.
+    const [row] = feedbackHonesty([4]);
+    let falls = ZERO;
+    for (let m = 0; m <= 3; m += 1) falls = add(falls, transitionProbability(4, m));
+    expect(toFraction(row.falls)).toBe(toFraction(falls));
+  });
+});
+
+describe('what FULL BLOOM actually pays', () => {
+  const bloom = bloomPayoutProfile();
+
+  it('starts an order of magnitude below the headline', () => {
+    expect(toFraction(bloom.smallest)).toBe(toFraction(colonyMultiplier(3, BLOOM_THRESHOLD)));
+    expect(bloom.smallestGeneration).toBe(3);
+    expect(bloom.smallestPopulation).toBe(BLOOM_THRESHOLD);
+    expect(compare(bloom.smallest, rat(10n))).toBe(-1);
+    expect(toFraction(bloom.largest)).toBe(toFraction(structuralMaxMultiplier()));
+  });
+
+  it('is mostly ordinary wins, which is why the ceremony cannot key on it', () => {
+    expect(compare(bloom.shareBelow50x, rat(1n, 2n))).toBe(1);
+    expect(compare(bloom.shareBelow20x, ZERO)).toBe(1);
+    expect(compare(bloom.shareBelow20x, bloom.shareBelow50x)).toBe(-1);
+    // Some blooms pay less than the smallest possible generation-18 settlement.
+    expect(compare(bloom.shareBelowSmallestFinal, ZERO)).toBe(1);
+    expect(toFraction(bloom.smallestFinal)).toBe(toFraction(colonyMultiplier(MAX_GENERATIONS, 1)));
+  });
+
+  it('matches the bloom terminal mass and the reach probability', () => {
+    expect(toFraction(bloom.mass)).toBe(toFraction(terminalCategories().BLOOM));
+    expect(toFraction(bloom.mass)).toBe(toFraction(reachProbability(BLOOM_THRESHOLD)));
+  });
+
+  it('separates the near-miss band from the reach probability', () => {
+    const band = peakBand(12, BLOOM_THRESHOLD);
+    expect(toFraction(band)).toBe(
+      toFraction(subtract(reachProbability(12), reachProbability(BLOOM_THRESHOLD))),
+    );
+    // Strictly rarer than "reaches 12", which is the mislabelling this fixes.
+    expect(compare(band, reachProbability(12))).toBe(-1);
+    expect(() => peakBand(16, 12)).toThrow(SwarmMathError);
   });
 });

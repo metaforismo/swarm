@@ -24,16 +24,21 @@ import {
   ONE,
   rat,
   subtract,
+  toFraction,
   ZERO,
 } from './rational.mjs';
 import {
   BLOOM_THRESHOLD,
+  COLONY_MAX_WIN_MULTIPLE,
   DRAW_MODULUS,
   MAX_GENERATIONS,
   MAX_POPULATION,
-  MAX_WIN_MULTIPLE,
+  MAX_TICKET_EXPOSURE_UNITS,
   SEED_COUNT,
+  SIDE_BET_MAX_WIN_MULTIPLES,
+  TARGET_RTP,
   colonyMultiplier,
+  maximumTicketExposureUnits,
   offspringWeights,
   organismValue,
 } from './config.mjs';
@@ -544,9 +549,10 @@ export function sideBets() {
 
   return bets.map((bet) => {
     const multiplier = divide(rat(19n, 20n), bet.probability);
-    if (compare(multiplier, rat(MAX_WIN_MULTIPLE)) > 0)
-      fail('INVALID_CONFIG', `Side bet ${bet.id} prices above the declared max-win multiple`);
-    return { ...bet, multiplier, rtp: multiply(multiplier, bet.probability) };
+    const capMultiple = SIDE_BET_MAX_WIN_MULTIPLES[bet.id];
+    if (capMultiple === undefined)
+      fail('INVALID_CONFIG', `Side bet ${bet.id} has no declared cap`, '$.sideBets');
+    return { ...bet, multiplier, capMultiple, rtp: multiply(multiplier, bet.probability) };
   });
 }
 
@@ -554,37 +560,84 @@ export function sideBets() {
  * The payable boundary: integer minor units, floor rounding, cap applied at
  * every credit. Mirrors `payable()` in the engine so the spec and the engine
  * cannot drift.
+ *
+ * `stakeUnits` is *this bet line's own stake* and `capMultiple` is that line's
+ * own declared ceiling. Lines never share a cap basis: a side-bet credit is not
+ * charged against the colony's ceiling and vice versa. See docs/MATH.md §11.
  */
-export function payableUnits(stakeUnits, multiplier, alreadyCreditedUnits = 0n) {
+export function payableUnits(
+  stakeUnits,
+  multiplier,
+  alreadyCreditedUnits = 0n,
+  capMultiple = COLONY_MAX_WIN_MULTIPLE,
+) {
   if (typeof stakeUnits !== 'bigint' || stakeUnits <= 0n)
     fail('INVALID_ARGUMENT', 'Stake must be a positive BigInt of minor units');
   if (typeof alreadyCreditedUnits !== 'bigint' || alreadyCreditedUnits < 0n)
     fail('INVALID_ARGUMENT', 'Already-credited units must be a non-negative BigInt');
+  if (typeof capMultiple !== 'bigint' || capMultiple <= 0n)
+    fail('INVALID_ARGUMENT', 'Cap multiple must be a positive BigInt');
   const theoretical = multiply(rat(stakeUnits), multiplier);
   const uncapped = theoretical.numerator / theoretical.denominator;
-  const ceiling = stakeUnits * MAX_WIN_MULTIPLE;
+  const ceiling = stakeUnits * capMultiple;
   const remaining = ceiling > alreadyCreditedUnits ? ceiling - alreadyCreditedUnits : 0n;
   const credited = uncapped > remaining ? remaining : uncapped;
   return { theoretical, credited, capped: uncapped > remaining };
 }
 
 /**
- * Proves the declared risk ceiling is a ceiling and not a clip: the maximum
- * total a round can credit is strictly below `stake * MAX_WIN_MULTIPLE`, so the
- * cap never truncates and the RTP stays exactly policy-invariant.
+ * Proves every declared risk ceiling is a ceiling and not a clip.
+ *
+ * Each bet line is capped on its own stake, so the proof obligation is per line:
+ *   - COLONY: the maximum *cumulative* total the colony can credit across a
+ *     whole round (harvest-farming included) is strictly below its cap;
+ *   - each side bet: its exact multiplier is strictly below its own cap.
+ * Then the worst ticket the declared stake bounds allow is compared against the
+ * operator admission limit, which is an open-time refusal and never a
+ * settlement-time truncation. Returns the disclosure the documentation quotes.
  */
 export function assertRiskPolicy() {
   const { multiplier } = maximumRoundPayout();
-  if (compare(multiplier, rat(MAX_WIN_MULTIPLE)) >= 0)
+  if (compare(multiplier, rat(COLONY_MAX_WIN_MULTIPLE)) >= 0)
     fail(
       'INVALID_CONFIG',
-      'Declared max-win multiple would truncate a reachable round total',
-      '$.risk.maxWinMultiple',
+      'Declared colony max-win multiple would truncate a reachable round total',
+      '$.risk.colonyMaxWinMultiple',
     );
-  for (const bet of sideBets())
-    if (compare(bet.multiplier, rat(MAX_WIN_MULTIPLE)) > 0)
-      fail('INVALID_CONFIG', `Side bet ${bet.id} prices above the cap`, '$.sideBets');
-  return true;
+  const lines = [
+    {
+      line: 'COLONY',
+      maximumCredit: multiplier,
+      capMultiple: COLONY_MAX_WIN_MULTIPLE,
+      basis: 'colony stake',
+    },
+  ];
+  for (const bet of sideBets()) {
+    if (compare(bet.multiplier, rat(bet.capMultiple)) >= 0)
+      fail('INVALID_CONFIG', `Side bet ${bet.id} prices at or above its own cap`, '$.sideBets');
+    lines.push({
+      line: bet.id,
+      maximumCredit: bet.multiplier,
+      capMultiple: bet.capMultiple,
+      basis: `${bet.id} stake`,
+    });
+  }
+  const worstTicket = maximumTicketExposureUnits();
+  if (worstTicket >= MAX_TICKET_EXPOSURE_UNITS)
+    fail(
+      'INVALID_CONFIG',
+      'The stake bounds admit a ticket at or above the operator exposure limit',
+      '$.risk.maxTicketExposureUnits',
+    );
+  return {
+    ok: true,
+    lines,
+    ticket: {
+      worstCaseExposureUnits: worstTicket,
+      admissionLimitUnits: MAX_TICKET_EXPOSURE_UNITS,
+      binds: false,
+    },
+  };
 }
 
 /** Exact expected total across every terminal of the wild line; must equal TARGET_RTP. */
@@ -631,5 +684,313 @@ export function expectedGenerations() {
   for (const terminal of terminals)
     total = add(total, multiply(terminal.probability, rat(BigInt(terminal.generation))));
   return total;
+}
+
+/**
+ * Exact three-way split of a policy's round total: nothing, something but not
+ * more than the stake, and an actual profit.
+ *
+ * A "hit rate" of `1 - P(total = 0)` counts a 0.396x return as a hit. That is
+ * true and misleading at the same time, so this function publishes the honest
+ * decomposition and the paytable prints the profit rate first.
+ *
+ * Method: forward enumeration over `(population, banked)` with the whole
+ * "already above the threshold" region collapsed into one absorbing mass. The
+ * collapse is what keeps the state space finite and exact: future credits are
+ * never negative, so once the banked amount passes the threshold the outcome is
+ * decided. Every harvest adds at least `c(1)` of a stake, so only a handful of
+ * banked values can remain at or below one stake at all.
+ */
+export function policyOutcomeSplit(policy, threshold = ONE) {
+  assertPolicy(policy);
+  let live = new Map([
+    [`${SEED_COUNT}|0/1`, { population: SEED_COUNT, banked: ZERO, probability: ONE }],
+  ]);
+  let zero = ZERO;
+  let subStake = ZERO;
+  let profit = ZERO;
+  let peakStates = 1;
+
+  const settle = (total, probability) => {
+    if (total.numerator === 0n) zero = add(zero, probability);
+    else if (compare(total, threshold) <= 0) subStake = add(subStake, probability);
+    else profit = add(profit, probability);
+  };
+
+  for (let t = 1; t <= G; t += 1) {
+    const next = new Map();
+    for (const state of live.values()) {
+      const row = KERNEL[state.population];
+      for (let m = 0; m < row.length; m += 1) {
+        if (row[m] === 0n) continue;
+        const probability = multiply(
+          state.probability,
+          rat(row[m], POWERS[state.population]),
+        );
+        if (m === 0) {
+          settle(state.banked, probability);
+          continue;
+        }
+        if (m >= B || t === G) {
+          settle(add(state.banked, colonyMultiplier(t, m)), probability);
+          continue;
+        }
+        const k = policy(t, m);
+        if (!Number.isSafeInteger(k) || k < 0 || k > m)
+          fail('INVALID_POLICY', `Policy returned an out-of-range harvest at (${t}, ${m})`);
+        const banked = add(state.banked, multiply(organismValue(t), rat(BigInt(k))));
+        const rest = m - k;
+        if (rest === 0) {
+          settle(banked, probability);
+          continue;
+        }
+        if (compare(banked, threshold) > 0) {
+          // Absorbing: the round already pays more than the threshold.
+          profit = add(profit, probability);
+          continue;
+        }
+        const key = `${rest}|${toFraction(banked)}`;
+        const existing = next.get(key);
+        if (existing) existing.probability = add(existing.probability, probability);
+        else next.set(key, { population: rest, banked, probability });
+      }
+    }
+    live = next;
+    if (live.size > peakStates) peakStates = live.size;
+  }
+
+  if (live.size !== 0) fail('INVALID_MODEL', 'Rounds survived past the last generation');
+  const mass = add(add(zero, subStake), profit);
+  if (!equal(mass, ONE)) fail('INVALID_MODEL', 'Outcome split does not sum to one');
+  return { zero, subStake, profit, hitRate: subtract(ONE, zero), peakStates };
+}
+
+/**
+ * The exact extremes of round variance over *every* adapted decision policy.
+ *
+ * The published volatility range must be a proven interval, not the spread of a
+ * handful of sampled policies. Because the expected continuation value of `j`
+ * organisms is exactly `c(t) * j` whatever the player does later (the invariance
+ * theorem), the second moment of a round decomposes as
+ *
+ *   E[(b + a + R)^2] = b^2 + 2b*(a + E[R]) + E[(a + R)^2]
+ *
+ * and `a + E[R] = c(t) * n` is the same for every harvest `k`. The bank `b`
+ * therefore drops out of the comparison between actions, the optimal action
+ * depends only on `(t, n)`, and this backward induction over `(t, n)` is the
+ * exact extremum over all history-dependent policies. Randomized policies are
+ * mixtures and cannot exceed a deterministic extreme.
+ */
+export function extremalRoundVariance(mode = 'max') {
+  if (mode !== 'max' && mode !== 'min') fail('INVALID_ARGUMENT', 'mode must be "max" or "min"');
+  const direction = mode === 'max' ? 1 : -1;
+  let second = new Array(MAX_POPULATION + 1);
+  for (let m = 0; m <= MAX_POPULATION; m += 1) {
+    const value = terminalMultiplier(G, m);
+    second[m] = multiply(value, value);
+  }
+  const harvests = [];
+
+  for (let t = G - 1; t >= 1; t -= 1) {
+    const continuationSecond = new Array(B).fill(ZERO);
+    for (let j = 1; j < B; j += 1) continuationSecond[j] = kernelExpectation(j, second);
+    const next = new Array(MAX_POPULATION + 1);
+    for (let n = 0; n <= MAX_POPULATION; n += 1) {
+      if (n === 0 || n >= B) {
+        const value = terminalMultiplier(t, n);
+        next[n] = multiply(value, value);
+        continue;
+      }
+      let best = null;
+      let bestHarvest = 0;
+      for (let k = 0; k <= n; k += 1) {
+        const banked = multiply(organismValue(t), rat(BigInt(k)));
+        const rest = n - k;
+        const futureFirst = rest === 0 ? ZERO : colonyMultiplier(t, rest);
+        const futureSecond = rest === 0 ? ZERO : continuationSecond[rest];
+        const value = add(
+          add(multiply(banked, banked), multiply(multiply(rat(2n), banked), futureFirst)),
+          futureSecond,
+        );
+        if (best === null || compare(value, best) * direction > 0) {
+          best = value;
+          bestHarvest = k;
+        }
+      }
+      if (bestHarvest > 0) harvests.push({ generation: t, population: n, harvest: bestHarvest });
+      next[n] = best;
+    }
+    second = next;
+  }
+
+  const secondMoment = kernelExpectation(SEED_COUNT, second);
+  const variance = subtract(secondMoment, multiply(TARGET_RTP, TARGET_RTP));
+  return { mode, secondMoment, variance, harvests };
+}
+
+/**
+ * The exact conditional payout distribution of FULL BLOOM under RUN.
+ *
+ * FULL BLOOM is the game's designated celebration, so how much it actually pays
+ * is a design input, not trivia: the smallest bloom pays less than the smallest
+ * possible generation-18 settlement, and most blooms are ordinary wins.
+ */
+export function bloomPayoutProfile() {
+  const { terminals } = enumerateWildLine();
+  const blooms = terminals
+    .filter((entry) => entry.reason === 'BLOOM')
+    .sort((a, b) => compare(a.multiplier, b.multiplier));
+  if (blooms.length === 0) fail('INVALID_MODEL', 'No bloom terminals enumerated');
+  let mass = ZERO;
+  for (const bloom of blooms) mass = add(mass, bloom.probability);
+
+  const shareBelow = (bound) => {
+    let total = ZERO;
+    for (const bloom of blooms)
+      if (compare(bloom.multiplier, bound) < 0) total = add(total, bloom.probability);
+    return divide(total, mass);
+  };
+
+  let cumulative = ZERO;
+  let median = null;
+  for (const bloom of blooms) {
+    cumulative = add(cumulative, divide(bloom.probability, mass));
+    if (median === null && compare(cumulative, rat(1n, 2n)) >= 0) median = bloom.multiplier;
+  }
+
+  const smallest = blooms[0];
+  const largest = blooms[blooms.length - 1];
+  const smallestFinal = colonyMultiplier(G, 1);
+  return {
+    mass,
+    outcomeCount: blooms.length,
+    smallest: smallest.multiplier,
+    smallestGeneration: smallest.generation,
+    smallestPopulation: smallest.population,
+    largest: largest.multiplier,
+    median,
+    shareBelow20x: shareBelow(rat(20n)),
+    shareBelow50x: shareBelow(rat(50n)),
+    shareBelow100x: shareBelow(rat(100n)),
+    smallestFinal,
+    shareBelowSmallestFinal: shareBelow(smallestFinal),
+  };
+}
+
+function factorial(value) {
+  let result = 1n;
+  for (let index = 2n; index <= value; index += 1n) result *= index;
+  return result;
+}
+
+/**
+ * Exact joint frequency of "the colony lost value this generation" and "at least
+ * one organism split this generation".
+ *
+ * Colony value is `n * c(t)` and `c(t)` rises by exactly 25% per generation, so
+ * a generation loses value exactly when `5m < 4n`, whatever the ladder position.
+ * A generation can therefore contain several splits and still be worth less than
+ * the one before it. This table is the evidence behind the feedback rule in
+ * docs/DESIGN.md §6.5: celebration is keyed to the signed value change, never to
+ * the event type.
+ */
+export function feedbackHonesty(populations = [3, 5, 8, 12, 15]) {
+  const weights = offspringWeights();
+  return populations.map((n) => {
+    if (!Number.isSafeInteger(n) || n < 1 || n >= B)
+      fail('INVALID_ARGUMENT', 'population out of range');
+    const denominator = POWERS[n];
+    const numeratorOf = BigInt(n);
+    let falls = 0n;
+    let flat = 0n;
+    let rises = 0n;
+    let fallsWithSplit = 0n;
+    let fallsWithTwoSplits = 0n;
+    let anySplit = 0n;
+    for (let splits = 0; splits <= n; splits += 1)
+      for (let holds = 0; holds + splits <= n; holds += 1) {
+        const deaths = n - holds - splits;
+        const weight =
+          (factorial(numeratorOf) /
+            (factorial(BigInt(deaths)) * factorial(BigInt(holds)) * factorial(BigInt(splits)))) *
+          weights[0] ** BigInt(deaths) *
+          weights[1] ** BigInt(holds) *
+          weights[2] ** BigInt(splits);
+        const children = holds + 2 * splits;
+        const direction = 5 * children - 4 * n;
+        if (direction < 0) {
+          falls += weight;
+          if (splits >= 1) fallsWithSplit += weight;
+          if (splits >= 2) fallsWithTwoSplits += weight;
+        } else if (direction === 0) flat += weight;
+        else rises += weight;
+        if (splits >= 1) anySplit += weight;
+      }
+    if (falls + flat + rises !== denominator)
+      fail('INVALID_MODEL', 'Feedback enumeration lost mass');
+    const fallsRational = rat(falls, denominator);
+    return {
+      population: n,
+      falls: fallsRational,
+      flat: rat(flat, denominator),
+      rises: rat(rises, denominator),
+      anySplit: rat(anySplit, denominator),
+      fallsWithSplit: rat(fallsWithSplit, denominator),
+      fallsWithTwoSplits: rat(fallsWithTwoSplits, denominator),
+      splitGivenFalls: falls === 0n ? ZERO : divide(rat(fallsWithSplit, denominator), fallsRational),
+    };
+  });
+}
+
+/**
+ * The break-even colony at every generation: the smallest population whose exact
+ * value is strictly above one stake, and the smallest whose value reaches it.
+ *
+ * Published because the value process is not monotone: a player can be below
+ * their stake at a decision point, which is the state docs/DESIGN.md §9.2 writes
+ * the copy rules for.
+ */
+export function breakEvenLadder() {
+  const rows = [];
+  for (let t = 1; t <= G; t += 1) {
+    const value = organismValue(t);
+    let atLeast = null;
+    let above = null;
+    for (let n = 1; n <= MAX_POPULATION; n += 1) {
+      const multiplier = multiply(value, rat(BigInt(n)));
+      if (atLeast === null && compare(multiplier, ONE) >= 0) atLeast = n;
+      if (above === null && compare(multiplier, ONE) > 0) above = n;
+      if (atLeast !== null && above !== null) break;
+    }
+    rows.push({ generation: t, organismValue: value, atLeast, above });
+  }
+  return rows;
+}
+
+/**
+ * Exact probability that the mandatory first generation leaves the player below
+ * their stake, split by whether the colony is already dead. No decision exists
+ * before this point, so this is a state the player is placed in, never one they
+ * choose.
+ */
+export function underwaterAfterFirstGeneration() {
+  const distribution = populationDistribution(1);
+  let extinct = ZERO;
+  let aliveBelow = ZERO;
+  let aboveWater = ZERO;
+  for (const entry of distribution) {
+    const multiplier = colonyMultiplier(1, entry.population);
+    if (entry.population === 0) extinct = add(extinct, entry.probability);
+    else if (compare(multiplier, ONE) <= 0) aliveBelow = add(aliveBelow, entry.probability);
+    else aboveWater = add(aboveWater, entry.probability);
+  }
+  return { extinct, aliveBelow, underwater: add(extinct, aliveBelow), aboveWater };
+}
+
+/** Exact probability that the peak population lands inside `[low, high)`. */
+export function peakBand(low, high) {
+  if (!Number.isSafeInteger(low) || !Number.isSafeInteger(high) || low >= high)
+    fail('INVALID_ARGUMENT', 'band bounds out of range');
+  return subtract(reachProbability(low), reachProbability(high));
 }
 

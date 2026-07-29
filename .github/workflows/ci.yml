@@ -33,10 +33,27 @@ jobs:
       - name: Verify the frozen paytable fixture
         run: npm run paytable:check
 
-      # Re-derives every published number and compares docs/MATH.md, README.md
-      # and docs/DESIGN.md against the enumeration.
+      # Every generated table in every document must already be current. This
+      # fails on a hand-edited number rather than silently rewriting it.
+      - name: Verify the generated documentation tables
+        run: npm run docs:check
+
+      # Re-derives every published number and compares README.md, docs/MATH.md,
+      # docs/DESIGN.md and docs/ENGINE.md against the enumeration.
       - name: Tests
         run: npm test
+
+      # The adapter fingerprint and the fixture digest are the two values the
+      # whole verification story hangs on. Printing them per Node version is
+      # what turns this matrix into cross-version determinism evidence.
+      - name: Determinism receipts
+        run: |
+          node -e "import('./tools/simulate.mjs').then(m => console.log('fingerprint', m.adapterFingerprint()))"
+          node -e "
+            import('./tools/lib/canonical.mjs').then(async c => {
+              const { buildPaytable } = await import('./tools/lib/report.mjs');
+              console.log('fixture', c.digest(c.canonicalJson(buildPaytable())));
+            })"
 
       # Independent sanity cross-check of the written rules. Seeded, so a
       # failure here is reproducible rather than flaky.

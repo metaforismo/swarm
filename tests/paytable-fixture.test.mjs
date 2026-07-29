@@ -6,7 +6,7 @@ import { buildPaytable } from '../tools/lib/report.mjs';
 import { SwarmMathError } from '../tools/lib/rational.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const fixturePath = `${root}spec/paytable.v1.json`;
+const fixturePath = `${root}spec/paytable.v2.json`;
 const frozen = readFileSync(fixturePath, 'utf8');
 const rendered = canonicalJson(buildPaytable());
 
@@ -56,14 +56,48 @@ describe('frozen paytable fixture', () => {
 
   it('states the risk policy it was generated under', () => {
     const fixture = parseFixture(frozen);
-    expect(fixture.schema).toBe('swarm/paytable-v1');
+    expect(fixture.schema).toBe('swarm/paytable-v2');
     expect(fixture.adapterId).toBe('swarm-colony-v1');
-    expect(fixture.adapterVersion).toBe('1.0.0');
+    expect(fixture.adapterVersion).toBe('1.1.0');
     expect(fixture.totals.rtp).toBe('19/20');
     expect(fixture.totals.probabilityMass).toBe('1/1');
     expect(fixture.proof.ok).toBe(true);
     expect(fixture.proof.failures).toBe(0);
     expect(fixture.roundMaximum.capBinds).toBe(false);
+  });
+
+  it('records one cap basis per bet line, none of them binding', () => {
+    const fixture = parseFixture(frozen);
+    expect(fixture.risk.lines.map((line) => line.line)).toEqual([
+      'COLONY',
+      'FIRST_LIGHT',
+      'DARK_VENT',
+      'SWARM',
+    ]);
+    for (const line of fixture.risk.lines) {
+      expect(line.binds, line.line).toBe(false);
+      // Headroom is published as a positive decimal, so a shrinking cap shows up
+      // in the fixture diff rather than only in a thrown error.
+      expect(line.headroom.startsWith('-'), line.line).toBe(false);
+      expect(Number(line.headroom), line.line).toBeGreaterThan(0);
+    }
+    expect(fixture.risk.ticket.binds).toBe(false);
+    expect(BigInt(fixture.risk.ticket.worstCaseExposureUnits)).toBeLessThan(
+      BigInt(fixture.risk.ticket.admissionLimitUnits),
+    );
+  });
+
+  it('publishes a profit rate next to every hit rate', () => {
+    const fixture = parseFixture(frozen);
+    for (const policy of fixture.policies) {
+      expect(policy.profitRate, policy.id).toMatch(/^\d\.\d+$/u);
+      // A hit is anything above zero, a profit is anything above the stake, so
+      // the profit rate can never exceed the hit rate.
+      expect(Number(policy.profitRate), policy.id).toBeLessThanOrEqual(Number(policy.hitRate));
+    }
+    const bankFirst = fixture.policies.find((policy) => policy.id === 'BANK_FIRST');
+    expect(bankFirst.hitRate).toBe('0.9360000000');
+    expect(bankFirst.profitRate).toBe('0.4560000000');
   });
 });
 

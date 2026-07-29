@@ -10,8 +10,15 @@ import { rat, multiply, divide, add, power, compare, fail, ONE } from './rationa
 
 /** Wire identity of this configuration. Bumped whenever any number below changes. */
 export const ADAPTER_ID = 'swarm-colony-v1';
-export const ADAPTER_VERSION = '1.0.0';
-export const PAYTABLE_SCHEMA = 'swarm/paytable-v1';
+/**
+ * 1.1.0 replaced the single round-level max-win multiple with one cap basis per
+ * bet line and bound the side-bet caps into the adapter fingerprint. That is a
+ * replay-visible change to the money path, so it takes a new adapter version and
+ * a new fingerprint, exactly as docs/ENGINE.md §2 requires.
+ */
+export const ADAPTER_VERSION = '1.1.0';
+/** v2 added the risk, bloom, feedback, break-even and variance-bound sections. */
+export const PAYTABLE_SCHEMA = 'swarm/paytable-v2';
 /** The Reveal Engine lifecycle module this adapter targets (docs/ENGINE.md). */
 export const MODULE_API = 'reveal-engine/staged-survival-v1';
 /** Adapter-owned promise: unchanged identity means unchanged draw behaviour. */
@@ -42,18 +49,59 @@ export const MAX_POPULATION = 2 * (BLOOM_THRESHOLD - 1);
 export const TARGET_RTP = rat(19n, 20n);
 
 /**
- * Declared risk ceiling, as a multiple of the stake, applied to the cumulative
- * credit of one round. It is the smallest integer strictly above the exact
- * maximum total a round can pay (905.776494...x, see `maximumRoundPayout()`),
- * so it is a real contractual ceiling that provably never truncates a payout.
+ * Declared risk ceiling of the COLONY line, as a multiple of *that line's own
+ * stake*, applied to the cumulative credit of one round on that line. It is the
+ * smallest integer strictly above the exact maximum total the colony can pay
+ * (905.776494...x, see `maximumRoundPayout()`), so it is a real contractual
+ * ceiling that provably never truncates a payout.
  * `assertRiskPolicy()` in tools/lib/model.mjs re-proves this from the model.
+ *
+ * **Every bet line has its own cap basis.** There is no round-level cap that
+ * sums lines: a side-bet credit is never charged against the colony's ceiling,
+ * and vice versa. See docs/MATH.md §11 for why a summing cap would break the
+ * invariance theorem, and docs/ENGINE.md §5 for the ledger rule.
  */
-export const MAX_WIN_MULTIPLE = 906n;
+export const COLONY_MAX_WIN_MULTIPLE = 906n;
+
+/**
+ * Declared risk ceiling of each side-bet line, on that line's own stake. Each is
+ * the smallest integer strictly above that bet's exact multiplier, which is the
+ * largest amount the line can ever credit (a side bet credits at most once).
+ * `assertRiskPolicy()` re-derives each of these from the enumerated prices.
+ */
+export const SIDE_BET_MAX_WIN_MULTIPLES = Object.freeze({
+  FIRST_LIGHT: 5n,
+  DARK_VENT: 3n,
+  SWARM: 249n,
+});
 
 /** Money is integer minor units. 1 credit = 10^6 units, so a floor crumb is 1e-6 credits. */
 export const UNITS_PER_CREDIT = 1000000n;
 export const MIN_STAKE_UNITS = UNITS_PER_CREDIT / 10n; // 0.10 credits
 export const MAX_STAKE_UNITS = 1000n * UNITS_PER_CREDIT; // 1000 credits
+/** Side-bet stakes are independent of the colony stake and bounded on their own line. */
+export const MIN_SIDE_BET_STAKE_UNITS = UNITS_PER_CREDIT / 10n; // 0.10 credits
+export const MAX_SIDE_BET_STAKE_UNITS = 100n * UNITS_PER_CREDIT; // 100 credits
+
+/**
+ * Operator admission limit on the total liability of one ticket, in minor units.
+ * Checked when the round is opened, never at settlement: a ticket that could
+ * exceed it is refused before money moves, so no credit is ever truncated.
+ * `assertRiskPolicy()` proves the worst ticket the stake bounds allow sits
+ * strictly below it, which is why the check cannot reject a legal ticket today
+ * and exists as a fence against a future bounds change.
+ */
+export const MAX_TICKET_EXPOSURE_UNITS = 1000000n * UNITS_PER_CREDIT; // 1,000,000 credits
+
+/**
+ * A round left with no player command for this long is reconciled by a forced
+ * BANK at the exact current colony value (docs/ENGINE.md §5.1). Every action
+ * ties in expectation, so a forced bank is exactly EV-neutral; it exists so that
+ * staked funds and a committed seed cannot sit in suspense indefinitely.
+ * It is four orders of magnitude above any human decision latency, so it does
+ * not make any money decision latency-sensitive.
+ */
+export const ABANDONED_ROUND_TIMEOUT_HOURS = 72;
 
 /** Mean offspring per organism, exact. */
 export const MU = (() => {
@@ -110,11 +158,43 @@ export function assertConfig() {
   if (compare(entry, TARGET_RTP) !== 0)
     fail('INVALID_CONFIG', 'Entry price does not reproduce the target RTP');
   // The declared cap must sit above the structural maximum so it can never truncate a payout.
-  if (compare(structuralMaxMultiplier(), rat(MAX_WIN_MULTIPLE)) >= 0)
+  if (compare(structuralMaxMultiplier(), rat(COLONY_MAX_WIN_MULTIPLE)) >= 0)
     fail('INVALID_CONFIG', 'Declared max-win multiple would truncate the paytable');
   if (MIN_STAKE_UNITS <= 0n || MAX_STAKE_UNITS < MIN_STAKE_UNITS)
     fail('INVALID_CONFIG', 'Stake bounds are inconsistent');
+  if (MIN_SIDE_BET_STAKE_UNITS <= 0n || MAX_SIDE_BET_STAKE_UNITS < MIN_SIDE_BET_STAKE_UNITS)
+    fail('INVALID_CONFIG', 'Side-bet stake bounds are inconsistent');
   return true;
+}
+
+/**
+ * Worst-case liability of one ticket, in minor units: the colony line at its own
+ * ceiling plus every selected side-bet line at its own ceiling. This is a
+ * *disclosure and an admission check*, not a truncating cap — no settlement is
+ * ever reduced to fit it. `selections` maps side-bet id to that line's stake.
+ */
+export function ticketExposureUnits(colonyStakeUnits, selections = {}) {
+  if (typeof colonyStakeUnits !== 'bigint' || colonyStakeUnits < MIN_STAKE_UNITS ||
+      colonyStakeUnits > MAX_STAKE_UNITS)
+    fail('INVALID_STAKE', 'Colony stake is outside the declared bounds', '$.stakeUnits');
+  let exposure = colonyStakeUnits * COLONY_MAX_WIN_MULTIPLE;
+  for (const [id, stakeUnits] of Object.entries(selections)) {
+    const cap = SIDE_BET_MAX_WIN_MULTIPLES[id];
+    if (cap === undefined) fail('UNKNOWN_SIDE_BET', `No such side bet: ${id}`, '$.sideBets');
+    if (typeof stakeUnits !== 'bigint' || stakeUnits < MIN_SIDE_BET_STAKE_UNITS ||
+        stakeUnits > MAX_SIDE_BET_STAKE_UNITS)
+      fail('INVALID_STAKE', `Side-bet stake for ${id} is outside the declared bounds`, '$.sideBets');
+    exposure += stakeUnits * cap;
+  }
+  return exposure;
+}
+
+/** The largest ticket the declared stake bounds allow, in minor units. */
+export function maximumTicketExposureUnits() {
+  const selections = {};
+  for (const id of Object.keys(SIDE_BET_MAX_WIN_MULTIPLES))
+    selections[id] = MAX_SIDE_BET_STAKE_UNITS;
+  return ticketExposureUnits(MAX_STAKE_UNITS, selections);
 }
 
 /** Offspring probability mass function as exact rationals, indexed by child count. */
@@ -143,10 +223,15 @@ export const CONFIG = Object.freeze({
   bloomThreshold: BLOOM_THRESHOLD,
   maxPopulation: MAX_POPULATION,
   targetRtp: TARGET_RTP,
-  maxWinMultiple: MAX_WIN_MULTIPLE,
+  colonyMaxWinMultiple: COLONY_MAX_WIN_MULTIPLE,
+  sideBetMaxWinMultiples: SIDE_BET_MAX_WIN_MULTIPLES,
+  maxTicketExposureUnits: MAX_TICKET_EXPOSURE_UNITS,
   unitsPerCredit: UNITS_PER_CREDIT,
   minStakeUnits: MIN_STAKE_UNITS,
   maxStakeUnits: MAX_STAKE_UNITS,
+  minSideBetStakeUnits: MIN_SIDE_BET_STAKE_UNITS,
+  maxSideBetStakeUnits: MAX_SIDE_BET_STAKE_UNITS,
+  abandonedRoundTimeoutHours: ABANDONED_ROUND_TIMEOUT_HOURS,
   mu: MU,
   ladderBase: LADDER_BASE,
 });

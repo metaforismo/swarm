@@ -11,15 +11,22 @@ import {
   normalizeSeed,
   playRound,
   resolveDraw,
+  resolveSideBets,
+  settleTicket,
   simulate,
   uniformBigInt,
+  wildLine,
 } from '../tools/simulate.mjs';
 import {
   BLOOM_THRESHOLD,
+  COLONY_MAX_WIN_MULTIPLE,
   DRAW_MODULUS,
   MAX_GENERATIONS,
+  MAX_STAKE_UNITS,
   OFFSPRING,
+  SIDE_BET_MAX_WIN_MULTIPLES,
 } from '../tools/lib/config.mjs';
+import { POLICIES } from '../tools/lib/model.mjs';
 import { compare, rat, subtract, toDecimal, toFraction } from '../tools/lib/rational.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -33,8 +40,8 @@ const engineDoc = readFileSync(`${root}docs/ENGINE.md`, 'utf8');
 const VECTOR = {
   seed: 'a'.repeat(64),
   roundId: 'swarm-vector-1',
-  fingerprint: '0ce06d9c6d3f5d55cd7379c42c46d3efedae4d3966d103acd307038e9aa4290b',
-  commitment: 'a5274468ec919dbbd23421d4c2be400ff2d63c3e520b30b0f928d3dbcdce94e3',
+  fingerprint: '598cf417489aea9710f37026d6814da8f390fde2db532c5e3ce06fa3760150e4',
+  commitment: '75c2f97a93d31870ac5baf60d63b3f8ecba191128e04e0b3edc61808b9c636e2',
   firstDraws: [0, 8, 18, 11, 0, 9, 16, 2, 11, 5, 7, 10, 14, 11, 13],
   run: {
     populations: [3, 3, 2, 3, 0],
@@ -53,6 +60,29 @@ const VECTOR = {
     total: '57/64',
   },
   bank: { reason: 'BANKED', total: '19/16' },
+};
+
+/**
+ * A frozen winning ticket. The colony line pays nothing and the side bets pay
+ * 27.25 credits on 2.10 staked — the exact configuration a single round-level
+ * cap on the colony stake would have short-paid.
+ */
+const TICKET = {
+  seed: '73afd34a0a248fcdbef0dc909a27b18809019ebd63ccb9600dcd224e06afa6b5',
+  roundId: 'swarm-vector-side',
+  wildPopulations: [6, 4, 7, 8, 11, 12, 9, 6, 5, 3, 1, 0],
+  ledger: [
+    [1, 'OPEN', 'COLONY', 'DEBIT', 1000000n, null],
+    [2, 'OPEN', 'FIRST_LIGHT', 'DEBIT', 500000n, null],
+    [3, 'OPEN', 'DARK_VENT', 'DEBIT', 500000n, null],
+    [4, 'OPEN', 'SWARM', 'DEBIT', 100000n, null],
+    [5, 'SETTLE', 'COLONY', 'CREDIT', 0n, null],
+    [6, 'SIDE_BET', 'FIRST_LIGHT', 'CREDIT', 2375000n, 'WON'],
+    [7, 'SIDE_BET', 'DARK_VENT', 'CREDIT', 0n, 'LOST'],
+    [8, 'SIDE_BET', 'SWARM', 'CREDIT', 24879850n, 'WON'],
+  ],
+  stakedUnits: 2100000n,
+  creditedUnits: 27254850n,
 };
 
 describe('canonical encoding', () => {
@@ -183,6 +213,124 @@ describe('round replay', () => {
   it('rejects an illegal harvest from a policy', () => {
     expect(() => playRound(VECTOR.seed, VECTOR.roundId, (_t, n) => n + 1)).toThrow(/illegal harvest/u);
     expect(() => playRound(VECTOR.seed, VECTOR.roundId, () => -1)).toThrow(/illegal harvest/u);
+  });
+});
+
+describe('wild line and side-bet resolution', () => {
+  it('reproduces the frozen wild line', () => {
+    const line = wildLine(TICKET.seed, TICKET.roundId);
+    expect(line.populations).toEqual(TICKET.wildPopulations);
+    expect(line.peak).toBe(12);
+    expect(line.extinctGeneration).toBe(12);
+  });
+
+  it('is exactly the RUN replay of the same committed grid', () => {
+    const run = playRound(TICKET.seed, TICKET.roundId, POLICIES.RUN.fn);
+    expect(wildLine(TICKET.seed, TICKET.roundId).populations).toEqual(
+      run.trace.map((entry) => entry.population),
+    );
+  });
+
+  it('does not move when the player harvests', () => {
+    // The whole point of the wild line: the base bet's actions cannot touch it.
+    const before = resolveSideBets(TICKET.seed, TICKET.roundId).map((bet) => bet.won);
+    playRound(TICKET.seed, TICKET.roundId, (_t, n) => Math.floor(n / 2));
+    playRound(TICKET.seed, TICKET.roundId, (_t, n) => n);
+    const after = resolveSideBets(TICKET.seed, TICKET.roundId).map((bet) => bet.won);
+    expect(after).toEqual(before);
+    expect(after).toEqual([true, false, true]);
+  });
+});
+
+describe('ticket settlement ledger', () => {
+  const settle = (overrides = {}) =>
+    settleTicket({
+      seedHex: TICKET.seed,
+      roundId: TICKET.roundId,
+      stakeUnits: 1000000n,
+      sideBetStakes: { FIRST_LIGHT: 500000n, DARK_VENT: 500000n, SWARM: 100000n },
+      policy: POLICIES.RUN.fn,
+      ...overrides,
+    });
+
+  it('reproduces the frozen receipt ledger', () => {
+    const { receipts, stakedUnits, creditedUnits } = settle();
+    expect(
+      receipts.map((receipt) => [
+        receipt.sequence,
+        receipt.kind,
+        receipt.line,
+        receipt.direction,
+        receipt.amountUnits,
+        receipt.resolved ?? null,
+      ]),
+    ).toEqual(TICKET.ledger);
+    expect(stakedUnits).toBe(TICKET.stakedUnits);
+    expect(creditedUnits).toBe(TICKET.creditedUnits);
+  });
+
+  it('names a line on every movement, so a side-bet credit is recordable', () => {
+    const { receipts } = settle();
+    for (const receipt of receipts) {
+      expect(typeof receipt.line).toBe('string');
+      expect(['DEBIT', 'CREDIT']).toContain(receipt.direction);
+      expect(receipt.amountUnits >= 0n).toBe(true);
+      expect(receipt.capped).toBe(false);
+    }
+    // One debit per selected line, and every side bet resolves exactly once.
+    expect(receipts.filter((receipt) => receipt.kind === 'OPEN')).toHaveLength(4);
+    expect(receipts.filter((receipt) => receipt.kind === 'SIDE_BET')).toHaveLength(3);
+  });
+
+  it('resolves side bets only after the colony line has settled', () => {
+    const { receipts } = settle();
+    const lastColony = receipts.findLastIndex((receipt) => receipt.line === 'COLONY');
+    const firstSideBet = receipts.findIndex((receipt) => receipt.kind === 'SIDE_BET');
+    expect(firstSideBet).toBeGreaterThan(lastColony);
+  });
+
+  it('pays every line in full at the most hostile stake ratio', () => {
+    // 0.10 credits on the colony, 100.00 on SWARM: the shared-basis failure case.
+    const { receipts, creditedUnits } = settle({
+      stakeUnits: 100000n,
+      sideBetStakes: { SWARM: 100000000n },
+      policy: POLICIES.RUN.fn,
+    });
+    const swarm = receipts.find((receipt) => receipt.line === 'SWARM' && receipt.kind === 'SIDE_BET');
+    expect(swarm.resolved).toBe('WON');
+    expect(swarm.capped).toBe(false);
+    expect(swarm.amountUnits).toBe(24879850562n);
+    // A single 906x cap on the 0.10 colony stake would have paid 90,600,000.
+    expect(creditedUnits).toBeGreaterThan(100000n * COLONY_MAX_WIN_MULTIPLE);
+  });
+
+  it('never credits more than the disclosed worst-case exposure', () => {
+    const { creditedUnits, exposureUnits } = settle();
+    expect(creditedUnits).toBeLessThan(exposureUnits);
+    expect(exposureUnits).toBe(
+      1000000n * COLONY_MAX_WIN_MULTIPLE +
+        500000n * SIDE_BET_MAX_WIN_MULTIPLES.FIRST_LIGHT +
+        500000n * SIDE_BET_MAX_WIN_MULTIPLES.DARK_VENT +
+        100000n * SIDE_BET_MAX_WIN_MULTIPLES.SWARM,
+    );
+  });
+
+  it('refuses a ticket outside the declared stake bounds before any money moves', () => {
+    expect(() => settle({ stakeUnits: MAX_STAKE_UNITS + 1n })).toThrow(/outside the declared bounds/u);
+    expect(() => settle({ sideBetStakes: { SWARM: 1n } })).toThrow(/outside the declared bounds/u);
+    expect(() => settle({ sideBetStakes: { NOPE: 1000000n } })).toThrow(/No such side bet/u);
+  });
+
+  it('records a harvesting round as one credit per harvest, in order', () => {
+    const { receipts } = settle({
+      policy: POLICIES.HALF_EVERY.fn,
+      sideBetStakes: {},
+    });
+    const harvests = receipts.filter((receipt) => receipt.kind === 'HARVEST');
+    expect(harvests.length).toBeGreaterThan(0);
+    for (let index = 1; index < harvests.length; index += 1)
+      expect(harvests[index].stage).toBeGreaterThan(harvests[index - 1].stage);
+    expect(receipts.filter((receipt) => receipt.kind === 'SIDE_BET')).toHaveLength(0);
   });
 });
 

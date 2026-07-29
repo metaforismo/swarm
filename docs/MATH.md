@@ -3,22 +3,27 @@
 Every number in this document is produced by `tools/enumerate.mjs` using exact
 BigInt rational arithmetic over the complete outcome space. No number here comes
 from a simulation, a float, or a fit. The tables between
-`<!-- generated:... -->` markers are compared byte for byte against the
-enumeration by `tests/docs-match-enumeration.test.mjs`, so this document cannot
-drift from the model.
+`<!-- generated:... -->` markers are written by `tools/syncdocs.mjs` and compared
+byte for byte against the enumeration by `tests/docs-match-enumeration.test.mjs`,
+so this document cannot drift from the model.
 
 Reproduce everything with:
 
 ```sh
 npm run enumerate            # full report
 npm run paytable:check       # byte-compare the frozen fixture
+npm run docs:check           # every generated table in every document is current
 npm test                     # re-derive and assert every published number
 ```
 
-- **Adapter identity** `swarm-colony-v1 @ 1.0.0`
-- **Paytable schema** `swarm/paytable-v1`
-- **Frozen fixture** `spec/paytable.v1.json`, sha256
-  `93ecb5400066fa964e9c5c2836cb7f283b18762b9571880aa3f6d529cdaefb4d`
+<!-- generated:identity -->
+| Identity | Value |
+| --- | --- |
+| Adapter | `swarm-colony-v1` @ `1.1.0` |
+| Paytable schema | `swarm/paytable-v2` |
+| Frozen fixture | `spec/paytable.v2.json` |
+| Fixture sha256 | `60be0abca67ae59045ff2a6e726a6485209151f24a934f495f717420853e7a70` |
+<!-- /generated:identity -->
 
 ---
 
@@ -34,9 +39,13 @@ npm test                     # re-derive and assert every published number
 | Actions proven to tie | 2295 |
 | Largest single settlement | `72479248046875/137438953472` = 527.355936x |
 | Probability of that settlement | 4.46239e-17 |
-| Largest total one round can credit | `373466920422265/412316860416` = 905.776494x |
-| Declared max-win multiple | 906x (never binds) |
+| Largest total the COLONY line can credit | `373466920422265/412316860416` = 905.776494x |
+| Declared COLONY cap, on the colony stake | 906x (proven never to bind) |
+| Worst-case ticket liability at the stake bounds | 931,700 credits, admitted below 1,000,000 |
 | FULL BLOOM frequency | 1 in 22217.97 |
+| FULL BLOOM payout range | 9.895833x to 527.355936x, median 37.749608x |
+| Standard deviation, proven interval over every policy | 0.513058 to 7.569363 |
+| Rounds left below the stake by the mandatory generation 1 | `68/125` = 54.40% |
 | Expected generations per RUN round | 5.85032978 |
 | Draw grid per round | 270 draws |
 <!-- /generated:headline -->
@@ -129,7 +138,7 @@ P(DIE) = (1 - mu) + P(SPLIT)
 
 so splits can never be more common than deaths in any subcritical configuration.
 The design cannot promise a colony that usually grows; it can only promise that
-growth, when it happens, is worth a lot. Section 9 turns that into an RTP.
+growth, when it happens, is worth a lot. Section 10 turns that into an RTP.
 
 ---
 
@@ -147,10 +156,10 @@ with `m(0) = 0`. Taking `k = 1` and inducting on `n` gives
 `m(n) = m(n - 1) + m(1) = n * m(1)`. Set `c = m(1)`. ∎
 
 If value were not conserved at a harvest, one of two things would be true: either
-harvesting in two steps pays more than harvesting in one step (a strategy that
-beats the RTP), or the game silently confiscates value when a player uses its
-signature mechanic. Linearity is not a modelling convenience here; it is forced
-by the mechanic.
+harvesting in two steps pays more than harvesting in one step (a decision rule
+that beats the RTP), or the game silently confiscates value when a player uses
+its signature mechanic. Linearity is not a modelling convenience here; it is
+forced by the mechanic.
 
 ---
 
@@ -195,6 +204,12 @@ per-organism value grows, and the two cancel to the last bit.
 
 The last column is the FULL BLOOM floor: the smallest payout a bloom can produce
 at that generation.
+
+**A martingale is not a monotone process.** `V` is fair in expectation across a
+generation and still falls about half the time — the value rises exactly when
+`5 * N(t+1) > 4 * N(t)`, so a colony that shrinks by more than 20% is worth less
+than it was, however many organisms split on the way. Section 9 enumerates that
+and turns it into two binding design constraints.
 
 ---
 
@@ -244,8 +259,8 @@ exactly `19/20` per unit staked.
 "Theoretical" is doing precise work here, not hedging: the theorem is a
 statement about the exact rational value the paytable owes. What a wallet
 actually credits is that value floored to integer minor units at each credit
-event, which is below it by less than one unit per event — section 12 bounds
-the gap at `1.8e-5` credits per round.
+event, which is below it by less than one unit per event — section 13 bounds the
+gap, and it is the only quantity in this document that is not policy-invariant.
 
 **Proof.** Define the wealth process `W(t) = banked(t) + c(t) * N(t)`.
 
@@ -276,45 +291,61 @@ one that harvests half every generation, and two threshold rules — and all eig
 return exactly `19/20`:
 
 <!-- generated:policies -->
-| Policy | Exact RTP | Standard deviation | Hit rate | Description |
-| --- | --- | --- | --- | --- |
-| `BANK_FIRST` | `19/20` | 0.513058 | 0.9360000000 | Bank at generation 1 |
-| `RUN` | `19/20` | 7.569291 | 0.0224631637 | Never harvest, ride to the end |
-| `HALF_EVERY` | `19/20` | 1.453021 | 0.8080000219 | Harvest half every generation |
-| `STOP_AT_2X` | `19/20` | 1.350584 | 0.3430951770 | Bank everything at 2.00x or better |
-| `STOP_AT_10X` | `19/20` | 3.453276 | 0.0729125643 | Bank everything at 10.00x or better |
-| `HALF_AT_2X` | `19/20` | 2.350899 | 0.3402336255 | Harvest half whenever value is 2.00x or better |
-| `BANK_AT_GEN_5` | `19/20` | 1.469801 | 0.4165582060 | Bank everything at generation 5 |
-| `PANIC` | `19/20` | 2.711665 | 0.8902420631 | Bank whenever the colony shrank below 3, else run |
+| Policy | Exact RTP | Standard deviation | Profit rate `P(>stake)` | Hit rate `P(>0)` | Description |
+| --- | --- | --- | --- | --- | --- |
+| `BANK_FIRST` | `19/20` | 0.513058 | 0.4560000000 | 0.9360000000 | Bank at generation 1 |
+| `RUN` | `19/20` | 7.569291 | 0.0224631637 | 0.0224631637 | Never harvest, ride to the end |
+| `HALF_EVERY` | `19/20` | 1.453021 | 0.3075713875 | 0.8080000219 | Harvest half every generation |
+| `STOP_AT_2X` | `19/20` | 1.350584 | 0.3430951770 | 0.3430951770 | Bank everything at 2.00x or better |
+| `STOP_AT_10X` | `19/20` | 3.453276 | 0.0729125643 | 0.0729125643 | Bank everything at 10.00x or better |
+| `HALF_AT_2X` | `19/20` | 2.350899 | 0.2861157144 | 0.3402336255 | Harvest half whenever value is 2.00x or better |
+| `BANK_AT_GEN_5` | `19/20` | 1.469801 | 0.2710879003 | 0.4165582060 | Bank everything at generation 5 |
+| `PANIC` | `19/20` | 2.711665 | 0.1712991168 | 0.8902420631 | Bank whenever the colony shrank below 3, else run |
 <!-- /generated:policies -->
 
 Standard deviations are truncated decimals of the exact variance (a square root
 is generally irrational; the variance itself is published exactly in the
-fixture). Hit rate is `1 - P(total credit = 0)`.
+fixture).
+
+**Two different questions, two different columns.** The *hit rate* is
+`P(total credit > 0)` and the *profit rate* is `P(total credit > stake)`. They
+are not the same number and the gap is not small: `BANK_FIRST` returns something
+93.60% of the time and returns more than the stake 45.60% of the time, because
+populations of 1 and 2 pay `0.3958x` and `0.7916x`. A returned fraction of a
+stake is a loss. Wherever this repository ranks a policy it leads with the
+profit rate, and any published "hit rate" must appear next to it, never instead
+of it.
 
 ### 6.1 What the theorem does not say
 
 - **It does not say choices are meaningless.** Harvesting changes how many draws
   the colony consumes, so it changes what actually happens next, and it changes
-  the entire shape of the payout distribution — standard deviation ranges from
-  0.51 to 7.56 across the policies above, a factor of 14. Choices move risk, not
-  return. That is the design goal, stated precisely.
-- **It does not survive a leaked seed.** A player who could read the committed
-  grid before deciding would beat 19/20 trivially. The theorem assumes the
-  policy is adapted to the revealed history only; the commit-reveal scheme in
-  docs/ENGINE.md is what makes that assumption true in practice, and the seed
-  must never be released before settlement.
-- **It does not cover a clipping cap.** It requires the declared max-win
-  multiple to sit above every reachable total. Section 11 proves it does.
+  the entire shape of the payout distribution — the proven standard-deviation
+  interval spans a factor of 14 (section 11). Choices move risk, not return.
+  That is the design goal, stated precisely.
+- **It does not survive a leaked seed, and side-bet display is part of that.**
+  The theorem assumes the policy is adapted to the revealed history only. Section
+  7.3 shows that revealing the side bets' wild line ahead of the player's own
+  colony leaks future draws and hands the player a strictly winning move, so the
+  reveal rule there is a condition of this theorem, not a UI preference.
+- **It does not cover a clipping cap.** It requires each line's declared max-win
+  multiple to sit above every total that line can reach. Section 12 proves that,
+  per line, and explains why a single cap shared across the ticket would break
+  the theorem instead of protecting it.
 
 ---
 
 ## 7. Bet types
 
+A ticket is one **COLONY** bet plus zero to three optional side bets. Every bet
+on the ticket carries **its own stake, its own cap basis and its own 95%**; no
+bet's payout is charged against another bet's ceiling. The engine surface for
+this is `docs/ENGINE.md` §5.
+
 ### 7.1 COLONY — the base bet
 
 Stake `S` buys the colony described above. Credits are `floor(S * c(t) * k)` at
-each harvest and at settlement, in integer minor units (section 12). Theoretical
+each harvest and at settlement, in integer minor units (section 13). Theoretical
 RTP: exactly `19/20`, for every policy, by section 6.
 
 ### 7.2 Side bets
@@ -331,21 +362,54 @@ not rounded decimals; a client displays the value truncated toward zero, so the
 credited amount is never below the displayed multiplier times the stake.
 
 <!-- generated:sidebets -->
-| Bet | Resolves on | Probability | One in | Multiplier (exact) | Multiplier | RTP |
-| --- | --- | --- | --- | --- | --- | --- |
-| **FIRST LIGHT** | The wild line holds 4 or more organisms after generation 1. | `1/5` | 5.00 | `19/4` | 4.750000x | `19/20` |
-| **DARK VENT** | The wild line is extinct at or before generation 3. | `168434389083176/476837158203125` | 2.83 | `1811981201171875/673737556332704` | 2.689446x | `19/20` |
-| **SWARM** | The wild line reaches 10 or more organisms during the round. | sha256 `d7ef65f76db5ecfc` | 261.89 | sha256 `c0b3977dacfceed6` | 248.798505x | `19/20` |
+| Bet | Resolves on | Probability | One in | Multiplier (exact) | Multiplier | Own cap | RTP |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **FIRST LIGHT** | The wild line holds 4 or more organisms after generation 1. | `1/5` | 5.00 | `19/4` | 4.750000x | 5x | `19/20` |
+| **DARK VENT** | The wild line is extinct at or before generation 3. | `168434389083176/476837158203125` | 2.83 | `1811981201171875/673737556332704` | 2.689446x | 3x | `19/20` |
+| **SWARM** | The wild line reaches 10 or more organisms during the round. | sha256 `d7ef65f76db5ecfc` | 261.89 | sha256 `c0b3977dacfceed6` | 248.798505x | 249x | `19/20` |
 <!-- /generated:sidebets -->
 
 Exact values longer than 44 characters are published as the SHA-256 of their
 canonical `numerator/denominator` string; the full 200-digit fractions are in
-`spec/paytable.v1.json`. `FIRST LIGHT` is exactly `1/5` and pays exactly `19/4`,
+`spec/paytable.v2.json`. `FIRST LIGHT` is exactly `1/5` and pays exactly `19/4`,
 which is a coincidence of the chosen weights and a useful sanity anchor.
 
-`DARK VENT` is a hedge on your own colony dying early. It is priced at the same
-RTP as everything else, so covering the base bet with it is neither clever nor
-punished: two 95% bets combine to a 95% return.
+Each side bet credits at most once, so the largest amount its line can ever owe
+is its own multiplier, and its own cap sits strictly above that (section 12).
+Side-bet stakes are bounded on their own line, in `[0.10, 100.00]` credits, and
+are independent of the colony stake: because caps are per line, a large side bet
+next to a small colony bet is priced and paid exactly, with no interaction.
+
+`DARK VENT` pays when your own colony is most likely to have died, which makes
+it *feel* like insurance. It is not sold as insurance and must not be presented
+as one: it is an independent bet at the same 95%, so pairing it with the base bet
+neither hedges the house edge away nor adds one — two 95% bets combine to 95% of
+the total staked, on a larger total. See `docs/DESIGN.md` §9.4 for the copy rules
+this forces.
+
+### 7.3 When a side bet may be revealed
+
+Because the wild line never harvests, its population at every generation is at
+least the player's, and the player's organisms occupy a *prefix* of the wild
+line's slots. So the wild line's next population is a sum that **contains** the
+player's next population as a partial sum.
+
+That makes early wild-line disclosure a leak of future draws, not a spoiler:
+
+> If a client shows that the wild line goes from 10 organisms to 0 at generation
+> `t + 1` while the player still owes a decision at generation `t`, the player
+> has learned that all 10 of those slots produced no children — including the
+> slots their own colony occupies. Their colony is certainly extinct next
+> generation, `BANK` is now a strictly winning move, and the round no longer
+> returns `19/20`.
+
+**Rule, binding on the protocol and not only the UI:** no wild-line state for
+generation `t + 1` may be computed into a client-visible response, or into any
+message the client can time, before the player's own generation `t + 1` has
+resolved. Side bets are resolved and credited **only at settlement**, after the
+base round has reached a terminal state, and the wild line is derived to its own
+terminal at that point. `advance()` and `harvest()` responses carry no side-bet
+field at all (`docs/ENGINE.md` §5.2).
 
 ---
 
@@ -426,114 +490,305 @@ blooms. Those frequencies are not tuned by taste — with an exactly fair value
 process, the probability of reaching a size is pinned by what that size is
 worth.
 
+**Reach is not a band.** `reach(12)` counts every round that ever holds 12
+organisms, including the ones that go on to bloom. The near-miss band — reaches
+12 to 15 and never blooms — is `reach(12) - reach(16)`, which is `1 in 1223.34`,
+not the `1 in 1159.50` of the reach table. Both numbers are in the fixture and
+the design document quotes the band.
+
+### 8.1 What a FULL BLOOM actually pays
+
+<!-- generated:bloom -->
+| FULL BLOOM payout | Value |
+| --- | --- |
+| Smallest possible | 9.895833x (generation 3, 16 organisms) |
+| Median | 37.749608x |
+| Largest possible | 527.355936x |
+| Share paying under 20x | 17.31% |
+| Share paying under 50x | 61.60% |
+| Share paying under 100x | 84.24% |
+| Share paying less than the smallest generation-18 settlement (17.578531x) | 10.36% |
+| Frequency | 1 in 22217.97 |
+<!-- /generated:bloom -->
+
+FULL BLOOM is a *population* event, not a size-of-win event. It can pay less
+than one tenth of what its own name suggests: the smallest bloom is 16 organisms
+at generation 3, worth `9.895833x`, and 10.36% of all blooms pay less than the
+smallest payout a surviving generation-18 colony can produce. Any presentation
+that treats every bloom as the game's biggest moment is misrepresenting the
+61.60% of them that pay under 50x; `docs/DESIGN.md` §7 scales the celebration to
+the settled multiplier instead.
+
 ---
 
-## 9. Why 95%
+## 9. The value process is not monotone
+
+This section exists because a crash-game mental model — a number that only ever
+rises until it dies — is wrong for SWARM, and the difference has consequences
+the design has to absorb rather than hide.
+
+### 9.1 A generation can lose money while organisms split
+
+Colony value is `N(t) * c(t)` and `c(t)` climbs exactly 25%, so
+
+```
+value rises  <=>  5 * N(t+1) > 4 * N(t)
+```
+
+A generation with several splits still loses value if enough organisms died in
+the same generation. Exactly how often, by exhaustive enumeration over the
+multinomial:
+
+<!-- generated:feedback -->
+| Population `n` | P(value falls) | P(falls **and** at least one split) | P(falls **and** two or more splits) | P(at least one split \| value falls) |
+| --- | --- | --- | --- | --- |
+| 3 | 54.40% | 9.60% | 0.00% | 17.64% |
+| 5 | 39.42% | 12.80% | 0.00% | 32.46% |
+| 8 | 52.69% | 36.50% | 10.55% | 69.27% |
+| 12 | 49.14% | 42.40% | 24.12% | 86.28% |
+| 15 | 43.76% | 40.31% | 28.30% | 92.10% |
+<!-- /generated:feedback -->
+
+Read the `n = 8` row: 52.69% of generations lose value, and 36.50% of *all*
+generations both lose value and contain at least one split. Conditional on the
+value falling, at least one split fires 69.27% of the time at `n = 8` and 86.28%
+at `n = 12`.
+
+**Consequence, binding on the build.** Feedback intensity may not be keyed to
+the event type, because "a split happened" is close to uncorrelated with "you
+made money this generation". It must be keyed to the sign and size of the value
+change. `docs/DESIGN.md` §6.5 is that rule, and it is derived from this table.
+
+### 9.2 Half of all rounds are underwater before the first decision
+
+Generation 1 is mandatory. It leaves the player below their stake with
+probability exactly `68/125 = 54.40%`: `8/125` extinct outright plus `12/25`
+alive but worth `0.3958x` or `0.7916x`.
+
+<!-- generated:break-even -->
+| Generation | Organism value | Organisms needed to be worth more than the stake | A colony of 3 is worth |
+| --- | --- | --- | --- |
+| 1 | 0.395833 | 3 | 1.187500x |
+| 2 | 0.494791 | 3 | 1.484375x |
+| 3 | 0.618489 | 2 | 1.855468x |
+| 4 | 0.773111 | 2 | 2.319335x |
+| 5 | 0.966389 | 2 | 2.899169x |
+| 6 | 1.207987 | 1 | 3.623962x |
+| 7 | 1.509984 | 1 | 4.529953x |
+| 8 | 1.887480 | 1 | 5.662441x |
+| 9 | 2.359350 | 1 | 7.078051x |
+| 10 | 2.949188 | 1 | 8.847564x |
+| 11 | 3.686485 | 1 | 11.059455x |
+| 12 | 4.608106 | 1 | 13.824319x |
+| 13 | 5.760133 | 1 | 17.280399x |
+| 14 | 7.200166 | 1 | 21.600499x |
+| 15 | 9.000207 | 1 | 27.000623x |
+| 16 | 11.250259 | 1 | 33.750779x |
+| 17 | 14.062824 | 1 | 42.188474x |
+| 18 | 17.578531 | 1 | 52.735593x |
+<!-- /generated:break-even -->
+
+From an underwater state, `BANK` crystallises a loss and `CONTINUE` is the only
+action that can reach the stake again. That is the canonical loss-chasing
+configuration, and roughly half of all rounds are placed in it by a resolution
+the player had no decision over.
+
+The mathematics cannot remove this: it is the direct consequence of a subcritical
+process with an honest entry price, and every alternative (a supercritical
+process, a higher seed count, a shallower ladder) trades it for a worse property.
+What the mathematics *can* do is state it exactly, so the product spec has to
+answer for it. `docs/DESIGN.md` §9.2 is that answer.
+
+---
+
+## 10. Why 95%
 
 - **Band.** 94–97% is the working band for instant/crash-style titles; 95% sits
   mid-band, leaving 5% operator margin.
 - **Exactness.** `19/20` keeps the entry price `c(1) = 19/48` and every
   generation-1 probability a short rational (`8/125`, `24/125`, ...), which is
   why this document can print exact fractions instead of rounded decimals.
-- **No skill gap.** The usual regulatory concern with a decision game is that
-  the advertised RTP assumes optimal play while the average player does worse.
-  Here the enumeration proves optimal-play RTP and worst-play RTP are the *same
-  number*. 95% is the return for the best player, the worst player, and the
-  player who taps at random. There is no "theoretical vs practical" gap to
-  disclose because there is no gap.
-- **Rounding.** Floor rounding at the credit boundary costs at most one minor
-  unit per credit event. A round has at most 18 credit events (a harvest at each
-  of generations 1 to 17, plus one settlement), so with 10^6 minor units per
-  credit the payable RTP is below the theoretical RTP by less than `1.8e-5`
-  credits per round, i.e. under `2e-5` of a 1-credit stake (section 12).
+- **No skill gap in the theoretical return.** The usual regulatory concern with
+  a decision game is that the advertised RTP assumes optimal play while the
+  average player does worse. Here the enumeration proves optimal-play and
+  worst-play theoretical RTP are the *same* exact number, `19/20`, for the best
+  player, the worst player, and the player who taps at random.
+- **The one gap, disclosed.** Payable RTP is theoretical RTP minus floor
+  rounding, and the number of credit events depends on how the player plays: a
+  single bank rounds once, harvesting every generation rounds up to 18 times. At
+  the minimum stake of `0.10` credits that is worth at most `1.80000e-04` of the
+  stake, i.e. **0.018 percentage points**, so `HALF_EVERY` is at most 0.018 pp
+  behind `BANK_FIRST` in payable terms. It is negligible; it is not zero, and
+  section 13 states the bound rather than claiming there is no gap at all.
 
 ---
 
-## 10. Volatility profile
+## 11. Volatility profile
 
-The base bet is a *volatility dial*, not a fixed profile. From the policy table:
+The base bet is a *volatility dial*, not a fixed profile:
 
-| Style | Policy | SD | Hit rate | Feel |
-| --- | --- | --- | --- | --- |
-| Low | `BANK_FIRST` | 0.51 | 93.6% | Grinding, near-flat, one decision |
-| Medium | `HALF_EVERY` | 1.45 | 80.8% | Frequent small credits, long tail kept alive |
-| Medium-high | `HALF_AT_2X` | 2.35 | 34.0% | Locks a profit, rides the rest |
-| High | `STOP_AT_10X` | 3.45 | 7.3% | Rare, chunky wins |
-| Extreme | `RUN` | 7.56 | 2.2% | Lottery: nothing, or 17.57x and up |
+<!-- generated:volatility -->
+| Style | Policy | SD | Profit rate | Hit rate | Feel |
+| --- | --- | --- | --- | --- | --- |
+| Low | `BANK_FIRST` | 0.51 | 45.60% | 93.60% | Grinding, near-flat, one decision |
+| Medium | `HALF_EVERY` | 1.45 | 30.75% | 80.80% | Frequent small credits, long tail kept alive |
+| Medium-high | `HALF_AT_2X` | 2.35 | 28.61% | 34.02% | Locks a profit, rides the rest |
+| High | `STOP_AT_10X` | 3.45 | 7.29% | 7.29% | Rare, chunky wins |
+| Extreme | `RUN` | 7.56 | 2.24% | 2.24% | Nothing, or 17.57x and up |
+<!-- /generated:volatility -->
 
-For reference, a standard-volatility slot sits near SD 3–6 per spin; `RUN` is
-above that band and `BANK_FIRST` far below it. The important property is that
-the RTP column is constant at `19/20` across all of them: the player chooses
-variance, never expectation.
+Every row returns exactly `19/20` (section 6): the player chooses variance, never
+expectation. Note how far the profit rate and the hit rate can diverge — `BANK_FIRST` returns something 93.60% of the time and profits 45.60%
+of the time, while `RUN`'s two numbers coincide because its smallest non-zero
+payout is already above the stake.
+
+**The published range is a proven interval, not a sample.** Maximising the
+variance is a maximisation of the second moment, and because the expected
+continuation value of `j` organisms is `c(t) * j` for every policy, the
+accumulated bank cancels out of the comparison between actions at a state. The
+optimal action therefore depends only on `(t, n)` and an exact backward induction
+over the 255 decision states gives the true extremum over *all* adapted policies,
+including history-dependent and randomized ones:
+
+<!-- generated:volatility-bounds -->
+| Bound over every adapted policy | Standard deviation | Attained by |
+| --- | --- | --- |
+| Minimum | 0.513058 | Banking the whole colony at the first decision (`BANK_FIRST`) |
+| Maximum | 7.569363 | Harvesting exactly one organism at population 15 to stay under FULL BLOOM (13 states) |
+<!-- /generated:volatility-bounds -->
+
+`RUN` is close to the maximum but is not the maximum: the maximum-variance policy
+harvests exactly one organism whenever the colony reaches 15, which dodges the
+FULL BLOOM force-settle and keeps the round alive for a heavier tail. It returns
+`19/20`, like everything else.
 
 Expected round length under RUN is `5.85032978` generations; policies that bank
 early are shorter, which matters for session pacing (docs/DESIGN.md).
 
 ---
 
-## 11. Caps, and why the cap never binds
+## 12. Caps: one basis per bet line
 
-Three different maxima matter, and conflating them is a classic way to publish a
-wrong max-win number.
+Three different maxima matter for the COLONY line, and conflating them is a
+classic way to publish a wrong max-win number.
 
 1. **Largest single settlement** — `72479248046875/137438953472 = 527.355936x`,
    at generation 18 with 30 organisms, probability `4.46239e-17`.
-2. **Largest total one round can credit** —
+2. **Largest total the line can credit in one round** —
    `373466920422265/412316860416 = 905.776494x`. This is *larger* than the
    largest settlement, because a player who harvests the overflow to keep the
    colony just under the FULL BLOOM threshold can farm the ladder for many
    generations instead of force-settling once. It is computed by an exact
    deterministic dynamic program (`maximumRoundPayout()`) that maximizes over
    every harvest policy and every draw grid simultaneously.
-3. **Declared max-win multiple** — `906x`, the smallest integer strictly above
-   (2), applied to the cumulative credit of a round.
+3. **Declared cap for the line** — `906x`, the smallest integer strictly above
+   (2), applied to the cumulative credit of the COLONY line on the COLONY stake.
 
-Because `906 > 905.776494...` and credits are floored, the cap provably never
-truncates a payout. That is the point: a cap that can bite would break the
-invariance theorem (it would make late continuation worth less than its fair
-value and hand the player a reason to stop that the paytable does not price).
-`assertRiskPolicy()` re-derives this from the model on every test run, so any
-future change to the offspring weights, the ladder, the generation count or the
-bloom threshold that would push a reachable total over the cap fails the build.
+Each side bet credits at most once, so its own maximum is simply its multiplier
+and its declared cap is the next integer above it:
 
-The largest side-bet payout is `248.798505x`, comfortably inside the same cap.
+<!-- generated:risk -->
+| Bet line | Cap basis | Largest credit the line can owe | Declared cap | Headroom |
+| --- | --- | --- | --- | --- |
+| `COLONY` | colony stake | 905.776494x | 906x | 0.223505x |
+| `FIRST_LIGHT` | FIRST_LIGHT stake | 4.750000x | 5x | 0.250000x |
+| `DARK_VENT` | DARK_VENT stake | 2.689446x | 3x | 0.310553x |
+| `SWARM` | SWARM stake | 248.798505x | 249x | 0.201494x |
+<!-- /generated:risk -->
 
-**Design note.** Fact (2) is also the most interesting strategic property of the
-game: partial harvest is the only way to reach the highest totals, because it is
-the only way to keep a colony alive under the bloom threshold while the ladder
-climbs. It still does not change the expectation — it changes which tail you are
-buying.
+Because every headroom above is strictly positive and credits are floored, no
+cap can ever truncate a payout. That is the point: a cap that can bite would
+break the invariance theorem (it would make late continuation worth less than its
+fair value and hand the player a reason to stop that the paytable does not
+price). `assertRiskPolicy()` re-derives every row from the model on every test
+run, so any future change to the offspring weights, the ladder, the generation
+count, the bloom threshold or a side-bet definition that would push a reachable
+total over its cap fails the build.
+
+### 12.1 Why the cap basis is per line and not per ticket
+
+A single round-level ceiling applied to the sum of all credits would be the
+obvious design and it is wrong. On equal stakes the four lines can owe
+
+```
+905.776494 + 248.798505 + 4.750000 + 2.689446 = 1162.014445 x
+```
+
+against a 906x ceiling, so the cap would bind and short-pay `256.014445x` — and
+it would bind on a `1 in 261.89` event, not a tail event. Worse, nothing relates
+a side-bet stake to the colony stake, so a shared basis makes the payout of one
+bet depend on the size of a different bet: a `0.10` credit colony bet next to a
+`100.00` credit SWARM bet would pay 0.4% of what SWARM owes.
+
+Per-line bases remove all of it. Each line's cap is proven above that line's own
+maximum, so:
+
+- no credit is ever truncated, on any line, at any stake ratio;
+- the invariance theorem's no-clipping precondition holds for the COLONY line and
+  each side bet independently;
+- each line's RTP is exactly `19/20`, so any ticket, being a sum of lines, returns
+  exactly `19/20` of the *total* staked.
+
+### 12.2 Ticket liability, disclosed and admitted rather than clipped
+
+Operators still need a bound on what one ticket can cost. That bound is a
+**disclosure and an open-time admission check**, never a settlement-time
+truncation:
+
+```
+ticket exposure = colonyStake * 906
+                + sum over selected side bets of (that bet's stake * that bet's cap)
+```
+
+At the declared stake bounds the worst ticket is `931,700` credits against an
+admission limit of `1,000,000` credits, so the check cannot refuse a legal ticket
+today. It exists so that a future change to the stake bounds fails the build
+instead of silently creating a ticket the operator has not underwritten, and so
+that a refusal — if the bounds ever change — happens before money moves rather
+than after a win.
 
 ---
 
-## 12. The payable boundary
+## 13. The payable boundary
 
 - Money is integer **minor units**; the reference configuration uses
-  `1 credit = 1,000,000 units`. Stakes are bounded to
-  `[100,000, 1,000,000,000]` units (0.1 to 1,000 credits).
+  `1 credit = 1,000,000 units`. The colony stake is bounded to
+  `[100,000, 1,000,000,000]` units (0.10 to 1,000 credits) and each side-bet
+  stake to `[100,000, 100,000,000]` units (0.10 to 100 credits).
 - Every credit event pays `floor(exact rational)` units, so
   `0 <= theoretical - credited < 1` unit at each event, and the round total is
   short of theoretical by less than the number of credit events (at most 18
-  units = `1.8e-5` credits).
-- The cap is applied with the original stake as the basis and the already
-  credited amount subtracted, exactly as `payableWithinCap()` does in the
-  engine. It never binds (section 11), but it is applied anyway so that a
-  configuration error cannot silently overpay.
+  units on the COLONY line: a harvest at each of generations 1 to 17 plus one
+  settlement).
+- **Absolute bound:** `18` units = `1.8e-5` credits per round, whatever the
+  stake. **Relative bound:** at the minimum stake of `0.10` credits that is
+  `1.80000e-04` of the stake, or `0.018` percentage points of RTP; at the
+  maximum stake it is `1.80000e-08`. The relative figure is stated at the
+  minimum stake because that is where it is largest, and it is the only quantity
+  in this document that depends on how the player plays.
+- The cap is applied per line with that line's own stake as the basis and the
+  already-credited units on that line subtracted, exactly as
+  `payableWithinCap()` does in the engine. It never binds (section 12), but it is
+  applied anyway so that a configuration error cannot silently overpay.
 - Nothing in the payable path uses a float. `payableUnits()` in
   `tools/lib/model.mjs` is the reference implementation and is tested against
-  hostile inputs (zero and negative stakes, non-BigInt stakes, absurd
-  multipliers).
+  hostile inputs (zero and negative stakes, non-BigInt stakes, non-BigInt cap
+  multiples, absurd multipliers).
 
 ---
 
-## 13. Reproducing every number
+## 14. Reproducing every number
 
 | Claim | Command |
 | --- | --- |
 | Total mass is exactly 1, RTP exactly 19/20 | `npm run enumerate` (section 5 of the report) |
 | Every action at every state ties | `npm run enumerate` (section 9 of the report) |
-| Eight policies all return 19/20 | `npm run enumerate` (section 8 of the report) |
+| Eight policies all return 19/20, with profit rates | `npm run enumerate` (section 8 of the report) |
+| Every cap sits above its own line's maximum | `npm run enumerate` (section 11 of the report) |
+| Split celebration would fire on losing generations | `npm run enumerate` (section 12 of the report) |
+| What FULL BLOOM actually pays | `npm run enumerate` (section 13 of the report) |
 | Published tables equal the model | `npm test` |
+| Generated tables in the docs are current | `npm run docs:check` |
 | Frozen fixture is byte-identical | `npm run paytable:check` |
 | Simulation agrees with enumeration | `npm run simulate` |
 | Every terminal state and its probability | `npm run enumerate:terminals` |
@@ -545,7 +800,7 @@ errors) and a mean round length of 5.8351 against the exact 5.85032978.
 
 ---
 
-## 14. What is not claimed
+## 15. What is not claimed
 
 This is engineering evidence for a free-play prototype specification, not a
 certification. No RNG certification, no laboratory approval, no jurisdictional
@@ -556,3 +811,7 @@ that the strategy proof is exhaustive over the declared state space. Deploying
 this game for real money would require independent RNG and seed-custody review,
 an operator wallet and idempotency audit, jurisdictional review, and whatever
 laboratory process applies — none of which this repository performs or replaces.
+
+The market claims in `docs/DESIGN.md` §1.1 are desk observation of publicly
+described competitor behaviour, not a commissioned competitive audit, and are
+labelled as such there.

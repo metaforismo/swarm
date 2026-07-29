@@ -1,16 +1,164 @@
 {
   "adapterId": "swarm-colony-v1",
-  "adapterVersion": "1.0.0",
+  "adapterVersion": "1.1.0",
+  "bloom": {
+    "largest": "527.355936",
+    "mass": "79606155952091278329467823330689276565669354290180296664321758950761472039052542939792763507512445364706732092265914035601274945916484769910224091067564510822863256013/1768687320083342259279124861501521832164556874636550427652854470690527601287665061472564736711124628799600085800171451104664596264311182682860135173541493713855743408203125",
+    "median": "37.749608",
+    "oneIn": "22217.97",
+    "outcomeCount": 234,
+    "shareBelow100x": "0.842461",
+    "shareBelow20x": "0.173121",
+    "shareBelow50x": "0.616079",
+    "shareBelowSmallestFinal": "0.103614",
+    "smallest": "9.895833",
+    "smallestExact": "475/48",
+    "smallestFinal": "17.578531",
+    "smallestGeneration": 3,
+    "smallestPopulation": 16
+  },
+  "breakEven": [
+    {
+      "aboveStake": 3,
+      "atLeastStake": 3,
+      "colonyOfThree": "1.187500",
+      "generation": 1,
+      "organismValue": "0.395833"
+    },
+    {
+      "aboveStake": 3,
+      "atLeastStake": 3,
+      "colonyOfThree": "1.484375",
+      "generation": 2,
+      "organismValue": "0.494791"
+    },
+    {
+      "aboveStake": 2,
+      "atLeastStake": 2,
+      "colonyOfThree": "1.855468",
+      "generation": 3,
+      "organismValue": "0.618489"
+    },
+    {
+      "aboveStake": 2,
+      "atLeastStake": 2,
+      "colonyOfThree": "2.319335",
+      "generation": 4,
+      "organismValue": "0.773111"
+    },
+    {
+      "aboveStake": 2,
+      "atLeastStake": 2,
+      "colonyOfThree": "2.899169",
+      "generation": 5,
+      "organismValue": "0.966389"
+    },
+    {
+      "aboveStake": 1,
+      "atLeastStake": 1,
+      "colonyOfThree": "3.623962",
+      "generation": 6,
+      "organismValue": "1.207987"
+    },
+    {
+      "aboveStake": 1,
+      "atLeastStake": 1,
+      "colonyOfThree": "4.529953",
+      "generation": 7,
+      "organismValue": "1.509984"
+    },
+    {
+      "aboveStake": 1,
+      "atLeastStake": 1,
+      "colonyOfThree": "5.662441",
+      "generation": 8,
+      "organismValue": "1.887480"
+    },
+    {
+      "aboveStake": 1,
+      "atLeastStake": 1,
+      "colonyOfThree": "7.078051",
+      "generation": 9,
+      "organismValue": "2.359350"
+    },
+    {
+      "aboveStake": 1,
+      "atLeastStake": 1,
+      "colonyOfThree": "8.847564",
+      "generation": 10,
+      "organismValue": "2.949188"
+    },
+    {
+      "aboveStake": 1,
+      "atLeastStake": 1,
+      "colonyOfThree": "11.059455",
+      "generation": 11,
+      "organismValue": "3.686485"
+    },
+    {
+      "aboveStake": 1,
+      "atLeastStake": 1,
+      "colonyOfThree": "13.824319",
+      "generation": 12,
+      "organismValue": "4.608106"
+    },
+    {
+      "aboveStake": 1,
+      "atLeastStake": 1,
+      "colonyOfThree": "17.280399",
+      "generation": 13,
+      "organismValue": "5.760133"
+    },
+    {
+      "aboveStake": 1,
+      "atLeastStake": 1,
+      "colonyOfThree": "21.600499",
+      "generation": 14,
+      "organismValue": "7.200166"
+    },
+    {
+      "aboveStake": 1,
+      "atLeastStake": 1,
+      "colonyOfThree": "27.000623",
+      "generation": 15,
+      "organismValue": "9.000207"
+    },
+    {
+      "aboveStake": 1,
+      "atLeastStake": 1,
+      "colonyOfThree": "33.750779",
+      "generation": 16,
+      "organismValue": "11.250259"
+    },
+    {
+      "aboveStake": 1,
+      "atLeastStake": 1,
+      "colonyOfThree": "42.188474",
+      "generation": 17,
+      "organismValue": "14.062824"
+    },
+    {
+      "aboveStake": 1,
+      "atLeastStake": 1,
+      "colonyOfThree": "52.735593",
+      "generation": 18,
+      "organismValue": "17.578531"
+    }
+  ],
   "config": {
+    "abandonedRoundTimeoutHours": 72,
     "bloomThreshold": 16,
+    "colonyMaxWinMultiple": "906",
     "drawGridSize": 270,
     "drawModulus": "20",
     "ladderBase": "19/48",
     "ladderStep": "5/4",
     "maxGenerations": 18,
     "maxPopulation": 30,
+    "maxSideBetStakeUnits": "100000000",
     "maxStakeUnits": "1000000000",
-    "maxWinMultiple": "906",
+    "maxTicketExposureUnits": "1000000000000",
+    "minSideBetStakeUnits": "100000",
     "minStakeUnits": "100000",
     "offspring": [
       {
@@ -58,6 +206,58 @@
     "targetRtpPercent": "95.0000",
     "unitsPerCredit": "1000000"
   },
+  "feedback": [
+    {
+      "anySplit": "0.488000",
+      "falls": "0.544000",
+      "fallsWithSplit": "0.096000",
+      "fallsWithTwoSplits": "0.000000",
+      "flat": "0.000000",
+      "population": 3,
+      "rises": "0.456000",
+      "splitGivenFalls": "0.176470"
+    },
+    {
+      "anySplit": "0.672320",
+      "falls": "0.394240",
+      "fallsWithSplit": "0.128000",
+      "fallsWithTwoSplits": "0.000000",
+      "flat": "0.230400",
+      "population": 5,
+      "rises": "0.375360",
+      "splitGivenFalls": "0.324675"
+    },
+    {
+      "anySplit": "0.832227",
+      "falls": "0.526909",
+      "fallsWithSplit": "0.365035",
+      "fallsWithTwoSplits": "0.105512",
+      "flat": "0.000000",
+      "population": 8,
+      "rises": "0.473090",
+      "splitGivenFalls": "0.692786"
+    },
+    {
+      "anySplit": "0.931280",
+      "falls": "0.491462",
+      "fallsWithSplit": "0.424068",
+      "fallsWithTwoSplits": "0.241263",
+      "flat": "0.000000",
+      "population": 12,
+      "rises": "0.508537",
+      "splitGivenFalls": "0.862870"
+    },
+    {
+      "anySplit": "0.964815",
+      "falls": "0.437692",
+      "fallsWithSplit": "0.403126",
+      "fallsWithTwoSplits": "0.283031",
+      "flat": "0.136100",
+      "population": 15,
+      "rises": "0.426207",
+      "splitGivenFalls": "0.921027"
+    }
+  ],
   "generationOne": [
     {
       "multiplier": "0/1",
@@ -237,14 +437,23 @@
       "organismValue": "14495849609375/824633720832"
     }
   ],
+  "nearMiss": {
+    "band": "12-15",
+    "decimal": "0.0008174288",
+    "oneIn": "1223.34",
+    "probability": "1445776049989761335858968124465690272954334280819080943606554039551767138328676023292520471805202032312557021814926546992077753734387433949208658927314329123973279322112/1768687320083342259279124861501521832164556874636550427652854470690527601287665061472564736711124628799600085800171451104664596264311182682860135173541493713855743408203125"
+  },
   "policies": [
     {
       "hitRate": "0.9360000000",
       "id": "BANK_FIRST",
       "label": "Bank at generation 1",
+      "profitRate": "0.4560000000",
+      "profitRateExact": "57/125",
       "rtp": "19/20",
       "rtpDecimal": "0.9500000000",
       "standardDeviation": "0.513058",
+      "subStakeProbability": "0.4800000000",
       "variance": "2527/9600",
       "zeroProbability": "0.0640000000"
     },
@@ -252,9 +461,12 @@
       "hitRate": "0.0224631637",
       "id": "RUN",
       "label": "Never harvest, ride to the end",
+      "profitRate": "0.0224631637",
+      "profitRateExact": "198651564359016844813018201749222461683490101406451825266132134037105274405657458146009065184490006442640812234824055494742452554299482821022236341003326540931120983023873/8843436600416711296395624307507609160822784373182752138264272353452638006438325307362823683555623143998000429000857255523322981321555913414300675867707468569278717041015625",
       "rtp": "19/20",
       "rtpDecimal": "0.9500000000",
       "standardDeviation": "7.569291",
+      "subStakeProbability": "0.0000000000",
       "variance": "30829919343879075191152830095494989932341902559993948267494279517800568839285000673912129794784689821218137686610829305224280181692125606394870909671981253361/538098610300729755234712159983327794411620585680582056354714221013679775751370470970869064331054687500000000000000000000000000000000000000000000000000000000",
       "zeroProbability": "0.9775368362"
     },
@@ -262,9 +474,12 @@
       "hitRate": "0.8080000219",
       "id": "HALF_EVERY",
       "label": "Harvest half every generation",
+      "profitRate": "0.3075713875",
+      "profitRateExact": "733307331983289/2384185791015625",
       "rtp": "19/20",
       "rtpDecimal": "0.9500000000",
       "standardDeviation": "1.453021",
+      "subStakeProbability": "0.5004286344",
       "variance": "13691982161605332223592367774033475067/6485183463413514240000000000000000000",
       "zeroProbability": "0.1919999780"
     },
@@ -272,9 +487,12 @@
       "hitRate": "0.3430951770",
       "id": "STOP_AT_2X",
       "label": "Bank everything at 2.00x or better",
+      "profitRate": "0.3430951770",
+      "profitRateExact": "32720105846889/95367431640625",
       "rtp": "19/20",
       "rtpDecimal": "0.9500000000",
       "standardDeviation": "1.350584",
+      "subStakeProbability": "0.0000000000",
       "variance": "76507399673411/41943040000000",
       "zeroProbability": "0.6569048229"
     },
@@ -282,9 +500,12 @@
       "hitRate": "0.0729125643",
       "id": "STOP_AT_10X",
       "label": "Bank everything at 10.00x or better",
+      "profitRate": "0.0729125643",
+      "profitRateExact": "3769491227763814651749460574642106322271926581875892460457/51698788284564229679463043254372678347863256931304931640625",
       "rtp": "19/20",
       "rtpDecimal": "0.9500000000",
       "standardDeviation": "3.453276",
+      "subStakeProbability": "0.0000000000",
       "variance": "2329124322413241871948750767415374116362368825807402967333/195312500000000000000000000000000000000000000000000000000",
       "zeroProbability": "0.9270874356"
     },
@@ -292,9 +513,12 @@
       "hitRate": "0.3402336255",
       "id": "HALF_AT_2X",
       "label": "Harvest half whenever value is 2.00x or better",
+      "profitRate": "0.2861157144",
+      "profitRateExact": "266466023782563371809/931322574615478515625",
       "rtp": "19/20",
       "rtpDecimal": "0.9500000000",
       "standardDeviation": "2.350899",
+      "subStakeProbability": "0.0541179111",
       "variance": "278169466020088670402959136403604982558494617875311911609049/50331648000000000000000000000000000000000000000000000000000",
       "zeroProbability": "0.6597663744"
     },
@@ -302,9 +526,12 @@
       "hitRate": "0.4165582060",
       "id": "BANK_AT_GEN_5",
       "label": "Bank everything at generation 5",
+      "profitRate": "0.2710879003",
+      "profitRateExact": "120387211466602451116801924437004629/444089209850062616169452667236328125",
       "rtp": "19/20",
       "rtpDecimal": "0.9500000000",
       "standardDeviation": "1.469801",
+      "subStakeProbability": "0.1454703056",
       "variance": "158226367330003875713667787/73242187500000000000000000",
       "zeroProbability": "0.5834417939"
     },
@@ -312,9 +539,12 @@
       "hitRate": "0.8902420631",
       "id": "PANIC",
       "label": "Bank whenever the colony shrank below 3, else run",
+      "profitRate": "0.1712991168",
+      "profitRateExact": "1514872879455482656888094705007565620025427530531624276714051464666632242259502189086640905182384093243969739576480775194464009799436008802535606502243294699897063365836373/8843436600416711296395624307507609160822784373182752138264272353452638006438325307362823683555623143998000429000857255523322981321555913414300675867707468569278717041015625",
       "rtp": "19/20",
       "rtpDecimal": "0.9500000000",
       "standardDeviation": "2.711665",
+      "subStakeProbability": "0.7189429463",
       "variance": "460621535991440399975288138955510664058416417341721444626194178220204379527862371495975462685879985941499661056997473527326645040651049620159977141/62642922892785835456418823448862856534731176877462078858482909972509343148135867781339802817797135503496974706649780273437500000000000000000000000",
       "zeroProbability": "0.1097579368"
     }
@@ -377,16 +607,75 @@
       "threshold": 16
     }
   ],
+  "risk": {
+    "basis": "per bet line, on that line's own stake",
+    "lines": [
+      {
+        "basis": "colony stake",
+        "binds": false,
+        "capMultiple": "906",
+        "headroom": "0.223505",
+        "line": "COLONY",
+        "maximumCredit": "373466920422265/412316860416",
+        "maximumCreditDecimal": "905.776494"
+      },
+      {
+        "basis": "FIRST_LIGHT stake",
+        "binds": false,
+        "capMultiple": "5",
+        "headroom": "0.250000",
+        "line": "FIRST_LIGHT",
+        "maximumCredit": "19/4",
+        "maximumCreditDecimal": "4.750000"
+      },
+      {
+        "basis": "DARK_VENT stake",
+        "binds": false,
+        "capMultiple": "3",
+        "headroom": "0.310553",
+        "line": "DARK_VENT",
+        "maximumCredit": "1811981201171875/673737556332704",
+        "maximumCreditDecimal": "2.689446"
+      },
+      {
+        "basis": "SWARM stake",
+        "binds": false,
+        "capMultiple": "249",
+        "headroom": "0.201494",
+        "line": "SWARM",
+        "maximumCredit": "66561677055428810868877155206271016235812442239134499158460743484765076427578378570615313947200775146484375/267532463219853250374817154043118859134154370359912214248173906874577030863083502730553499271485333297764",
+        "maximumCreditDecimal": "248.798505"
+      }
+    ],
+    "ticket": {
+      "admissionLimitCredits": "1000000",
+      "admissionLimitUnits": "1000000000000",
+      "binds": false,
+      "note": "Worst-case liability of one ticket at the declared stake bounds: the sum of every line at its own ceiling. An open-time admission check, never a settlement-time truncation.",
+      "worstCaseExposureCredits": "931700",
+      "worstCaseExposureUnits": "931700000000"
+    }
+  },
   "roundMaximum": {
     "capBinds": false,
     "decimal": "905.776494",
     "declaredMaxWinMultiple": "906",
     "multiplier": "373466920422265/412316860416",
-    "note": "Largest total one round can credit across every draw grid and every harvest policy."
+    "note": "Largest total the COLONY line can credit across every draw grid and every harvest policy."
   },
-  "schema": "swarm/paytable-v1",
+  "roundingBound": {
+    "maximumCreditEvents": 18,
+    "maximumLossCredits": "0.00001800",
+    "maximumLossUnits": "18",
+    "note": "Floor rounding costs at most one minor unit per credit event; a round has at most 18 of them. The relative bound is stated at the minimum stake, which is where it is largest.",
+    "relativeAtMaximumStake": "1.80000e-08",
+    "relativeAtMinimumStake": "1.80000e-04",
+    "relativeAtMinimumStakePercentagePoints": "0.018000"
+  },
+  "schema": "swarm/paytable-v2",
   "sideBets": [
     {
+      "capMultiple": "5",
       "description": "The wild line holds 4 or more organisms after generation 1.",
       "id": "FIRST_LIGHT",
       "label": "FIRST LIGHT",
@@ -398,6 +687,7 @@
       "rtp": "19/20"
     },
     {
+      "capMultiple": "3",
       "description": "The wild line is extinct at or before generation 3.",
       "id": "DARK_VENT",
       "label": "DARK VENT",
@@ -409,6 +699,7 @@
       "rtp": "19/20"
     },
     {
+      "capMultiple": "249",
       "description": "The wild line reaches 10 or more organisms during the round.",
       "id": "SWARM",
       "label": "SWARM",
@@ -2480,5 +2771,92 @@
     "rtp": "19/20",
     "rtpPercent": "95.000000",
     "terminalCount": 267
+  },
+  "underwater": {
+    "aboveStake": "57/125",
+    "afterGenerationOne": "68/125",
+    "afterGenerationOneDecimal": "0.5440000000",
+    "aliveBelowStake": "12/25",
+    "extinct": "8/125"
+  },
+  "varianceBounds": {
+    "maximum": {
+      "harvestStates": 13,
+      "harvests": [
+        {
+          "generation": 13,
+          "harvest": 1,
+          "population": 15
+        },
+        {
+          "generation": 12,
+          "harvest": 1,
+          "population": 15
+        },
+        {
+          "generation": 11,
+          "harvest": 1,
+          "population": 15
+        },
+        {
+          "generation": 10,
+          "harvest": 1,
+          "population": 15
+        },
+        {
+          "generation": 9,
+          "harvest": 1,
+          "population": 15
+        },
+        {
+          "generation": 8,
+          "harvest": 1,
+          "population": 15
+        },
+        {
+          "generation": 7,
+          "harvest": 1,
+          "population": 15
+        },
+        {
+          "generation": 6,
+          "harvest": 1,
+          "population": 15
+        },
+        {
+          "generation": 5,
+          "harvest": 1,
+          "population": 15
+        },
+        {
+          "generation": 4,
+          "harvest": 1,
+          "population": 15
+        },
+        {
+          "generation": 3,
+          "harvest": 1,
+          "population": 15
+        },
+        {
+          "generation": 2,
+          "harvest": 1,
+          "population": 15
+        },
+        {
+          "generation": 1,
+          "harvest": 1,
+          "population": 15
+        }
+      ],
+      "standardDeviation": "7.569363",
+      "variance": "631408669847654704209050523377715965415236310749856330479020125401012939574813571035241589025824382569803893238233799959866486967604841582706196091173/11020259538958945387206905036458553229549989594738320514144547246360161807388067245483398437500000000000000000000000000000000000000000000000000000000"
+    },
+    "minimum": {
+      "harvestStates": 255,
+      "standardDeviation": "0.513058",
+      "variance": "2527/9600"
+    },
+    "note": "Exact extremes over every adapted decision policy, by backward induction. The expected continuation value is policy-independent, so the accumulated bank cancels out of the comparison between actions and the (t, n) recursion is the true extremum, not a sample over chosen policies."
   }
 }
