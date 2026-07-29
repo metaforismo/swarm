@@ -25,7 +25,7 @@ enumeration rather than asserted.
 | Stage | **Specification — build-ready.** Docs, exact paytable, proofs, fixtures and tests. No game client in this repository yet. |
 | Money | Free-play prototype only. No real-money integration exists. |
 | Engine | Consumes a Reveal Engine lifecycle module, `staged-survival`, specified in [docs/ENGINE.md](docs/ENGINE.md) and **not yet implemented** in Reveal Engine 0.2. |
-| Evidence | `npm test` and `npm run enumerate` locally. Hosted CI (`.github/workflows/ci.yml`) is configured but has never run: this repository has no remote. |
+| Evidence | `npm test` and `npm run enumerate` locally. Hosted CI (`.github/workflows/ci.yml`) is configured but has never run: nothing has been pushed to the remote. |
 | Certification | None. Not an RNG certificate, not a fairness certificate, not a laboratory or regulatory approval. See [docs/MATH.md §14](docs/MATH.md). |
 
 ```sh
