@@ -78,7 +78,7 @@ answer for rather than hide ([docs/DESIGN.md §9.2](docs/DESIGN.md)).
 | Max win, COLONY line | **905.77x** its own stake; declared cap `906x`, proven never to bind |
 | Biggest single settlement | `527.35x` |
 | Cap basis | One per bet line, on that line's own stake. No cap sums lines, so no line is ever short-paid |
-| FULL BLOOM | 1 in 22,218 rounds; pays 9.90x to 527.36x, median 37.74x |
+| FULL BLOOM | 1 in 22,218 rounds; pays 9.89x to 527.35x, median 37.74x |
 | Colony reaches 4+ organisms | 1 in 2.87 rounds |
 | Volatility | Player-selected. Proven interval over *every* policy: standard deviation `0.513058` to `7.569363` |
 | How often you profit | `P(return > stake)`: 45.60% banking at once, 30.75% harvesting half every generation, 2.24% never banking |

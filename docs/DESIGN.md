@@ -358,7 +358,7 @@ Pillar 1 is only true if it is specified, so here it is specified.
 
   ```
   E(V) = E_min + (E_max - E_min) * log2(1 + V / V0) / log2(1 + V_max / V0)
-  V0 = 1.00x   V_max = 527.36x   E_min = 0.04   E_max = 1.00
+  V0 = 1.00x   V_max = 527.35x   E_min = 0.04   E_max = 1.00
   ```
 
   `E` is normalized screen luminance of the colony's contribution. The curve is
@@ -556,7 +556,7 @@ error to treat the two as the same thing. What blooms actually pay:
 | Frequency | 1 in 22217.97 |
 <!-- /generated:bloom -->
 
-The smallest bloom pays 9.90x. 61.60% of blooms pay under 50x. 10.36% of them
+The smallest bloom pays 9.89x. 61.60% of blooms pay under 50x. 10.36% of them
 pay less than the smallest payout a surviving generation-18 colony can produce
 (17.58x) — which, under the old rule, got the game's maximum celebration while a
 larger win got none.
@@ -564,16 +564,20 @@ larger win got none.
 **So the ceremony tiers on the round's total credited multiple, whatever produced
 it:**
 
-| Tier | Round total | Treatment |
+| Tier | Round total `X` | Treatment |
 | --- | --- | --- |
-| T0 | `< 2x` | Value settles in place, balance chip counts up. 600 ms. No swell, no card |
-| T1 | `2x – 10x` | 800 ms count-up, single soft swell, share card available but not offered |
-| T2 | `10x – 50x` | 250 ms of silence, frame lifts one exposure stop, 1,000 ms count-up, share card offered |
-| T3 | `≥ 50x` | The full treatment: 250 ms silence, frame to full illumination, 1,200 ms count-up, freeze-frame share card. 2,400 ms |
+| T0 | `X < 2` | Value settles in place, balance chip counts up. 600 ms. No swell, no card |
+| T1 | `2 ≤ X < 10` | 800 ms count-up, single soft swell, share card available but not offered |
+| T2 | `10 ≤ X < 50` | 250 ms of silence, frame lifts one exposure stop, 1,000 ms count-up, share card offered |
+| T3 | `X ≥ 50` | The full treatment: 250 ms silence, frame to full illumination, 1,200 ms count-up, freeze-frame share card. 2,400 ms |
 
-A generation-18 colony of three organisms pays 52.74x and gets T3. A
-generation-3 bloom pays 9.90x and gets T1. The loudest moment in the game is now
-the biggest win in the game, which was the intention all along.
+`X` is the **whole round's credited multiple**, harvests included, because that
+is what the player actually took home: a round that harvested 8x on the way and
+settles for 3x is an 11x round and gets T2. A round that runs to generation 18
+with three organisms and never harvests totals 52.74x and gets T3. A round that
+blooms at generation 3 with no prior harvest totals 9.89x and gets T1. The
+loudest moment in the game is now the biggest win in the game, which was the
+intention all along.
 
 ### 7.2 FULL BLOOM still looks different, because it is different
 
@@ -581,15 +585,18 @@ The bloom *visual* is unique and stays unique, independent of tier: sixteen or
 more bodies light the water well enough that the environment becomes visible for
 the first time in the round — silt, rock, drifting plankton, all of it, revealed
 by the colony's own light. That is a real physical consequence of §6.3, not a
-bespoke effect, and it happens whether the bloom pays 9.90x or 527.36x. What
+bespoke effect, and it happens whether the bloom pays 9.89x or 527.35x. What
 scales with the money is the ceremony around it: the silence, the count-up
 length, and whether a share card is pushed.
 
-**Why it is clippable.** Three seconds, no context needed, and the payoff is
-visual rather than numeric: the screen literally fills with light. It reads on a
-muted phone in a feed. A bloom at generation 10 pays at least 47.18x and at
-generation 18 at least 281.25x, so the biggest clips and the biggest wins do
-coincide at the top of the range — they simply are not the same event.
+**Why it is clippable.** The illumination itself is about a second, needs no
+context, and the payoff is visual rather than numeric: the screen literally fills
+with light. It reads on a muted phone in a feed. The ceremony that follows is
+600 to 2,400 ms depending on the tier, so a big bloom is a three-second clip and
+a small one is a short one — which is correct, because they are not the same
+win. A bloom at generation 10 pays at least 47.18x and at generation 18 at least
+281.25x, so at the top of the range the biggest clips and the biggest wins do
+coincide; they simply are not the same event.
 
 **The near miss.** Reaching 12 to 15 organisms and never blooming happens once in
 1,223 rounds. It needs no special handling — the frame is already almost fully
