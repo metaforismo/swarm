@@ -619,6 +619,17 @@ button {
   grid-template-columns: 1fr;
 }
 
+/* Below the 390 pt reference frame the tertiary sub-label wraps onto three lines
+   and drags the bar's height with it. The type tightens; the copy does not
+   change, because §9.2 requires the ladder constant to say "per organism". */
+@media (max-width: 360px) {
+  .act small {
+    font-size: 9.5px;
+    letter-spacing: 0;
+    line-height: 12px;
+  }
+}
+
 /* ---------------------------------------------------------------- footer */
 
 .footer {
@@ -854,11 +865,270 @@ button {
   color: var(--lumen);
 }
 
-.legend-inline {
-  margin-top: 8px !important;
+/*
+ * The S0 demos (§5, S0).
+ *
+ * Each panel shows what it says, on the same gradients the stage uses, at the
+ * real 900 ms beat. They are illustrations of the rules and not a free round:
+ * nothing here is a resolved outcome of a committed grid, and the demo colony's
+ * value falls, because the honest thing to show first is that it can.
+ */
+.demo {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--crust) 30%, transparent);
+}
+
+.demo .cell {
+  position: relative;
+  display: block;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 38% 32%,
+    var(--lumen-high) 0%,
+    var(--lumen) 42%,
+    color-mix(in srgb, var(--lumen-deep) 70%, transparent) 100%
+  );
+  box-shadow:
+    0 0 18px color-mix(in srgb, var(--lumen) 45%, transparent),
+    0 0 5px color-mix(in srgb, var(--lumen-high) 55%, transparent);
+}
+
+.outcomes {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.outcomes .outcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+}
+
+.outcomes .cap {
+  font-family: var(--numerals);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  letter-spacing: 0.07em;
   color: var(--mist);
-  letter-spacing: 0.09em;
-  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* The three outcomes, on one 900 ms cycle so they read as one generation. */
+.outcomes .die {
+  animation: demo-die 2600ms cubic-bezier(0.4, 0, 1, 1) infinite;
+}
+
+.outcomes .hold {
+  animation: demo-hold 2600ms cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Wide enough to contain both children at full separation, so the group stays
+   centred in its column and nothing hangs outside its own box. */
+.outcomes .split {
+  background: none;
+  box-shadow: none;
+  width: 40px;
+}
+
+.outcomes .split i {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 38% 32%,
+    var(--lumen-high) 0%,
+    var(--lumen) 42%,
+    color-mix(in srgb, var(--lumen-deep) 70%, transparent) 100%
+  );
+  box-shadow: 0 0 14px color-mix(in srgb, var(--lumen) 40%, transparent);
+  animation: demo-split-left 2600ms cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+}
+
+.outcomes .split i:last-child {
+  animation-name: demo-split-right;
+}
+
+@keyframes demo-die {
+  0%,
+  22% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  38%,
+  100% {
+    opacity: 0.06;
+    transform: translateY(9px) scale(0.55);
+  }
+}
+
+@keyframes demo-hold {
+  0%,
+  22% {
+    filter: brightness(1);
+  }
+  30% {
+    filter: brightness(1.15);
+  }
+  40%,
+  100% {
+    filter: brightness(1);
+  }
+}
+
+@keyframes demo-split-left {
+  0%,
+  22% {
+    transform: translateX(4px) scaleX(1);
+  }
+  30% {
+    transform: translateX(4px) scaleX(1.2) scaleY(0.86);
+  }
+  46%,
+  100% {
+    transform: translateX(-4px) scale(0.84);
+  }
+}
+
+@keyframes demo-split-right {
+  0%,
+  22% {
+    transform: translateX(4px) scaleX(1);
+  }
+  30% {
+    transform: translateX(4px) scaleX(1.2) scaleY(0.86);
+  }
+  46%,
+  100% {
+    transform: translateX(12px) scale(0.84);
+  }
+}
+
+/* Panel 2: a colony of three losing one, with the value falling and the stake
+   line held — the unintuitive part of the game, shown rather than asserted. */
+.falling {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.falling .mini-colony {
+  display: flex;
+  gap: 7px;
+}
+
+.falling .cell {
+  width: 22px;
+  height: 22px;
+}
+
+.falling .fades {
+  animation: demo-die 2600ms cubic-bezier(0.4, 0, 1, 1) infinite;
+}
+
+.falling .mini-readout {
+  flex: 1;
+  min-width: 0;
+}
+
+.falling .mini-values {
+  position: relative;
+  display: block;
+  height: 22px;
+}
+
+.falling .mini-value {
+  position: absolute;
+  inset: 0 auto auto 0;
+  font-family: var(--numerals);
+  font-variant-numeric: tabular-nums;
+  font-size: 19px;
+  line-height: 22px;
+  color: var(--foam);
+}
+
+.falling .mini-value.from {
+  animation: demo-value-out 2600ms steps(1, end) infinite;
+}
+
+.falling .mini-value.to {
+  color: var(--mist);
+  animation: demo-value-in 2600ms steps(1, end) infinite;
+}
+
+/* The 1.00x stake reference: static, never an animated target (§9.2). */
+.falling .mini-stake {
+  display: block;
+  margin-top: 3px;
+  font-family: var(--numerals);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  color: var(--mist);
+}
+
+@keyframes demo-value-out {
+  0%,
+  35% {
+    opacity: 1;
+  }
+  36%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes demo-value-in {
+  0%,
+  35% {
+    opacity: 0;
+  }
+  36%,
+  100% {
+    opacity: 1;
+  }
+}
+
+/* Panel 3: the action bar's hierarchy, which never changes (§9.2). */
+.bar-demo {
+  display: grid;
+  grid-template-columns: 1.15fr 1.3fr 0.85fr;
+  gap: 6px;
+}
+
+.mini-act {
+  display: grid;
+  place-items: center;
+  min-height: 34px;
+  border-radius: 10px;
+  font-family: var(--numerals);
+  font-size: 10.5px;
+  letter-spacing: 0.07em;
+}
+
+.mini-act.primary {
+  background: linear-gradient(180deg, var(--lumen-high), var(--lumen) 50%, var(--lumen-deep));
+  color: #032019;
+  font-weight: 700;
+}
+
+.mini-act.secondary {
+  border: 1px solid color-mix(in srgb, var(--lumen) 65%, transparent);
+  color: var(--lumen);
+}
+
+.mini-act.tertiary {
+  border: 1px solid color-mix(in srgb, var(--crust) 85%, transparent);
+  color: var(--mist);
 }
 
 /* A limit the player set has reached its bound. AMBER and a border, never a red
@@ -1378,5 +1648,51 @@ table.data td.num {
     animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 1ms !important;
+  }
+
+  /*
+   * The S0 demos need a *state*, not a stopped animation.
+   *
+   * These keyframes do not use `forwards`, so cutting their duration to 1 ms
+   * returns every element to its base style — which would stack the two values on
+   * top of each other and put the two split children in the same place. What a
+   * reduced-motion reader gets instead is the resolved frame of each rule, drawn
+   * side by side: still three distinguishable outcomes, still both figures, no
+   * motion at all.
+   */
+  .outcomes .die {
+    opacity: 0.3;
+    transform: translateY(6px) scale(0.7);
+  }
+
+  .outcomes .split i {
+    transform: translateX(-2px) scale(0.86);
+  }
+
+  .outcomes .split i:last-child {
+    transform: translateX(10px) scale(0.86);
+  }
+
+  .falling .fades {
+    opacity: 0.3;
+    transform: scale(0.7);
+  }
+
+  .falling .mini-values {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    height: auto;
+  }
+
+  .falling .mini-value {
+    position: static;
+    opacity: 1;
+  }
+
+  .falling .mini-value.from::after {
+    content: '→';
+    margin-left: 10px;
+    color: var(--mist);
   }
 }

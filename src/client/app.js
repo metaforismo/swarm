@@ -1325,6 +1325,12 @@ async function boot() {
   dom.legend.textContent = state.config.rules.offspring
     .map((band) => `${band.id} ${band.percent}%`)
     .join(' · ');
+  // The explainer's own legend comes from the same served paytable as the stage's,
+  // so the first screen a player sees cannot disagree with the model either (§5, S0).
+  for (const band of state.config.rules.offspring) {
+    const cap = document.querySelector(`#s0-outcomes .cap[data-outcome="${band.id}"]`);
+    if (cap !== null) cap.textContent = `${band.id} ${band.percent}%`;
+  }
   // The persistent free-play marker, from the server rather than hard-coded here.
   dom.freeplayText.textContent =
     state.config.protection?.freePlayNotice ?? 'FREE-PLAY DEMO CREDITS · NO CASH VALUE';

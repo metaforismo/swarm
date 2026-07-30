@@ -101,10 +101,27 @@
             <p class="kicker">A colony that is your money</p>
           </div>
           <div class="spacer"></div>
+          <!--
+            §5 (S0) asks each panel to *show* what it says, at the real beat, with
+            the permanent legend already in place. These three demos are CSS on the
+            same gradients the stage uses — they are illustrations of the rules, not
+            a free round: nothing here is a resolved outcome of a real grid, and no
+            stake has been placed. Under `prefers-reduced-motion` they hold still.
+          -->
           <div class="panel numbered" data-step="1">
             <h2>Every generation</h2>
             <p>Each organism independently <strong>dies</strong>, <strong>holds</strong> or <strong>splits</strong>.</p>
-            <p class="mono legend-inline">DIE 40% · HOLD 40% · SPLIT 20%</p>
+            <div class="demo outcomes" id="s0-outcomes" aria-hidden="true">
+              <div class="outcome">
+                <span class="cell die"></span><span class="cap" data-outcome="DIE">DIE</span>
+              </div>
+              <div class="outcome">
+                <span class="cell hold"></span><span class="cap" data-outcome="HOLD">HOLD</span>
+              </div>
+              <div class="outcome">
+                <span class="cell split"><i></i><i></i></span><span class="cap" data-outcome="SPLIT">SPLIT</span>
+              </div>
+            </div>
           </div>
           <div class="panel numbered" data-step="2">
             <h2>Your colony is money</h2>
@@ -112,6 +129,26 @@
               It is worth its size times a yield that climbs 25% a generation.
               <strong>It can go down.</strong>
             </p>
+            <!--
+              The two figures are the real ladder: three organisms at generation 1
+              are worth 1.187500x and two at generation 2 are worth 0.989583x, so
+              a generation that lost one organism *and* gained a yield step still
+              went down and still crossed under the stake. That is the thing §9.2
+              is written around, and the first screen states it rather than
+              letting a player discover it with a stake on the table.
+            -->
+            <div class="demo falling" aria-hidden="true">
+              <div class="mini-colony">
+                <span class="cell"></span><span class="cell"></span><span class="cell fades"></span>
+              </div>
+              <div class="mini-readout">
+                <span class="mini-values">
+                  <span class="mini-value from">1.18x</span>
+                  <span class="mini-value to">0.98x</span>
+                </span>
+                <span class="mini-stake">STAKE 1.00x</span>
+              </div>
+            </div>
           </div>
           <div class="panel numbered" data-step="3">
             <h2>Bank whenever you like</h2>
@@ -119,6 +156,11 @@
               Or harvest part and let the rest run. Every way of playing returns the same
               <strong>95%</strong> on average, before rounding.
             </p>
+            <div class="demo bar-demo" aria-hidden="true">
+              <span class="mini-act primary">BANK</span>
+              <span class="mini-act secondary">HARVEST</span>
+              <span class="mini-act tertiary">NEXT</span>
+            </div>
           </div>
           <div class="spacer"></div>
           <button class="cta" id="s0-done" type="button">START</button>
