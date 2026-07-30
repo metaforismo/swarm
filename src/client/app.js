@@ -156,6 +156,8 @@ const state = {
   displayedValue: null,
   /** Credited-this-round minor units, which is what the vessel holds. */
   bankedUnits: 0n,
+  /** What the balance chip currently reads, in minor units. */
+  chipUnits: 0n,
   /** Whether the environment reveal has already fired this round (§7.2). */
   revealed: false,
   /** Suppresses the balance chip while the ceremony is counting up into it. */
@@ -294,6 +296,7 @@ function rollUnits(node, fromUnits, toUnits, ms, onDone) {
  */
 function rollCredits(node, fromUnits, toUnits, ms) {
   return rollUnits(node, fromUnits, toUnits, ms, () => {
+    state.chipUnits = BigInt(toUnits);
     state.holdBalance = false;
   });
 }
@@ -310,7 +313,11 @@ function rollCredits(node, fromUnits, toUnits, ms) {
  * resize while it counts.
  */
 function fitHeadline(text, tier) {
-  const base = tier === 'T3' ? 72 : tier === 'T2' ? 66 : 56;
+  // A ladder, not a step: 56 · 62 · 66 · 72 across T0-win, T1, T2, T3. T1 covers
+  // every win from 2x to 10x and used to be drawn at exactly the size of a 1.02x
+  // return, which is most of the wins in the game rendered at the size of the
+  // quietest one.
+  const base = tier === 'T3' ? 72 : tier === 'T2' ? 66 : tier === 'T1' ? 62 : 56;
   const room = 316;
   // The advance of the tabular monospace set, as a fraction of the font size.
   const advance = 0.62;
@@ -414,6 +421,11 @@ async function guard(action) {
     } else {
       toast('The round service is unreachable.');
     }
+    // A command that never landed has to give the decision back. The bar is made
+    // inert on the tap now rather than on the response, so a refusal that left it
+    // inert would strand a live round with no way to play it — and §9.7 is
+    // explicit that a floor may never cost a payout.
+    if (state.frame?.state === 'STAGED') setActionBarInert(false);
     return null;
   } finally {
     state.busy = false;
@@ -422,10 +434,25 @@ async function guard(action) {
 
 // ------------------------------------------------------------------ session
 
+/**
+ * The balance chip, and the only place its text is written.
+ *
+ * What the chip currently *reads* has to be knowable, because the settlement
+ * count-up starts from wherever the chip already is. Writing the element in six
+ * places and inferring its value from the session is how the round-1 build
+ * ended up winding the chip backwards at the ceremony: the harvest had already
+ * put the final balance on screen, and the count-up then reset it to the balance
+ * before the round and counted the same money in a second time.
+ */
+function setBalanceChip(units) {
+  state.chipUnits = BigInt(units);
+  dom.balance.textContent = credits(state.chipUnits);
+}
+
 function renderSession(session) {
   if (session === undefined || session === null) return;
   state.session = session;
-  if (!state.holdBalance) dom.balance.textContent = credits(session.balanceUnits);
+  if (!state.holdBalance) setBalanceChip(session.balanceUnits);
   const net = BigInt(session.netUnits);
   dom.sessionNet.textContent = signedCredits(net);
   dom.sessionNet.dataset.sign = net > 0n ? 'up' : 'flat';
@@ -697,6 +724,11 @@ async function seedColony() {
 
 async function runAdvance() {
   const previous = state.frame;
+  // The deal begins on the tap, so the control stops being a live control on the
+  // tap. Dimming it when the response lands means `NEXT` spends the whole
+  // round-trip at full opacity with `pointer-events: auto` — an affordance that
+  // dims *after* it goes dead.
+  setActionBarInert(true);
   const response = await api.advance(state.roundId, {
     idempotencyKey: commandKey('advance'),
     expectedFrameRevision: previous.revision,
@@ -706,6 +738,23 @@ async function runAdvance() {
 
 async function runHarvest(units) {
   const previous = state.frame;
+  // The affordance goes before the request, not after it: a control that is
+  // still lit and still tappable while its own command is in flight is a control
+  // that lies for as long as the network takes.
+  setActionBarInert(true);
+  /*
+   * A harvest that takes the whole colony ends the round, and a round that ends
+   * goes straight to the settlement ceremony — whose entire job is to reveal
+   * what the round paid, by counting it up from zero.
+   *
+   * So from this moment the chip is held. Otherwise the credit lands in it here,
+   * about 1.6 s before the ceremony, and the ceremony then winds the chip
+   * *backwards* to count the same money in a second time — which is both a
+   * flicker at the loudest beat in the round and a total given away before its
+   * own reveal begins.
+   */
+  const takesAll = units >= previous.units;
+  if (takesAll) state.holdBalance = true;
   // The share card's picture has to be this round's own frame, and a harvest is
   // the beat that takes the colony away — so it is frozen here, while the colony
   // is still standing, rather than at a settlement that may have nothing left to
@@ -742,11 +791,28 @@ async function runHarvest(units) {
       ? ' Side bets follow the colony that never gets harvested. Harvesting cannot lose you one.'
       : '';
   if (lesson !== '') sessionStorage.setItem(STORAGE_GHOST_TAUGHT, '1');
+  /*
+   * The note says what happened. On a harvest that leaves the colony standing it
+   * also says how much, because that money has genuinely landed in the chip and
+   * nothing is going to announce it again.
+   *
+   * On a bank it does not. The settlement ceremony is 970 ms away and its only
+   * suspense device is a figure counting up from zero — and this note used to
+   * print that exact figure first, in bold, on the stage. There is no version of
+   * a count-up that works when the answer is already on screen above it.
+   */
   stage.setNote(
-    `Banked <strong>${credits(credited)}</strong> from ${units} organism${units === 1 ? '' : 's'}.${lesson}`,
+    takesAll
+      ? `<strong>BANKED.</strong> ${units} organism${units === 1 ? '' : 's'} into the vessel.${lesson}`
+      : `Banked <strong>${credits(credited)}</strong> from ${units} organism${units === 1 ? '' : 's'}.${lesson}`,
   );
-  await afterBeat();
-  if (state.frame.state !== 'STAGED') await terminalFlow();
+  // The dead period is a floor on the *decision* cycle (§9.7). A generation that
+  // ended the round has no next decision to protect, so paying it there buys
+  // nothing and costs 350 ms of the player staring at a stage with nothing on it
+  // before the settlement arrives. The round-cycle floor is untouched — `NEW
+  // ROUND` is still gated to 2,500 ms from the seed, in `showCeremony`.
+  if (state.frame.state === 'STAGED') await afterBeat();
+  else await terminalFlow();
 }
 
 /**
@@ -803,8 +869,13 @@ async function applyResolution(previous, response) {
     await stage.verdict(delta);
   }
 
-  await afterBeat();
-  if (state.frame.state !== 'STAGED') await terminalFlow();
+  // The dead period is a floor on the *decision* cycle (§9.7). A generation that
+  // ended the round has no next decision to protect, so paying it there buys
+  // nothing and costs 350 ms of the player staring at a stage with nothing on it
+  // before the settlement arrives. The round-cycle floor is untouched — `NEW
+  // ROUND` is still gated to 2,500 ms from the seed, in `showCeremony`.
+  if (state.frame.state === 'STAGED') await afterBeat();
+  else await terminalFlow();
 }
 
 /**
@@ -861,7 +932,7 @@ async function terminalFlow() {
     });
   } catch (error) {
     state.holdBalance = false;
-    if (state.session !== null) dom.balance.textContent = credits(state.session.balanceUnits);
+    if (state.session !== null) setBalanceChip(state.session.balanceUnits);
     throw error;
   }
   applyView(response);
@@ -1115,14 +1186,36 @@ function renderActionBar() {
   const frame = state.frame;
   const live = frame.state === 'STAGED';
   const decision = live && frame.decisionOpen && frame.stage >= 1;
-  dom.actionbar.classList.toggle('single', live && !decision);
-  dom.bank.hidden = !decision;
-  dom.harvest.hidden = !decision;
+  /*
+   * The bar keeps its three columns for the whole round, including generation 1.
+   *
+   * It used to collapse to a single full-width `NEXT` while no decision was open
+   * and expand again once one was, and that is a **273 px jump of the primary
+   * decision control, once every round** — a measured layout shift of CLS 0.01991,
+   * all of it attributed to `#next`, which is 20% of the 'good' budget spent on
+   * one element moving two-thirds of the way across the screen. It happens while
+   * the bar is inert, so it can never cost a mis-tap; it is still the one control
+   * a player is watching changing size and place under their thumb.
+   *
+   * So `BANK` and `HARVEST` hold their cells and are *drawn unavailable* — the
+   * same state, and the same 6.9:1 legible treatment, that `HARVEST` already uses
+   * at one organism. That reads better than the collapse did, too: the rule is
+   * now written on the controls the rule is about, rather than in a sub-label
+   * under a different button.
+   *
+   * Nothing about the money changes. Both handlers already refuse on
+   * `decisionOpen !== true` and did so before this, so a tap here has never been
+   * able to move a credit; what it did not do was *say so*, and now it does.
+   */
+  dom.bank.hidden = !live;
+  dom.harvest.hidden = !live;
   dom.next.hidden = !live;
 
   if (!live) return;
 
   if (decision) {
+    dom.bank.removeAttribute('aria-disabled');
+    dom.bank.firstChild.textContent = 'BANK';
     dom.bankSub.textContent = credits(creditForK(frame.units));
     const half = Math.floor(frame.units / 2);
     if (frame.units === 1) {
@@ -1141,9 +1234,15 @@ function renderActionBar() {
     dom.nextSub.textContent =
       frame.nextUnitValue === null ? '' : `${multiple(frame.nextUnitValue)} per organism`;
   } else {
+    const mandatory = frame.stage === 0;
+    dom.bank.setAttribute('aria-disabled', 'true');
+    dom.harvest.setAttribute('aria-disabled', 'true');
+    dom.bank.firstChild.textContent = 'BANK';
+    dom.harvest.firstChild.textContent = 'HARVEST';
+    dom.bankSub.textContent = mandatory ? 'after generation 1' : 'this generation is committed';
+    dom.harvestSub.textContent = mandatory ? 'after generation 1' : 'this generation is committed';
     dom.next.firstChild.textContent = 'NEXT';
-    dom.nextSub.textContent =
-      frame.stage === 0 ? 'generation 1 is mandatory' : 'this generation is committed';
+    dom.nextSub.textContent = mandatory ? 'generation 1 is mandatory' : 'this generation is committed';
   }
 }
 
@@ -1169,11 +1268,11 @@ function renderTrace(populations, down) {
     bar.className = 'trace-bar';
     if (population === 0) bar.classList.add('gone');
     bar.style.height = `${Math.max(6, Math.round((population / peak) * 100))}%`;
-    // The bars grow in, left to right, once the card has settled — the round
-    // replayed in a third of a second. The delay is stacked on top of the
-    // container's own reveal, because a bar that finishes growing while its
-    // container is still transparent is a bar nobody sees grow.
-    bar.style.animationDelay = `calc(var(--reveal-delay, 230ms) + ${140 + index * 26}ms)`;
+    // The bars grow in, left to right, *under* the counting figure — the round
+    // replayed at about the speed the total is counting. The stagger is stacked
+    // on top of the container's own reveal, because a bar that finishes growing
+    // while its container is still transparent is a bar nobody sees grow.
+    bar.style.animationDelay = `${300 + index * 34}ms`;
     dom.trace.append(bar);
   });
   dom.trace.dataset.tone = down ? 'spent' : 'won';
@@ -1242,14 +1341,30 @@ function showCeremony() {
               : 'T3';
 
   dom.settlement.dataset.tier = tier;
-  dom.settlementTerminal.textContent =
-    settlement.proof.terminal === 'RECONCILED'
-      ? 'Closed by the 72-hour rule'
-      : `Terminal · ${settlement.proof.terminal}`;
   // Below the stake, the signed net *is* the headline: §7.1 requires it to be at
   // least as prominent as the credited amount, and a player must never have to do
   // subtraction to find out they lost.
   const down = tier === 'T-nil' || tier === 'T0-loss';
+  /*
+   * The eyebrow above the figure.
+   *
+   * On a win it is the round's own word for what happened — BANKED, FULL BLOOM,
+   * GENERATION 18 — because the loudest piece of language on a 54x screen should
+   * not be the word "TERMINAL" in grey. On a round that returned less than it
+   * cost it stays the plain protocol reading: the terminal state is a fact about
+   * the round, and a losing round does not get a headline.
+   */
+  const TERMINAL_WORD = {
+    BANKED: 'BANKED',
+    THRESHOLD: 'FULL BLOOM',
+    FINAL: 'GENERATION 18',
+    RECONCILED: 'CLOSED BY THE 72-HOUR RULE',
+  };
+  dom.settlementTerminal.textContent = down
+    ? settlement.proof.terminal === 'RECONCILED'
+      ? 'Closed by the 72-hour rule'
+      : `Terminal · ${settlement.proof.terminal}`
+    : (TERMINAL_WORD[settlement.proof.terminal] ?? settlement.proof.terminal);
   // Two readings, not one string: at a 1,000 stake `RETURNED 527355.94 · NET
   // +526355.94` is far wider than the card, and a single run of text breaks
   // wherever it runs out of room — which put `NET` at the end of one line and its
@@ -1319,7 +1434,7 @@ function showCeremony() {
     // The value settles in place. The chip is simply the truth, at once.
     state.holdBalance = false;
     dom.settlementHeadline.textContent = finalHeadline;
-    dom.balance.textContent = credits(balance);
+    setBalanceChip(balance);
   } else {
     // The chip goes back to the moment the ticket was paid for, and the round's
     // whole return flows into it. The reset is simultaneous with the vessel
@@ -1327,7 +1442,20 @@ function showCeremony() {
     // and has not reached the balance yet — not a chip that glitched downward.
     state.holdBalance = true;
     dom.settlementHeadline.textContent = credits(0n);
-    const from = credited > balance ? 0n : balance - credited;
+    /*
+     * Where the chip counts from, and it is never backwards.
+     *
+     * `balance − credited` is the balance at the moment the ticket was paid for.
+     * That is the right place to count from for a round whose money all arrives
+     * at the bank — but a round that took a mid-round HARVEST has already put
+     * that credit in the chip, on purpose, because no ceremony was coming for it.
+     * Counting from `balance − credited` would drag the chip back down over money
+     * the player already watched arrive. So the count starts from whichever is
+     * higher and still lands on the truth.
+     */
+    const paidFor = credited > balance ? 0n : balance - credited;
+    const from = state.chipUnits > paidFor && state.chipUnits <= balance ? state.chipUnits : paidFor;
+    state.chipUnits = from;
     dom.balance.textContent = credits(from);
     beat(silence, () => {
       // The round's take goes home: the vessel drains and anything still alive
@@ -1346,10 +1474,19 @@ function showCeremony() {
     });
   }
 
-  // §7.1: T2 lifts the frame one exposure stop and T3 takes it to full
-  // illumination. The colony has usually just been banked away, so there is no
-  // colony light left to lift — the ceremony supplies its own.
-  if (tier === 'T2' || tier === 'T3') beat(silence, () => void stage.celebrate(tier));
+  /*
+   * The swell (§7.1). Three tiers have one and they are three different sizes:
+   * T1 gets "a single soft swell", T2 lifts the frame one exposure stop, T3 goes
+   * to full illumination. The colony has usually just been banked away, so there
+   * is no colony light left to lift — the ceremony supplies its own.
+   *
+   * T1 covers every win from 2x to 10x, which is most of the wins a player will
+   * ever see, and the round-1 build gave it nothing at all: the same dark frame
+   * as an extinction with an amber figure in the middle of it. A tier the table
+   * says has a swell has to have one.
+   */
+  if (tier === 'T1' || tier === 'T2' || tier === 'T3')
+    beat(silence, () => void stage.celebrate(tier));
 
   // The settlement hold, and the round-cycle floor: a loss cannot be skipped into
   // the next stake, and a whole round cannot be chained faster than 2.5 s (§9.7).
@@ -1380,7 +1517,7 @@ async function newRound() {
   // writing into the balance chip behind the new stake screen.
   stopCeremony();
   state.holdBalance = false;
-  dom.balance.textContent = credits(state.session?.balanceUnits ?? 0);
+  setBalanceChip(state.session?.balanceUnits ?? 0);
   dom.balanceButton.classList.remove('credited');
   sound.setPopulation(0);
   stage.reset();
@@ -1511,7 +1648,31 @@ function wireStake() {
 }
 
 function wireActions() {
+  /**
+   * Why a control that cannot act still answers.
+   *
+   * `BANK` and `HARVEST` hold their places through generation 1, drawn
+   * unavailable, so the decision bar never changes shape mid-round. A control
+   * that is visible, legible and reachable has to reply to a tap — silence from
+   * something that looks like a button is the player wondering whether the tap
+   * registered, and at generation 1 that is the difference between "I may not do
+   * this yet" and "this app dropped my input".
+   *
+   * It only ever prints a sentence. Both commands remain gated on
+   * `decisionOpen === true` below, which is the same gate they have always had.
+   */
+  const refuse = () => {
+    if (state.frame?.state !== 'STAGED' || state.frame.decisionOpen === true) return false;
+    toast(
+      state.frame.stage === 0
+        ? 'Generation 1 resolves without a decision.'
+        : 'This generation is already committed.',
+    );
+    return true;
+  };
+
   dom.bank.addEventListener('click', () => {
+    if (refuse()) return;
     if (!state.acceptsInput || state.frame?.decisionOpen !== true) return;
     void guard(() => runHarvest(state.frame.units));
   });
@@ -1542,6 +1703,7 @@ function wireActions() {
       held = false;
       return;
     }
+    if (refuse()) return;
     const frame = state.frame;
     if (!state.acceptsInput || frame?.decisionOpen !== true) return;
     if (frame.units === 1) {

@@ -166,14 +166,19 @@ const ease = {
  * `shadowBlur` and never a per-frame `filter`.
  */
 function glowSprite(colour, falloff = 2.6) {
-  const size = 128;
+  // 256 px and 64 stops, not 128 and 16. A halo is blitted at up to 3.5× its own
+  // bake size, and a canvas gradient is *linear between stops*: sixteen stops
+  // magnified three-fold puts a visible kink every 24 px across a near-black
+  // frame, which is how a soft bloom acquires concentric rings. Sixty-four stops
+  // put the kinks below the noise floor of the grain that sits over them.
+  const size = 256;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d');
   const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  for (let stop = 0; stop <= 16; stop += 1) {
-    const t = stop / 16;
+  for (let stop = 0; stop <= 64; stop += 1) {
+    const t = stop / 64;
     gradient.addColorStop(t, rgba(colour, Math.pow(1 - t, falloff)));
   }
   ctx.fillStyle = gradient;
@@ -181,67 +186,266 @@ function glowSprite(colour, falloff = 2.6) {
   return canvas;
 }
 
-/** The three silhouettes of §6.2, as lobes on a unit body radius. */
+/**
+ * The bell sprite's box, and the bell's own box inside it.
+ *
+ * §6.2 fixes the *bell* at `2 * r(n)` — 24 to 68 pt across — and an organism that
+ * trails tentacles has to hang them somewhere. So the sprite is baked a quarter
+ * larger than the bell's own box and blitted across `2.5 * radius`: the bell
+ * lands on exactly the specified diameter and the tentacles use the margin,
+ * rather than the round-1 compromise of a body shrunk to make room for its own
+ * anatomy.
+ *
+ * The margin is a quarter and not a half because every pixel of it is blitted
+ * fifteen times a frame with `lighter`: at 1.5x the blit covers 2.25 times the
+ * area of the bell's own box, and most of that area is transparent. A skirt is
+ * worth a quarter; it is not worth half the colony's fill rate.
+ */
+const BELL_SPRITE = 320;
+const BELL_INNER = 256;
+/** What a body's radius has to be multiplied by to blit the whole sprite. */
+const BELL_BLIT = BELL_SPRITE / BELL_INNER;
+
+/**
+ * The three silhouettes of §6.2, with the anatomy each one carries.
+ *
+ * `lobes` is the gel; the rest is the interior. Round 1 had only the lobes, which
+ * is why the hero object of a game called SWARM measured, at 3x zoom, as a plain
+ * radial gradient: a colony of blurred dots. An organism needs organs.
+ */
 const ARCHETYPES = [
-  // DOME — wide, shallow.
-  [{ x: 0, y: 0.06, rx: 1, ry: 0.82 }],
-  // BELL — tall, pinched.
-  [{ x: 0, y: -0.04, rx: 0.8, ry: 1 }],
-  // LOBE — asymmetric, two-lobed. The minor lobe stays small: at 12 pt across it
-  // has to read as a bulge in one organism, never as a second organism.
-  [
-    { x: -0.08, y: 0, rx: 0.9, ry: 0.92 },
-    { x: 0.5, y: 0.14, rx: 0.34, ry: 0.3 },
-  ],
+  // DOME — wide, shallow. Fine canals, a broad short veil.
+  {
+    lobes: [{ x: 0, y: 0.06, rx: 1, ry: 0.8, gain: 1 }],
+    canals: 6,
+    tentacles: 26,
+    tentacleLength: 0.78,
+    tentacleSpread: 2.7,
+    lappets: 13,
+    grain: 54,
+  },
+  // BELL — tall, pinched. Fewer canals and a long trailing veil.
+  {
+    lobes: [{ x: 0, y: -0.04, rx: 0.82, ry: 1, gain: 1 }],
+    canals: 5,
+    tentacles: 22,
+    tentacleLength: 1.15,
+    tentacleSpread: 2.1,
+    lappets: 11,
+    grain: 44,
+  },
+  /*
+   * LOBE — asymmetric, two-lobed.
+   *
+   * The minor lobe has to read as a *bulge in one organism* and never as a second
+   * organism, and at `x: 0.5` with a full-brightness gel it did exactly the wrong
+   * thing: its own falloff reached zero outside the main body's, so it came out
+   * of the blit as a separate bright ellipse stuck to the side — an ear. It is
+   * pulled inside the main lobe's own radius and drawn at two-fifths the gain, so
+   * what the eye gets is one body whose silhouette swells on one side.
+   */
+  {
+    lobes: [
+      { x: -0.06, y: 0, rx: 0.94, ry: 0.9, gain: 1 },
+      { x: 0.36, y: 0.12, rx: 0.42, ry: 0.36, gain: 0.4 },
+    ],
+    canals: 6,
+    tentacles: 24,
+    tentacleLength: 0.95,
+    tentacleSpread: 2.4,
+    lappets: 12,
+    grain: 50,
+  },
 ];
 
 /**
- * A gel bell (§6.2): a translucent body that *transmits* its core outward with a
- * soft falloff, a brighter nucleus at ~25% of body radius, and a thin Fresnel
- * membrane in LUMEN HIGH.
+ * How many baked interiors each archetype gets.
+ *
+ * Three sprites for a colony of up to thirty is three sprites: at sixteen
+ * organisms the frame carries five copies of each, in the same orientation band,
+ * and the eye reads a *stamp* rather than a species. Nine interiors — the same
+ * three silhouettes, each seeded three ways — is the cheapest thing that makes
+ * every organism on screen an individual, and the variant is chosen from the slot
+ * index and from nothing else, exactly like the archetype (§6.2).
+ */
+const BELL_VARIANTS = 3;
+
+/**
+ * A gel bell (§6.2), with the anatomy the round-1 build did not have.
+ *
+ * The body *transmits* its core outward with a soft falloff and carries a
+ * brighter nucleus at ~25% of body radius and a thin Fresnel membrane in LUMEN
+ * HIGH — and inside that, the things that make it an organism rather than a
+ * blur: radial gastric canals running from the manubrium to the bell margin, a
+ * scalloped margin of lappets, fine interior granulation, and a skirt of
+ * tentacles trailing behind it.
  *
  * Everything is drawn **additively and with no hard silhouette edge** — each lobe
  * is a radial falloff that reaches zero alpha exactly at its own boundary. That
  * is what separates a bioluminescent organism from a coloured disc: the body has
  * no outline, it has a brightness that runs out. §6.2's "never a flat sprite;
  * never outlined" is the rule, and an opaque fill with a crisp rim breaks both.
+ * The canals and the lappets obey it too — every one of them is a gradient that
+ * fades out before it reaches an edge.
  *
  * Three archetypes, because fifteen identical bells read as a texture and three
- * read as a colony. Baked at 256 px and blitted at 24–68 pt: a *cached* body, not
- * a flat one — the internal falloff and the membrane are real, they are simply
- * computed once.
- *
- * The 2–3 px background refraction §6.2 asks for is not attempted: sampling the
- * backdrop per body per frame is exactly the work §6.4's budget rules out, and on
- * an additive emitter over near-black water there is almost nothing behind the
- * body to warp. The membrane carries the lens read instead.
+ * read as a colony. Baked once at 384 px and blitted at 24–68 pt: a *cached*
+ * body, not a flat one — the falloff, the canals and the membrane are real, they
+ * are simply computed once. The interior is seeded from the archetype index and
+ * from nothing else, which is §6.2's hard rule.
  */
-function bellSprite(archetype, core, high, deep) {
-  const size = 256;
+function bellSprite(archetype, variant, core, high, deep, edge = C.plankton) {
+  const size = BELL_SPRITE;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d');
   const cx = size / 2;
   const cy = size / 2;
-  const R = size / 2 - 14;
-  const lobes = ARCHETYPES[archetype];
-  const nucleus = { x: cx - R * 0.17, y: cy - R * 0.21 };
+  /** The bell's own radius, so its diameter blits to exactly `2 * r(n)`. */
+  const R = BELL_INNER / 2 - 4;
+  const shape = ARCHETYPES[archetype];
+  const lobes = shape.lobes;
+  const main = lobes[0];
+  // The variant moves the manubrium as well as re-seeding the interior: a nucleus
+  // in the same corner of every bell is the tell that gives a stamp away even
+  // when everything around it differs.
+  const salt = 200 + archetype * 17 + variant * 53;
+  const nucleus = {
+    x: cx - R * (0.09 + slotRandom(variant, salt + 40) * 0.14),
+    y: cy - R * (0.11 + slotRandom(variant, salt + 41) * 0.16),
+  };
 
   ctx.globalCompositeOperation = 'lighter';
 
-  // The gel: one falloff per lobe, drawn in a scaled space so an ellipse is a
-  // circle and the alpha reaches zero on every axis at the same time.
+  /*
+   * The tentacles, first, so the bell sits in front of its own skirt.
+   *
+   * They leave the trailing margin and hang away with a bow, **tapering to
+   * nothing** — width and brightness both run out along the filament, which is
+   * the difference between a skirt and a set of drawn legs. The first pass at
+   * this stroked each one at a constant width with a bead halfway down, and the
+   * result read as whiskers on a comet: too few, too straight, too even.
+   *
+   * Drawn into its own layer in `source-over` and composited once. Additive
+   * segments overlapping at their own joins would bead the filament at every
+   * sample, and a filament of beads is the round-1 defect wearing a new coat.
+   */
+  const skirt = document.createElement('canvas');
+  skirt.width = size;
+  skirt.height = size;
+  const sk = skirt.getContext('2d');
+  sk.lineCap = 'round';
+  const mix = (a, b, t) => [
+    a[0] + (b[0] - a[0]) * t,
+    a[1] + (b[1] - a[1]) * t,
+    a[2] + (b[2] - a[2]) * t,
+  ];
+  for (let index = 0; index < shape.tentacles; index += 1) {
+    const spread = shape.tentacleSpread;
+    const t = shape.tentacles === 1 ? 0.5 : index / (shape.tentacles - 1);
+    /*
+     * Roots fan across the trailing margin — and they leave it at *different
+     * depths*, which is the detail that decides whether this reads as a veil or
+     * as a comb. Thirteen filaments on one arc at even spacing and one length is
+     * a comb no matter how well each individual one is drawn, and that is exactly
+     * what the previous pass measured as at 3x zoom: a row of identical teeth
+     * under every bell, repeated across the whole colony.
+     */
+    const angle = Math.PI / 2 + (t - 0.5) * spread + (slotRandom(index, salt) - 0.5) * 0.42;
+    const depth = 0.62 + slotRandom(index, salt + 20) * 0.34;
+    const root = {
+      x: cx + Math.cos(angle) * R * main.rx * depth,
+      y: cy + Math.sin(angle) * R * main.ry * depth,
+    };
+    /*
+     * A few primaries and a lot of veil. Every filament the same weight is the
+     * other half of the comb read; a medusa has three or four long trailing
+     * tentacles and a haze of short fine ones, and the ratio is what the eye
+     * actually recognises.
+     */
+    const primary = slotRandom(index, salt + 21) > 0.78;
+    const length =
+      R * shape.tentacleLength * (primary ? 1.6 + slotRandom(index, salt + 1) * 1.2 : 0.3 + slotRandom(index, salt + 1) * 1);
+    // A cubic, so each filament has an S in it and no two curve the same way. The
+    // bow scales with the length: a long tentacle trails, a short one barely does.
+    const bend = (slotRandom(index, salt + 2) - 0.5) * 2.4;
+    const outward = Math.cos(angle) * length * 0.5;
+    const sway = (length / R) * R * 0.3;
+    const p0 = root;
+    const p1 = { x: root.x + outward * 0.3 + bend * sway * 0.8, y: root.y + length * 0.32 };
+    const p2 = { x: root.x + outward * 0.8 - bend * sway, y: root.y + length * 0.72 };
+    const p3 = { x: root.x + outward + bend * sway * 0.5, y: root.y + length };
+    const width = R * (primary ? 0.03 + slotRandom(index, salt + 4) * 0.018 : 0.013 + slotRandom(index, salt + 4) * 0.014);
+    const peak = primary ? 0.44 : 0.2 + slotRandom(index, salt + 22) * 0.12;
+    const at = (u) => {
+      const v = 1 - u;
+      return {
+        x: v * v * v * p0.x + 3 * v * v * u * p1.x + 3 * v * u * u * p2.x + u * u * u * p3.x,
+        y: v * v * v * p0.y + 3 * v * v * u * p1.y + 3 * v * u * u * p2.y + u * u * u * p3.y,
+      };
+    };
+    const steps = 18;
+    let from = at(0);
+    for (let step = 1; step <= steps; step += 1) {
+      const u = step / steps;
+      const to = at(u);
+      /*
+       * Both taper, and the colour walks continuously from the core hue to the
+       * deep one. The previous pass switched hue at `u = 0.55`, which put a
+       * visible joint in the middle of every filament — a tentacle with a knee.
+       *
+       * The alpha profile is `fade³` rather than `fade²`: a filament that is
+       * still at a third of its brightness three-quarters of the way down ends
+       * somewhere, and an end is a tip, and a tip is a tooth.
+       */
+      const fade = 1 - (step - 0.5) / steps;
+      sk.strokeStyle = rgba(mix(core, deep, u), peak * fade * fade * fade);
+      sk.lineWidth = Math.max(0.5, width * (0.18 + 0.82 * fade));
+      sk.beginPath();
+      sk.moveTo(from.x, from.y);
+      sk.lineTo(to.x, to.y);
+      sk.stroke();
+      from = to;
+    }
+  }
+  ctx.save();
+  // Blurred: at the 24 pt end of the range the whole veil is 36 device px tall,
+  // and anything with a legible edge in it at that size is a spike. Five pixels
+  // at bake resolution is about one device pixel at the small end of the range
+  // and three at the large one, which is where a filament stops being a line.
+  ctx.filter = 'blur(5px)';
+  ctx.drawImage(skirt, 0, 0);
+  ctx.filter = 'none';
+  ctx.restore();
+
+  /*
+   * The gel: one falloff per lobe, drawn in a scaled space so an ellipse is a
+   * circle and the alpha reaches zero on every axis at the same time. The body
+   * runs LUMEN → LUMEN DEEP → PLANKTON outward, so the organism is chromatic
+   * rather than one hue at two alphas.
+   *
+   * The falloff is **monotone in premultiplied luminance**, not merely in alpha,
+   * and that distinction is the whole of §6.2's "never outlined". A ramp whose
+   * alpha only ever descends still draws a hard ring if the *hue* brightens on
+   * the way out: LUMEN DEEP at 18.5% is darker on screen than LUMEN HIGH at
+   * 15.5%, so a membrane written as a stop in this ramp put a local maximum at
+   * `t = 0.88` and every organism in the colony acquired a contact-lens edge.
+   * Alpha falls and the hue cools together, all the way out, with no radius the
+   * eye can find.
+   */
   for (const lobe of lobes) {
     ctx.save();
     ctx.translate(cx + lobe.x * R, cy + lobe.y * R);
     ctx.scale(lobe.rx, lobe.ry);
+    const gain = lobe.gain ?? 1;
     const gel = ctx.createRadialGradient(0, 0, 0, 0, 0, R);
-    gel.addColorStop(0, rgba(core, 0.6));
-    gel.addColorStop(0.32, rgba(core, 0.46));
-    gel.addColorStop(0.62, rgba(core, 0.28));
-    gel.addColorStop(0.86, rgba(deep, 0.11));
-    gel.addColorStop(1, rgba(deep, 0));
+    gel.addColorStop(0, rgba(core, 0.52 * gain));
+    gel.addColorStop(0.3, rgba(core, 0.45 * gain));
+    gel.addColorStop(0.58, rgba(core, 0.33 * gain));
+    gel.addColorStop(0.78, rgba(deep, 0.21 * gain));
+    gel.addColorStop(0.91, rgba(edge, 0.1 * gain));
+    gel.addColorStop(1, rgba(edge, 0));
     ctx.fillStyle = gel;
     ctx.beginPath();
     ctx.arc(0, 0, R, 0, Math.PI * 2);
@@ -249,35 +453,237 @@ function bellSprite(archetype, core, high, deep) {
     ctx.restore();
   }
 
-  // The nucleus, at ~25% of body radius: the hottest 10% of the body.
-  const core1 = ctx.createRadialGradient(nucleus.x, nucleus.y, 0, nucleus.x, nucleus.y, R * 0.42);
-  core1.addColorStop(0, rgba(high, 0.95));
-  core1.addColorStop(0.28, rgba(high, 0.5));
-  core1.addColorStop(0.62, rgba(core, 0.17));
+  /*
+   * The interior, in **one blurred layer**.
+   *
+   * The canals, the granulation, the bell margin and the oral arms all want the
+   * same treatment — soft at bake resolution, because the sprite is minified up
+   * to 6:1 and a feature that is merely soft at 320 px comes out of a 24 pt blit
+   * crisp. Drawing them as four separately-filtered passes cost four full-sprite
+   * blurs per sprite, and at nine interiors in two tints that is seventy-two
+   * blurs of a 320² surface on the main thread at construction: a measured 772 ms
+   * of frozen UI before the first frame, which on a mid-range phone is seconds.
+   *
+   * They are one layer, blurred once. Eighteen blurs instead of seventy-two, the
+   * same picture, and the anatomy is composited additively over the gel exactly
+   * as before.
+   */
+  const organs = document.createElement('canvas');
+  organs.width = size;
+  organs.height = size;
+  const og = organs.getContext('2d');
+
+  /*
+   * Four short oral arms hanging off the manubrium: the frilled cross a medusa
+   * has under its bell, and the thing that reads as an *interior* rather than as
+   * a bright spot painted on a dome.
+   *
+   * Drawn in `source-over` and before everything else in the layer: four additive
+   * strokes meeting at one point put a bright wedge in the middle of the bell,
+   * and at 3x zoom that wedge read as a shard of glass.
+   */
+  og.lineCap = 'round';
+  og.strokeStyle = rgba(high, 0.15);
+  /*
+   * Five, at uneven angles, not four at ninety degrees. Four arms on a cross
+   * blurred into a bright manubrium do not read as arms — they read as a *square*,
+   * because the eye completes them, and a square is the one silhouette a medusa
+   * must not have. At five with the spacing broken the same feature reads as a
+   * frill.
+   */
+  for (let index = 0; index < 5; index += 1) {
+    const angle =
+      (index / 5) * Math.PI * 2 +
+      slotRandom(archetype, 149) * Math.PI +
+      variant +
+      (slotRandom(index, salt + 19) - 0.5) * 0.7;
+    const reach = R * (0.2 + slotRandom(index, salt + 17) * 0.12);
+    const swirl = (slotRandom(index, salt + 18) - 0.5) * 0.9;
+    og.lineWidth = R * 0.045;
+    og.beginPath();
+    og.moveTo(nucleus.x, nucleus.y);
+    og.quadraticCurveTo(
+      nucleus.x + Math.cos(angle + swirl) * reach * 0.6,
+      nucleus.y + Math.sin(angle + swirl) * reach * 0.6,
+      nucleus.x + Math.cos(angle) * reach,
+      nucleus.y + Math.sin(angle) * reach,
+    );
+    og.stroke();
+  }
+  og.globalCompositeOperation = 'lighter';
+
+  /*
+   * The gastric canals: tapered spokes from the manubrium to the margin.
+   *
+   * They are the single feature that turns the blur into an organism, because
+   * they give the interior a *direction*. Drawn in the bell's own scaled space so
+   * they follow the archetype's ellipse, and faded to nothing at both ends so
+   * neither the nucleus nor the margin gets an edge.
+   */
+  og.save();
+  og.translate(cx + main.x * R, cy + main.y * R);
+  og.scale(main.rx, main.ry);
+  og.lineCap = 'round';
+  for (let index = 0; index < shape.canals; index += 1) {
+    // Uneven spacing, and each canal *curves*. Straight spokes at even angles are
+    // a starburst — a UI sparkle, not an anatomy — and that is exactly what a
+    // first pass at this drew.
+    const angle =
+      (index / shape.canals) * Math.PI * 2 +
+      slotRandom(archetype, 137) * Math.PI +
+      (slotRandom(index, salt + 10) - 0.5) * 0.5;
+    const inner = R * (0.24 + slotRandom(index, salt + 11) * 0.08);
+    const outer = R * (0.78 + slotRandom(index, salt + 5) * 0.12);
+    const curl = (slotRandom(index, salt + 12) - 0.5) * 0.55;
+    const from = { x: Math.cos(angle) * inner, y: Math.sin(angle) * inner };
+    const to = { x: Math.cos(angle + curl) * outer, y: Math.sin(angle + curl) * outer };
+    const canal = og.createLinearGradient(from.x, from.y, to.x, to.y);
+    canal.addColorStop(0, rgba(high, 0));
+    canal.addColorStop(0.3, rgba(high, 0.24));
+    canal.addColorStop(0.7, rgba(core, 0.17));
+    canal.addColorStop(1, rgba(core, 0));
+    og.strokeStyle = canal;
+    og.lineWidth = R * (0.07 + slotRandom(index, salt + 13) * 0.03);
+    const mid = {
+      x: Math.cos(angle + curl * 0.35) * (inner + outer) * 0.5,
+      y: Math.sin(angle + curl * 0.35) * (inner + outer) * 0.5,
+    };
+    og.beginPath();
+    og.moveTo(from.x, from.y);
+    og.quadraticCurveTo(mid.x, mid.y, to.x, to.y);
+    og.stroke();
+  }
+  og.restore();
+
+  /*
+   * Interior granulation: the fine scatter inside the gel that stops the body
+   * being smooth. Seeded from the archetype and the variant, and from nothing
+   * else — the per-body variation is which variant a slot wears and how it is
+   * tilted, and both of those are derived from the slot index (§6.2).
+   *
+   * Dim, wide and overlapping, and it has to stay that way. Forty small
+   * high-contrast points inside a bell is not a texture, it is a rash: at 3x zoom
+   * the organism read as a cell with measles and the specks could be counted. A
+   * texture that can be counted is a pattern. So the specks are twice the size
+   * they were, at a third of the contrast, drawn under a blur that puts them
+   * below the threshold at which the eye resolves individuals.
+   */
+  for (let index = 0; index < shape.grain; index += 1) {
+    const angle = slotRandom(index, salt + 6) * Math.PI * 2;
+    const rho = Math.sqrt(slotRandom(index, salt + 7)) * R * 0.84;
+    const gx = cx + main.x * R + Math.cos(angle) * rho * main.rx;
+    const gy = cy + main.y * R + Math.sin(angle) * rho * main.ry;
+    const gr = R * (0.06 + slotRandom(index, salt + 8) * 0.09);
+    const speck = og.createRadialGradient(gx, gy, 0, gx, gy, gr);
+    speck.addColorStop(0, rgba(high, 0.018 + slotRandom(index, salt + 9) * 0.026));
+    speck.addColorStop(1, rgba(core, 0));
+    og.fillStyle = speck;
+    og.fillRect(gx - gr, gy - gr, gr * 2, gr * 2);
+  }
+
+  /*
+   * The bell margin: the scalloped edge where the bell ends.
+   *
+   * Not a stroke, and no longer a ring of small beads — twenty-six hard little
+   * dots on a perfect circle minified to 24 pt read as a *necklace*, which is
+   * both an outline (§6.2 forbids one) and jewellery (an organism has none). It
+   * is a dozen wide, soft, overlapping swells sitting half in and half out of the
+   * bell's own edge: the silhouette comes out lobed rather than drawn, and there
+   * is no frequency in it that a 6:1 minification can turn into dots.
+   */
+  for (let index = 0; index < shape.lappets; index += 1) {
+    const angle = (index / shape.lappets) * Math.PI * 2 + (slotRandom(index, salt + 14) - 0.5) * 0.22;
+    const reach = 0.9 + (slotRandom(index, salt + 15) - 0.5) * 0.09;
+    const lx = cx + main.x * R + Math.cos(angle) * R * main.rx * reach;
+    const ly = cy + main.y * R + Math.sin(angle) * R * main.ry * reach;
+    const lr = R * (0.15 + slotRandom(index, salt + 16) * 0.07);
+    const lappet = og.createRadialGradient(lx, ly, 0, lx, ly, lr);
+    lappet.addColorStop(0, rgba(high, 0.1));
+    lappet.addColorStop(0.45, rgba(core, 0.06));
+    lappet.addColorStop(1, rgba(deep, 0));
+    og.fillStyle = lappet;
+    og.fillRect(lx - lr, ly - lr, lr * 2, lr * 2);
+  }
+
+  // The whole interior, softened once and laid over the gel. Eight pixels at bake
+  // resolution is a tenth of the bell: nothing inside the gel is allowed a
+  // frequency a 6:1 minification can sharpen into an edge.
+  ctx.save();
+  ctx.filter = 'blur(8px)';
+  ctx.drawImage(organs, 0, 0);
+  ctx.filter = 'none';
+  ctx.restore();
+
+  /*
+   * The manubrium: the nucleus, at ~25% of body radius, and it has structure now
+   * — a soft body, a brighter ring around it, and one hot point at the centre.
+   * A single radial gradient is a smudge; three concentric ones are an organ.
+   */
+  const core1 = ctx.createRadialGradient(nucleus.x, nucleus.y, 0, nucleus.x, nucleus.y, R * 0.46);
+  core1.addColorStop(0, rgba(high, 0.4));
+  core1.addColorStop(0.3, rgba(high, 0.24));
+  core1.addColorStop(0.64, rgba(core, 0.11));
   core1.addColorStop(1, rgba(core, 0));
   ctx.fillStyle = core1;
   ctx.fillRect(0, 0, size, size);
 
-  // The Fresnel membrane: soft, thin, brightest away from the nucleus, and never
-  // a crisp outline. Blurred once here rather than per frame, and drawn only on
-  // the body's own silhouette — a second stroke around a LOBE's minor lobe reads
-  // as a second organism, which is the one thing the archetype must not do.
+  /*
+   * The hot point at the centre of the manubrium.
+   *
+   * It is deliberately **not** white. Fifteen bodies overlap by up to 30% at the
+   * top of the population range and every one of them is composited additively —
+   * a FOAM-hot core per body clips the whole colony to a flat white disc, which
+   * is precisely what the first pass did at twelve organisms and above. The core
+   * is LUMEN HIGH with a trace of FOAM, and the colony stays chromatic all the
+   * way to full bloom.
+   */
+  const hotR = R * 0.15;
+  const hot = ctx.createRadialGradient(nucleus.x, nucleus.y, 0, nucleus.x, nucleus.y, hotR);
+  hot.addColorStop(0, rgba(C.foam, 0.34));
+  hot.addColorStop(0.35, rgba(high, 0.3));
+  hot.addColorStop(1, rgba(high, 0));
+  ctx.fillStyle = hot;
+  ctx.fillRect(nucleus.x - hotR, nucleus.y - hotR, hotR * 2, hotR * 2);
+
+  /*
+   * The membrane, as a **crescent** rather than a ring.
+   *
+   * §6.2 asks for a Fresnel rim and forbids an outline in the same breath, and a
+   * ring cannot honour both: a stroke has a peak at one radius and a stop has a
+   * peak at one radius, and either one, magnified to a 68 pt bell, is a contact
+   * lens. What Fresnel actually looks like on a gel is not a ring — it is a
+   * *limb*: the membrane lights where the surface turns away from the eye and
+   * fades to nothing where it faces it.
+   *
+   * So it is a wash whose own centre lies **outside** the bell, clipped by
+   * `source-atop` to the pixels the body has already drawn. Its brightest point
+   * is off the sprite entirely, which means there is no radius anywhere on the
+   * organism where it peaks: the eye gets a bright lower-right limb running out
+   * across the body, and nothing it can trace.
+   */
   ctx.save();
-  ctx.filter = 'blur(5px)';
-  ctx.lineWidth = size * 0.02;
-  const rim = ctx.createLinearGradient(cx - R, cy - R, cx + R, cy + R);
-  rim.addColorStop(0, rgba(high, 0.03));
-  rim.addColorStop(0.62, rgba(high, 0.17));
-  rim.addColorStop(1, rgba(high, 0.07));
-  ctx.strokeStyle = rim;
-  ctx.beginPath();
-  const main = lobes[0];
-  ctx.ellipse(cx + main.x * R, cy + main.y * R, R * main.rx * 0.9, R * main.ry * 0.9, 0, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.filter = 'none';
+  ctx.globalCompositeOperation = 'source-atop';
+  const rimX = cx + R * 0.86;
+  const rimY = cy + R * 0.62;
+  const rim = ctx.createRadialGradient(rimX, rimY, 0, rimX, rimY, R * 1.5);
+  rim.addColorStop(0, rgba(high, 0.3));
+  rim.addColorStop(0.45, rgba(high, 0.12));
+  rim.addColorStop(1, rgba(edge, 0));
+  ctx.fillStyle = rim;
+  ctx.fillRect(0, 0, size, size);
   ctx.restore();
+  ctx.globalCompositeOperation = 'lighter';
 
   return canvas;
+}
+
+/** The nine baked interiors, indexed `archetype * BELL_VARIANTS + variant`. */
+function bellSet(core, high, deep, edge) {
+  const set = [];
+  for (let archetype = 0; archetype < ARCHETYPES.length; archetype += 1)
+    for (let variant = 0; variant < BELL_VARIANTS; variant += 1)
+      set.push(bellSprite(archetype, variant, core, high, deep, edge));
+  return set;
 }
 
 /**
@@ -306,24 +712,188 @@ function ringSprite(colour) {
 }
 
 /**
- * The colony's light in the water: LUMEN at the core, cooling through LUMEN DEEP
- * to PLANKTON at the edge, so the field the colony sits in is two hues rather
- * than the single one the round-1 build had. Baked once and blitted; the whole
- * point is that this is one `drawImage` a frame and not a gradient fill.
+ * A drifting bloom cloud: the abyss's own light, formless and huge.
+ *
+ * Deep water is not empty and it is not black — it is full of things that glow,
+ * and the round-1 build drew none of them. These are the largest of them: soft
+ * masses of distant bioluminescence, four of them, each covering a fifth of the
+ * frame at low alpha. They are what turns 58% of the viewport from a void into
+ * water, and they cost four `drawImage` calls a frame.
+ *
+ * **They are constant.** Their level does not vary with the colony, so they add
+ * the same term to every frame in every round and cannot reorder two frames by
+ * value — §6.3's promise is about the *ordering* of frames by money, and a
+ * constant preserves every ordering there is. They are life rather than rock,
+ * which is why they are not the environment §7.2 keeps unlit: rock has no light
+ * of its own and waits for the colony, plankton does not.
  */
-function waterSprite() {
-  const size = 256;
+function cloudSprite(colour, seed) {
+  const size = 192;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d');
-  const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  gradient.addColorStop(0, rgba(C.lumen, 0.44));
-  gradient.addColorStop(0.34, rgba(C.lumenDeep, 0.25));
-  gradient.addColorStop(0.72, rgba(C.plankton, 0.1));
-  gradient.addColorStop(1, rgba(C.plankton, 0));
-  ctx.fillStyle = gradient;
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.filter = 'blur(18px)';
+  // Six overlapping blobs rather than one circle: a cloud with a circular
+  // silhouette is a spotlight, and the one thing this must not read as is a light.
+  for (let index = 0; index < 6; index += 1) {
+    const angle = slotRandom(index, seed) * Math.PI * 2;
+    const rho = slotRandom(index, seed + 1) * size * 0.22;
+    const x = size / 2 + Math.cos(angle) * rho;
+    const y = size / 2 + Math.sin(angle) * rho;
+    const r = size * (0.16 + slotRandom(index, seed + 2) * 0.16);
+    const blob = ctx.createRadialGradient(x, y, 0, x, y, r);
+    blob.addColorStop(0, rgba(colour, 0.5));
+    blob.addColorStop(0.5, rgba(colour, 0.2));
+    blob.addColorStop(1, rgba(colour, 0));
+    ctx.fillStyle = blob;
+    ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  ctx.filter = 'none';
+  // Feathered to nothing at its own edge, so scaling it up never shows a seam.
+  const mask = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  mask.addColorStop(0, 'rgba(0,0,0,1)');
+  mask.addColorStop(0.62, 'rgba(0,0,0,0.9)');
+  mask.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.fillStyle = mask;
   ctx.fillRect(0, 0, size, size);
+  return canvas;
+}
+
+/**
+ * A siphonophore strand: a long beaded filament of light, drifting in the column.
+ *
+ * The abyss needs *structure* as well as light — something with a shape in it, so
+ * a screenshot has a subject even before the colony is rich. Each strand is baked
+ * once and blitted with a slow sway, which is six `drawImage` calls a frame for
+ * six objects that would otherwise be six stroked paths with six live gradients.
+ *
+ * Constant, for the same reason the clouds are, and life rather than rock.
+ */
+function strandSprite(seed) {
+  const width = 64;
+  const height = 320;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  ctx.globalCompositeOperation = 'lighter';
+  const nodes = [];
+  for (let index = 0; index <= 10; index += 1) {
+    const t = index / 10;
+    nodes.push({
+      x: width / 2 + Math.sin(t * 4.2 + slotRandom(seed, 3) * 6) * width * 0.24,
+      y: t * height,
+    });
+  }
+  ctx.filter = 'blur(2px)';
+  const line = ctx.createLinearGradient(0, 0, 0, height);
+  line.addColorStop(0, rgba(C.plankton, 0));
+  line.addColorStop(0.18, rgba(C.plankton, 0.44));
+  line.addColorStop(0.62, rgba(C.lumenDeep, 0.34));
+  line.addColorStop(1, rgba(C.lumenDeep, 0));
+  ctx.strokeStyle = line;
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(nodes[0].x, nodes[0].y);
+  for (let index = 1; index < nodes.length; index += 1) ctx.lineTo(nodes[index].x, nodes[index].y);
+  ctx.stroke();
+  ctx.filter = 'none';
+  // The beads: the nectophores, and the reason this reads as an animal.
+  for (let index = 1; index < nodes.length - 1; index += 1) {
+    const node = nodes[index];
+    const r = 3.4 + slotRandom(index, seed + 5) * 3.4;
+    const fade = 1 - Math.abs(index / nodes.length - 0.45) * 1.5;
+    const bead = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, r);
+    bead.addColorStop(0, rgba(C.lumenHigh, 0.7 * fade));
+    bead.addColorStop(0.4, rgba(C.plankton, 0.32 * fade));
+    bead.addColorStop(1, rgba(C.plankton, 0));
+    ctx.fillStyle = bead;
+    ctx.fillRect(node.x - r, node.y - r, r * 2, r * 2);
+  }
+  return canvas;
+}
+
+/**
+ * The colony's light in the water: LUMEN at the core, cooling through LUMEN DEEP
+ * to PLANKTON at the edge, so the field the colony sits in is two hues rather
+ * than the single one the round-1 build had. Baked once and blitted; the whole
+ * point is that this is one `drawImage` a frame and not a gradient fill.
+ *
+ * **Why this is written per pixel and not as a `createRadialGradient`.** This is
+ * the single largest thing drawn in the game: at full bloom it is blitted across
+ * 1.06 × the frame diagonal, so a 256 px bake is magnified about seven times. A
+ * canvas gradient interpolates *linearly between its stops*, which puts a
+ * derivative discontinuity at every stop — invisible at 1:1 and, magnified
+ * seven-fold across a near-black frame, a set of hard concentric rings with a
+ * defined outer edge. The round-2 build had four stops and drew, on the screen
+ * the player spends most of the round on, three visible rings and a rim: a lens
+ * artefact sitting over 60% of the stage. Light in water has no rings in it.
+ *
+ * So the falloff is evaluated as a continuous function, the hue ramp with it,
+ * and three things are done that a gradient cannot do at all:
+ *
+ * - the radius is **warped by a low-frequency angular term**, so the field is an
+ *   irregular volume of lit water rather than a disc with a circumference;
+ * - the alpha is **dithered** by ±0.6 of a quantisation step, which is what
+ *   removes the 8-bit contour bands that survive even a perfectly smooth ramp
+ *   when it is stretched across 1,200 px;
+ * - the profile reaches exactly zero with a zero derivative, so there is no
+ *   edge to find.
+ *
+ * One `ImageData` pass over 512², once, at construction. It is never re-baked.
+ */
+function waterSprite() {
+  const size = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const image = ctx.createImageData(size, size);
+  const data = image.data;
+  const half = size / 2;
+  // Three low-frequency lobes on the radius. Small — 6% — because this is the
+  // frame's own volume of light and a field that visibly wobbles reads as a
+  // shape, but enough that no part of the boundary is a circular arc.
+  const warp = [
+    { k: 2, phase: 0.7, amp: 0.05 },
+    { k: 3, phase: 2.3, amp: 0.035 },
+    { k: 5, phase: 4.1, amp: 0.022 },
+  ];
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const dx = (x + 0.5 - half) / half;
+      const dy = (y + 0.5 - half) / half;
+      let t = Math.hypot(dx, dy);
+      if (t >= 1) continue;
+      const angle = Math.atan2(dy, dx);
+      let wobble = 0;
+      for (const w of warp) wobble += w.amp * Math.sin(w.k * angle + w.phase);
+      t = Math.min(1, Math.max(0, t * (1 + wobble)));
+      // `(1 - t²)³` — smooth everywhere, and both the value and the slope are
+      // zero at `t = 1`, so the field ends without an edge.
+      const u = 1 - t * t;
+      const falloff = u * u * u;
+      // The hue ramp is continuous too: LUMEN → LUMEN DEEP over the inner half,
+      // LUMEN DEEP → PLANKTON over the outer half, with no stop to band on.
+      const m = t < 0.5 ? t * 2 : (t - 0.5) * 2;
+      const from = t < 0.5 ? C.lumen : C.lumenDeep;
+      const to = t < 0.5 ? C.lumenDeep : C.plankton;
+      // Smoothstep on the mix, so the two halves meet with matching slope.
+      const s = m * m * (3 - 2 * m);
+      const index = (y * size + x) * 4;
+      data[index] = from[0] + (to[0] - from[0]) * s;
+      data[index + 1] = from[1] + (to[1] - from[1]) * s;
+      data[index + 2] = from[2] + (to[2] - from[2]) * s;
+      // ±0.6 LSB of ordered-ish noise, seeded from the pixel and from nothing
+      // else. Without it a ramp this long still contours at every 1/255 step.
+      const dither = (slotRandom(x * 131 + y, 617) - 0.5) * 1.2;
+      data[index + 3] = Math.max(0, Math.min(255, falloff * 0.62 * 255 + dither));
+    }
+  }
+  ctx.putImageData(image, 0, 0);
   return canvas;
 }
 
@@ -416,16 +986,28 @@ export class Stage {
       // The colony's light in the water: LUMEN at the core cooling to PLANKTON
       // at the edge, so the field is two hues rather than one. Baked once.
       waterBody: waterSprite(),
-      bells: [
-        bellSprite(0, C.lumen, C.lumenHigh, C.lumenDeep),
-        bellSprite(1, C.lumen, C.lumenHigh, C.lumenDeep),
-        bellSprite(2, C.lumen, C.lumenHigh, C.lumenDeep),
+      // The abyss's own light: four drifting bloom clouds and six siphonophore
+      // strands. Constant, so they change no ordering by value (§6.3); life, so
+      // they do not wait for the colony the way §7.2's rock does.
+      clouds: [
+        cloudSprite(C.lumenDeep, 301),
+        cloudSprite(C.plankton, 311),
+        cloudSprite(C.lumenDeep, 317),
+        cloudSprite(C.plankton, 331),
       ],
-      amberBells: [
-        bellSprite(0, C.amber, [255, 224, 168], [196, 132, 56]),
-        bellSprite(1, C.amber, [255, 224, 168], [196, 132, 56]),
-        bellSprite(2, C.amber, [255, 224, 168], [196, 132, 56]),
+      strands: [
+        strandSprite(401),
+        strandSprite(409),
+        strandSprite(419),
+        strandSprite(431),
+        strandSprite(439),
+        strandSprite(443),
       ],
+      // Nine interiors on three silhouettes, indexed `archetype * 3 + variant`.
+      // Nine 320² sprites is 3.7 MB of texture baked once at construction, which
+      // buys thirty organisms that are thirty individuals.
+      bells: bellSet(C.lumen, C.lumenHigh, C.lumenDeep, C.plankton),
+      amberBells: bellSet(C.amber, [255, 224, 168], [196, 132, 56], [255, 176, 96]),
       // One tile: the 12 fps cycle is `background-position` on the compositor
       // now, so the three the canvas pass used to swap between are dead weight.
       grain: [grainTile(11)],
@@ -582,37 +1164,200 @@ export class Stage {
    */
   bakeBackground() {
     const { width, height, dpr } = this;
+    const scale = this.scale;
     const canvas = document.createElement('canvas');
     canvas.width = Math.round(width * dpr);
     canvas.height = Math.round(height * dpr);
     const ctx = canvas.getContext('2d');
     ctx.scale(dpr, dpr);
 
+    /*
+     * The water column, in the palette's own water tones (§6.1).
+     *
+     * Round 1 collapsed the whole column to ABYSS and measured 4% of the stage
+     * above `L = 24` on the screen a player sees before every round — a black
+     * rectangle where the brief asks for a place. ABYSS is the *deepest* tone in
+     * §6.1, not the only one: TRENCH and SILT are in the table too, and SILT sits
+     * at `L = 24.3`, which is exactly where water stops reading as a void. The
+     * column now runs ABYSS at the surface through TRENCH to a SILT-weight floor,
+     * and ABYSS keeps the corners through the vignette.
+     *
+     * Nothing about §6.3 moves: this is a constant, identical in every frame of
+     * every round, so it cannot make a poorer frame outrank a richer one. The
+     * colony's own contribution is still `E(V)` and still the only term that
+     * varies with the money.
+     */
     const water = ctx.createLinearGradient(0, 0, 0, height);
-    water.addColorStop(0, 'rgb(2, 4, 10)');
-    water.addColorStop(0.42, 'rgb(4, 11, 18)');
-    water.addColorStop(0.78, 'rgb(6, 18, 26)');
-    water.addColorStop(1, 'rgb(3, 9, 15)');
+    water.addColorStop(0, 'rgb(2, 6, 12)');
+    water.addColorStop(0.26, 'rgb(4, 13, 21)');
+    water.addColorStop(0.58, 'rgb(6, 20, 29)');
+    water.addColorStop(0.84, 'rgb(8, 25, 34)');
+    water.addColorStop(1, 'rgb(6, 18, 26)');
     ctx.fillStyle = water;
     ctx.fillRect(0, 0, width, height);
 
     // A cold cast toward the trench walls, so the frame has depth before any
     // light exists in it.
     const cast = ctx.createRadialGradient(width / 2, height * 0.36, 0, width / 2, height * 0.36, width * 1.05);
-    cast.addColorStop(0, rgba(C.trench, 0.55));
+    cast.addColorStop(0, rgba(C.basalt, 0.36));
     cast.addColorStop(0.7, 'rgba(2, 8, 14, 0)');
     ctx.fillStyle = cast;
     ctx.fillRect(0, 0, width, height);
 
-    const vignette = ctx.createRadialGradient(width / 2, height * 0.42, width * 0.24, width / 2, height * 0.42, width * 0.95);
-    vignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
-    vignette.addColorStop(1, 'rgba(0, 0, 0, 0.72)');
-    ctx.fillStyle = vignette;
-    ctx.fillRect(0, 0, width, height);
+    ctx.globalCompositeOperation = 'lighter';
+
+    /*
+     * Thermocline banding: three wide, very soft horizontal strata across the
+     * column. Water with no strata in it is fog; the bands are what give the
+     * frame a *depth axis* the eye can read before anything is lit.
+     */
+    for (const band of [
+      { y: 0.2, h: 0.14, a: 0.05 },
+      { y: 0.46, h: 0.17, a: 0.07 },
+      { y: 0.72, h: 0.13, a: 0.055 },
+    ]) {
+      const strat = ctx.createLinearGradient(0, height * (band.y - band.h), 0, height * (band.y + band.h));
+      strat.addColorStop(0, rgba(C.plankton, 0));
+      strat.addColorStop(0.5, rgba(C.lumenDeep, band.a));
+      strat.addColorStop(1, rgba(C.plankton, 0));
+      ctx.fillStyle = strat;
+      ctx.fillRect(0, height * (band.y - band.h), width, height * band.h * 2);
+    }
+
+    /*
+     * The abyss's own light: the bloom clouds and the siphonophore strands, baked
+     * into the plate rather than blitted every frame.
+     *
+     * They were a live layer, and they cost the frame rate the whole product is
+     * built on: three cloud sprites at up to the width of the frame, composited
+     * with `lighter`, is two million blended pixels a frame — and it took the
+     * resolve beat from 60 fps to 30 in the harness. What that bought was a drift
+     * of ±14 px on a sixty-second cycle, which is *invisible* inside a round that
+     * lasts twenty seconds. The motion was never the point; the light was. So the
+     * light stays, at exactly the same positions and sizes, and the per-frame cost
+     * is gone: a constant that never moves belongs in the plate.
+     */
+    for (let index = 0; index < 3; index += 1) {
+      const size = (0.6 + slotRandom(index, 313) * 0.42) * width;
+      const x = (0.14 + slotRandom(index, 303) * 0.72) * width;
+      const y = (0.12 + slotRandom(index, 307) * 0.76) * height;
+      ctx.globalAlpha = 0.2 + slotRandom(index, 337) * 0.16;
+      ctx.drawImage(this.sprites.clouds[index], x - size / 2, y - size / 2, size, size);
+    }
+    for (let index = 0; index < 6; index += 1) {
+      const sprite = this.sprites.strands[index];
+      const tall = (0.26 + slotRandom(index, 353) * 0.3) * height;
+      const wide = (tall / sprite.height) * sprite.width;
+      const x = (0.06 + slotRandom(index, 347) * 0.9) * width;
+      const y = (-0.06 + slotRandom(index, 349) * 0.72) * height;
+      ctx.globalAlpha = 0.3 + slotRandom(index, 373) * 0.3;
+      ctx.drawImage(sprite, x - wide / 2, y, wide, tall);
+    }
+    ctx.globalAlpha = 1;
+
+    /*
+     * The deep field: forty far-off points of bioluminescence, so the water has a
+     * distance in it. They are tiny, they never move, and they are the cheapest
+     * depth cue there is — a bokeh field baked into the plate.
+     */
+    for (let index = 0; index < 40; index += 1) {
+      const x = slotRandom(index, 211) * width;
+      const y = slotRandom(index, 223) * height;
+      const r = (0.9 + slotRandom(index, 227) * 2.2) * scale;
+      const warmth = slotRandom(index, 229);
+      const colour = warmth > 0.86 ? C.amber : warmth > 0.5 ? C.plankton : C.lumenDeep;
+      const dot = ctx.createRadialGradient(x, y, 0, x, y, r * 4);
+      dot.addColorStop(0, rgba(colour, 0.5));
+      dot.addColorStop(0.3, rgba(colour, 0.18));
+      dot.addColorStop(1, rgba(colour, 0));
+      ctx.fillStyle = dot;
+      ctx.fillRect(x - r * 4, y - r * 4, r * 8, r * 8);
+    }
+
+    /*
+     * The bed: a tube-worm colony along the floor, glowing at the tips.
+     *
+     * This is the layer that answers "the lower third of the frame has nothing in
+     * it". It is *life*, not rock — it makes its own light and therefore does not
+     * wait for the colony the way §7.2's silt, chimney and far rock do, and it is
+     * constant, so it changes no ordering. What it changes is that the floor of
+     * the abyss is a floor.
+     */
+    ctx.lineCap = 'round';
+    for (let index = 0; index < 44; index += 1) {
+      // Clustered, not scattered: tube worms grow in stands. Each stand gets a
+      // root and its members lean away from it, which is what keeps the bed from
+      // reading as a row of evenly spaced toothpicks.
+      const stand = Math.floor(index / 5);
+      const inStand = index % 5;
+      const root = (0.06 + slotRandom(stand, 269) * 0.9) * width;
+      const x = root + (inStand - 2) * (7 + slotRandom(index, 233) * 12) * scale;
+      const lean = ((inStand - 2) * 0.4 + (slotRandom(index, 239) - 0.5) * 1.2) * 26 * scale;
+      const tall = (20 + slotRandom(index, 241) * 78) * scale;
+      const base = height - slotRandom(index, 251) * 30 * scale;
+      const top = base - tall;
+      /*
+       * Depth, and a hue that is not one hue.
+       *
+       * Every stand at one brightness in one green is a hedge, and a hedge at the
+       * bottom of the frame competes with the colony for the eye. Half of them sit
+       * back into the water — dimmer, cooler, PLANKTON rather than LUMEN — so the
+       * bed has a near row and a far one and the eye reads past it.
+       */
+      const depth = 0.4 + slotRandom(stand, 281) * 0.6;
+      const cool = slotRandom(index, 283) > 0.62;
+      const tipHue = cool ? C.plankton : C.lumen;
+      const stalk = ctx.createLinearGradient(x, base, x + lean, top);
+      stalk.addColorStop(0, rgba(C.basalt, 0.34 * depth));
+      stalk.addColorStop(0.5, rgba(C.lumenDeep, 0.1 * depth));
+      stalk.addColorStop(0.86, rgba(tipHue, 0.15 * depth));
+      stalk.addColorStop(1, rgba(tipHue, 0.04 * depth));
+      ctx.strokeStyle = stalk;
+      ctx.lineWidth = (1 + slotRandom(index, 257) * 2.4) * scale;
+      ctx.beginPath();
+      ctx.moveTo(x, base);
+      ctx.bezierCurveTo(
+        x + lean * 0.1,
+        base - tall * 0.4,
+        x + lean * 0.9,
+        base - tall * 0.72,
+        x + lean,
+        top,
+      );
+      ctx.stroke();
+      // The plume at the tip, drawn as three short fronds rather than one blob —
+      // a bead on a stick is a matchstick, and a matchstick is not an animal.
+      const tipR = (2 + slotRandom(index, 263) * 2.6) * scale;
+      // Two to four fronds, never always three: a plume with a fixed prong count
+      // is a rubber stamp, and forty-four of the same stamp is wallpaper.
+      const fronds = 2 + Math.floor(slotRandom(index, 287) * 3);
+      for (let frond = 0; frond < fronds; frond += 1) {
+        const spray =
+          (frond - (fronds - 1) / 2) * 0.46 + (slotRandom(index * 4 + frond, 271) - 0.5) * 0.5;
+        const len = tipR * (1.8 + slotRandom(index * 4 + frond, 277) * 2.6);
+        ctx.strokeStyle = rgba(tipHue, 0.12 * depth);
+        ctx.lineWidth = Math.max(0.7, tipR * 0.3);
+        ctx.beginPath();
+        ctx.moveTo(x + lean, top);
+        ctx.quadraticCurveTo(
+          x + lean + Math.sin(spray) * len * 0.45,
+          top - Math.cos(spray) * len * 0.62,
+          x + lean + Math.sin(spray) * len,
+          top - Math.cos(spray) * len * 0.86,
+        );
+        ctx.stroke();
+      }
+      const tip = ctx.createRadialGradient(x + lean, top, 0, x + lean, top, tipR * 4);
+      tip.addColorStop(0, rgba(cool ? C.plankton : C.lumenHigh, 0.26 * depth));
+      tip.addColorStop(0.24, rgba(tipHue, 0.12 * depth));
+      tip.addColorStop(1, rgba(tipHue, 0));
+      ctx.fillStyle = tip;
+      ctx.fillRect(x + lean - tipR * 4, top - tipR * 4, tipR * 8, tipR * 8);
+    }
 
     /*
      * The ambient floor §6.3 specifies at `V = 0` — the vent's fixed rim light
-     * and the 2% PLANKTON ambient — baked in rather than composited every frame.
+     * and the PLANKTON ambient — baked in rather than composited every frame.
      *
      * It is a *constant*: the same contribution in every frame of every round, so
      * it cannot reorder two frames by value and §6.3's promise is untouched. And
@@ -622,19 +1367,42 @@ export class Stage {
      * about 20 in the headless harness.
      */
     const cold = ctx.createLinearGradient(0, 0, 0, height * 0.66);
-    cold.addColorStop(0, rgba(C.plankton, 0.05));
-    cold.addColorStop(0.55, rgba(C.plankton, 0.022));
+    cold.addColorStop(0, rgba(C.plankton, 0.09));
+    cold.addColorStop(0.55, rgba(C.plankton, 0.05));
     cold.addColorStop(1, 'rgba(0, 0, 0, 0)');
-    ctx.globalCompositeOperation = 'lighter';
     ctx.fillStyle = cold;
     ctx.fillRect(0, 0, width, height * 0.66);
 
-    const warm = ctx.createLinearGradient(0, height * 0.58, 0, height);
+    const warm = ctx.createLinearGradient(0, height * 0.52, 0, height);
     warm.addColorStop(0, 'rgba(0, 0, 0, 0)');
-    warm.addColorStop(1, rgba(C.ember, 0.06));
+    warm.addColorStop(1, rgba(C.ember, 0.13));
     ctx.fillStyle = warm;
-    ctx.fillRect(0, height * 0.58, width, height * 0.42);
+    ctx.fillRect(0, height * 0.52, width, height * 0.48);
     ctx.globalCompositeOperation = 'source-over';
+
+    /*
+     * The trench walls, and the vignette, last — they are the frame's edges and
+     * they take light *away*, which is how ABYSS stays the deepest tone in the
+     * picture while the middle of the column is water.
+     */
+    for (const wall of [
+      { x: 0, w: 0.2, dir: 1 },
+      { x: 1, w: 0.17, dir: -1 },
+    ]) {
+      const edge = ctx.createLinearGradient(width * wall.x, 0, width * (wall.x + wall.w * wall.dir), 0);
+      edge.addColorStop(0, 'rgba(1, 3, 7, 0.86)');
+      edge.addColorStop(0.55, 'rgba(1, 3, 7, 0.34)');
+      edge.addColorStop(1, 'rgba(1, 3, 7, 0)');
+      ctx.fillStyle = edge;
+      ctx.fillRect(0, 0, width, height);
+    }
+
+    const vignette = ctx.createRadialGradient(width / 2, height * 0.42, width * 0.3, width / 2, height * 0.42, width * 1.05);
+    vignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    vignette.addColorStop(0.62, 'rgba(1, 3, 7, 0.3)');
+    vignette.addColorStop(1, 'rgba(1, 2, 6, 0.86)');
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, width, height);
     return canvas;
   }
 
@@ -862,15 +1630,33 @@ export class Stage {
   // -------------------------------------------------------------------- layout
 
   makeBody(slot) {
+    const archetype = slot % 3;
     return {
       slot,
-      archetype: slot % 3,
+      archetype,
+      /**
+       * Which of the archetype's three baked interiors this body wears, and the
+       * per-body brightness it carries.
+       *
+       * Both are derived from the slot index and from nothing else (§6.2), which
+       * is the same hard rule the archetype obeys. The brightness is a *constant
+       * factor* on this body's halation, so the frame's total is still a strictly
+       * increasing function of the colony's value and §6.3 is untouched — it only
+       * stops sixteen organisms from being sixteen identical lamps.
+       */
+      sprite: archetype * BELL_VARIANTS + Math.floor(slotRandom(slot, 47) * BELL_VARIANTS),
+      lamp: 0.86 + slotRandom(slot, 53) * 0.28,
       /**
        * A per-body tilt, so the nucleus does not point the same way on every
        * organism and three baked archetypes read as fifteen individuals. Derived
        * from the slot index and from nothing else (§6.2).
+       *
+       * A third of a turn either way, not a whole one. The bell now carries a
+       * skirt, and a skirt on a body rotated 200° hangs *upward* — three of those
+       * in a frame and the colony reads as comets with whiskers rather than as
+       * animals in water. Medusae drift; they do not tumble.
        */
-      tilt: slotRandom(slot, 19) * Math.PI * 2,
+      tilt: (slotRandom(slot, 19) - 0.5) * 1.15,
       phase: slotRandom(slot, 1) * Math.PI * 2,
       driftSeed: slot * 7 + 3,
       x: this.centre.x,
@@ -1408,7 +2194,14 @@ export class Stage {
    * asked to describe a frame that has no money in it any more.
    */
   async celebrate(tier) {
-    const peak = tier === 'T3' ? 1 : 0.6;
+    /*
+     * Three sizes, because §7.1's table names three: T1 is "a single soft
+     * swell", T2 "lifts the frame one exposure stop", T3 goes to "full
+     * illumination". The shower belongs to the two loud tiers — a swell is one
+     * breath of light, and a swell with a firework in it is not soft.
+     */
+    const peak = tier === 'T3' ? 1 : tier === 'T2' ? 0.6 : 0.24;
+    const shower = tier === 'T3' ? 86 : tier === 'T2' ? 44 : 0;
     const round = this.generation;
     this.floodTint = 'amber';
     this.flood = 0;
@@ -1419,7 +2212,7 @@ export class Stage {
       this.tween(this, 'flood', 0, 260, ease.standard);
       return;
     }
-    this.emitSparks(tier === 'T3' ? 86 : 44);
+    if (shower > 0) this.emitSparks(shower);
     this.tween(this, 'flood', peak, 360, ease.decel);
     await this.wait(360);
     // `NEW ROUND` unlocks after 600 ms, so from here on the round may be over.
@@ -1624,10 +2417,10 @@ export class Stage {
     // gradient built and filled across the whole frame every frame: same picture,
     // one blit, no per-frame gradient object. The constant ambient this used to
     // carry now lives in the baked background, where it belongs.
-    const reach = Math.hypot(width, height) * (0.4 + 0.62 * level);
+    const reach = Math.hypot(width, height) * (0.36 + 0.7 * level);
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    ctx.globalAlpha = 0.3 * level;
+    ctx.globalAlpha = 0.46 * level;
     ctx.drawImage(this.sprites.waterBody, centre.x - reach, centre.y - reach, reach * 2, reach * 2);
     ctx.restore();
   }
@@ -1763,7 +2556,7 @@ export class Stage {
       // visible: "vent idle in darkness" is a picture of water, and water with no
       // life in it at all is a black rectangle.
       const alpha =
-        (0.085 + 0.42 * level * falloff + 0.16 * this.environment * this.depthPhase(700, 300)) *
+        (0.085 + 0.72 * level * falloff + 0.16 * this.environment * this.depthPhase(700, 300)) *
         twinkle *
         mote.depth;
       if (alpha < 0.006) continue;
@@ -1935,14 +2728,31 @@ export class Stage {
       if (body.alpha < 0.01) continue;
       const radius = body.r * contract * (1 - 0.6 * body.die);
       const alive = body.alpha * (1 - body.die);
-      // The gain on both terms is steeper than the round-1 build's, so the top
-      // of the range is genuinely bright rather than merely less dark. Both are
-      // still strictly increasing in `level`, which is all §6.3 requires.
-      const size = radius * (4.6 + 6.4 * level);
-      ctx.globalAlpha = (0.22 + 0.5 * level) * alive;
+      /*
+       * The gain on both terms, and the reason the light still reads as the money
+       * now that the water is water.
+       *
+       * Filling the frame with a constant raises the floor, and a floor that
+       * rises without the ceiling rising with it flattens the one thing §6.3 is
+       * for: a rich frame has to be *visibly* richer, not arithmetically richer.
+       * So the level-dependent term carries almost all of the weight — halation
+       * area times opacity runs about 25:1 across the value range, against 12:1
+       * in the round-1 build — while both terms stay strictly increasing in
+       * `level`, which is all §6.3 requires.
+       *
+       * The gain is bounded by what **twelve overlapping bodies** do, not by what
+       * one does. Every body is composited additively; a gain tuned so a single
+       * organism reads bright saturates a dense colony to a flat white disc with
+       * the bodies visible only as rings inside it — the whole colony reduced to
+       * one shape, at exactly the population the round is worth most. Halation
+       * has to sum to bloom, not to paper.
+       */
+      const lamp = body.lamp ?? 1;
+      const size = radius * (3.2 + 6.6 * level);
+      ctx.globalAlpha = (0.16 + 0.4 * level) * alive * lamp;
       ctx.drawImage(wide, body.x - size / 2, body.y - size / 2, size, size);
-      const cool = radius * (2.7 + 1.1 * level);
-      ctx.globalAlpha = (0.13 + 0.17 * level) * alive;
+      const cool = radius * (2.4 + 2.4 * level);
+      ctx.globalAlpha = (0.1 + 0.2 * level) * alive * lamp;
       ctx.drawImage(halo, body.x - cool / 2, body.y - cool / 2, cool, cool);
     }
     ctx.restore();
@@ -1965,8 +2775,8 @@ export class Stage {
     for (const body of this.bodies) {
       if (body.alpha < 0.01 || body.tint === 'amber') continue;
       const radius = body.r * contract * (1 - 0.6 * body.die);
-      const size = radius * (1.7 + 0.5 * level);
-      ctx.globalAlpha = (0.36 + 0.44 * level) * body.alpha * (1 - body.die);
+      const size = radius * (1.5 + 0.55 * level);
+      ctx.globalAlpha = (0.2 + 0.26 * level) * body.alpha * (1 - body.die) * (body.lamp ?? 1);
       ctx.drawImage(tight, body.x - size / 2, body.y - size / 2, size, size);
     }
     ctx.restore();
@@ -2019,7 +2829,7 @@ export class Stage {
     const radius = body.r * contract * breath * dieShrink;
     const x = body.x + drift.x;
     const y = body.y + drift.y + body.die * 26 * this.scale;
-    const sprite = (body.tint === 'amber' ? this.sprites.amberBells : this.sprites.bells)[body.archetype];
+    const sprite = (body.tint === 'amber' ? this.sprites.amberBells : this.sprites.bells)[body.sprite];
     const bright = (1 + 0.15 * body.hold) * (1 - 0.85 * body.die);
 
     ctx.save();
@@ -2063,7 +2873,8 @@ export class Stage {
         ctx.translate(x + sign * dx, y + sign * dy);
         ctx.rotate(axis + body.tilt);
         ctx.scale(stretch, squash);
-        ctx.drawImage(sprite, -childRadius, -childRadius, childRadius * 2, childRadius * 2);
+        const box = childRadius * BELL_BLIT;
+        ctx.drawImage(sprite, -box, -box, box * 2, box * 2);
         ctx.restore();
       }
       ctx.restore();
@@ -2072,7 +2883,11 @@ export class Stage {
 
     ctx.translate(x, y);
     ctx.rotate(body.tilt);
-    ctx.drawImage(sprite, -radius, -radius, radius * 2, radius * 2);
+    // The sprite carries the tentacle skirt outside the bell's own box, so it is
+    // blitted across `2 * BELL_BLIT * radius` and the *bell* lands on exactly the
+    // `2 * r(n)` §6.2 specifies.
+    const box = radius * BELL_BLIT;
+    ctx.drawImage(sprite, -box, -box, box * 2, box * 2);
     ctx.restore();
   }
 

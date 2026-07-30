@@ -312,6 +312,21 @@
           leaves the vessel for the balance chip.
         -->
         <section class="overlay ceremony" id="settlement" hidden aria-label="Settlement">
+          <!--
+            The rays live in a well that is exactly the overlay's own box and
+            clips them.
+
+            They are 150vh across, and as a direct child of a scrollable overlay
+            that made the *ceremony* scrollable — 828 px of scroll width and
+            1,002 px of scroll height on a 390x844 frame — for a decoration that
+            is transparent at three tiers out of six. Chrome's scroll anchoring
+            then quietly scrolled it: the payout card rendered 16 px off the left
+            edge of the screen and 158 px up, on a winning round. A decorative
+            layer must never be able to move the money.
+          -->
+          <div class="ray-well" aria-hidden="true">
+            <div class="ceremony-rays"></div>
+          </div>
           <div class="spacer"></div>
           <!--
             The payout card. The ceremony's scrim is deliberately translucent so
@@ -325,11 +340,25 @@
             overlay they sat below it and read as a perspective floor.
           -->
           <div class="payout-stage">
-            <div class="ceremony-rays" aria-hidden="true"></div>
             <div class="payout-card" id="payout-card">
               <div class="card-sweep" aria-hidden="true"></div>
               <div class="terminal" id="settlement-terminal">—</div>
               <div class="headline" id="settlement-headline">—</div>
+              <!--
+                The round's own shape: what the colony did, generation by
+                generation. It is the player's own resolved history and it is
+                already in the receipt — never a colony they could have had
+                (§9.8), and never anything forward-looking.
+
+                It sits directly under the figure, and it grows *while* the figure
+                counts. Everything that confirms the total has to wait for the
+                count to land, and with all of it below the figure the card spent
+                the whole count-up as a half-empty box. The trace gives away no
+                total — it is a population per generation — so it is the one thing
+                that can fill that beat, and filling it with the round's own story
+                is better than filling it with air.
+              -->
+              <div class="trace" id="settlement-trace" aria-hidden="true"></div>
               <!-- The round's credited multiple of what the ticket cost: the
                    tier's own basis (§7.1), shown on wins only, truncated like
                    every other figure on screen. It arrives *after* the count-up
@@ -337,11 +366,6 @@
                    total that has already given the answer away. -->
               <div class="multiple" id="settlement-multiple" hidden>—</div>
               <div class="net" id="settlement-net">—</div>
-              <!-- The round's own shape: what the colony did, generation by
-                   generation. It is the player's own resolved history and it is
-                   already in the receipt — never a colony they could have had
-                   (§9.8), and never anything forward-looking. -->
-              <div class="trace" id="settlement-trace" aria-hidden="true"></div>
               <p class="small" id="settlement-copy"></p>
             </div>
           </div>

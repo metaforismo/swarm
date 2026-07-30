@@ -668,12 +668,28 @@ button {
   transition: opacity 150ms ease, transform 90ms cubic-bezier(0.2, 0, 0, 1), box-shadow 160ms ease;
 }
 
+/*
+ * The sub-label's box is the same box on every generation: two lines tall whether
+ * it uses two lines or one, and the full width of its control whether the text is
+ * "→ 1.20" or "→ 0.39 · hold to choose k".
+ *
+ * Both axes had to be pinned, and only pinning the height was the round-2 error.
+ * `.act` centres its column, so a shrink-to-fit `<small>` resized from 39 px to
+ * 122 px and back as the copy changed, and the layout-shift observer recorded it
+ * on every generation — small each time (0.00047) but recorded, on the decision
+ * bar, six times a round. The box is fixed; only the glyphs inside it change.
+ */
 .act small {
   font-size: 10.5px;
   opacity: 0.8;
   letter-spacing: 0.02em;
   line-height: 13px;
   text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  height: 26px;
 }
 
 /* Instant feedback on every tap: the control moves under the thumb on the frame
@@ -720,10 +736,37 @@ button {
   color: var(--mist);
 }
 
-.act[disabled],
-.act[aria-disabled='true'] {
+.act[disabled] {
   opacity: 0.28;
   cursor: default;
+}
+
+/*
+ * The unavailable-but-answering state, and why it is not `opacity: 0.28`.
+ *
+ * At one organism HARVEST is the same as BANK, so it carries `aria-disabled` and
+ * answers a tap with the reason instead of doing nothing. That is the right
+ * behaviour — and it is exactly why the WCAG exemption for inactive components
+ * does not apply to it: the control is live, it is reachable, it responds. Its
+ * label measured 1.61:1 by pixel-true Otsu against the 4.5:1 floor this document
+ * sets for itself in §9.6, on the most common non-zero late-round state in the
+ * game.
+ *
+ * So the state is drawn rather than faded: the frame and the fill recede, the
+ * type is ASH at full opacity (6.9:1 on ABYSS) and the sub-label with it
+ * (6.9:1 as well, at 10.5 px, where 4.5:1 is the floor). It reads as clearly
+ * unavailable and it is legible, which are not in tension.
+ */
+.act[aria-disabled='true'] {
+  cursor: default;
+  color: var(--ash);
+  border-color: color-mix(in srgb, var(--crust) 55%, transparent);
+  background: color-mix(in srgb, var(--foam) 2%, transparent);
+  box-shadow: none;
+}
+
+.act[aria-disabled='true'] small {
+  opacity: 1;
 }
 
 .actionbar.inert .act {
@@ -731,9 +774,6 @@ button {
   opacity: 0.45;
 }
 
-.actionbar.single {
-  grid-template-columns: 1fr;
-}
 
 /* Below the 390 pt reference frame the tertiary sub-label wraps onto three lines
    and drags the bar's height with it. The type tightens; the copy does not
@@ -1345,11 +1385,21 @@ button {
   border-top: 1px solid color-mix(in srgb, var(--crust) 28%, transparent);
 }
 
+/*
+ * A key that wraps and a value that does not.
+ *
+ * Both sides were free to wrap, so on the densest row in the game — `MAX WIN,
+ * COLONY LINE` against `905.776494x (cap 906x)` — the key broke onto two lines
+ * and the value broke onto two lines beside it, and the four fragments
+ * interleaved. The key gets the slack and the figure stays a figure.
+ */
 .row .k {
   font-size: 11.5px;
   letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--mist);
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .row .v {
@@ -1358,6 +1408,8 @@ button {
   font-size: 14px;
   text-align: right;
   color: var(--foam);
+  flex: 0 1 auto;
+  white-space: nowrap;
 }
 
 .row .v.amber {
@@ -1657,17 +1709,34 @@ table.data td.num {
  * those two tiers and to nothing else, so a round that paid nothing keeps the
  * dark it earned. One rasterized conic gradient, transformed; never repainted.
  */
-/* The card and the light behind it are one box, so the rays are centred on the
-   figure rather than on the overlay — which is what stopped them reading as a
-   perspective floor under the card. */
 .payout-stage {
   position: relative;
   flex: 0 0 auto;
+  /* Above the ray well, which is the overlay's own backdrop. */
+  z-index: 1;
 }
 
+/*
+ * The well: exactly the overlay's box, and it clips.
+ *
+ * `inset: 0` on the overlay's padding box adds nothing to the scrollable
+ * overflow area, so the ceremony is no longer a scroll container that happens to
+ * contain the payout. Everything oversized lives inside it.
+ */
+.ray-well {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* The rays are centred where the card sits rather than on the middle of the
+   overlay — centred on the overlay they sat below the card and read as a
+   perspective floor under it. */
 .ceremony-rays {
   position: absolute;
-  top: 50%;
+  top: 44%;
   left: 50%;
   width: 150vh;
   height: 150vh;
@@ -1682,6 +1751,22 @@ table.data td.num {
   -webkit-mask-image: radial-gradient(closest-side, transparent 8%, rgba(0, 0, 0, 0.9) 17%, rgba(0, 0, 0, 0.34) 34%, transparent 56%);
   mask-image: radial-gradient(closest-side, transparent 8%, rgba(0, 0, 0, 0.9) 17%, rgba(0, 0, 0, 0.34) 34%, transparent 56%);
   will-change: transform, opacity;
+}
+
+/*
+ * T1 gets a fan too, at half of T2's.
+ *
+ * §7.1 gives T1 "a single soft swell" and no more, and this is the frame's half
+ * of that swell — the light behind the card rather than a second event. It is
+ * the tier every win from 2x to 10x lands in, which is most of the wins anyone
+ * will ever see, and a tier whose entire distinction from a 1.02x return is a
+ * warmer number is the tier the round-1 verdict called a receipt. It does not
+ * spin: a rotating fan is a *fanfare*, and a fanfare belongs to the two loud
+ * tiers.
+ */
+.ceremony[data-tier='T1'] .ceremony-rays {
+  opacity: 0.13;
+  animation: rays-in 900ms cubic-bezier(0.2, 0, 0, 1) both;
 }
 
 .ceremony[data-tier='T2'] .ceremony-rays {
@@ -1735,6 +1820,22 @@ table.data td.num {
     0 0 40px color-mix(in srgb, var(--amber) 12%, transparent),
     inset 0 1px 0 color-mix(in srgb, var(--foam) 16%, transparent);
   animation: card-land 460ms cubic-bezier(0.18, 1.14, 0.36, 1) both;
+}
+
+/* T1's glass carries a trace of the money's own colour — a third of what T2
+   carries, so the ladder holds, and enough that the card a 2x to 10x win lands
+   on is not the same cold glass an extinction lands on. */
+.ceremony[data-tier='T1'] .payout-card {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--amber) 7%, transparent) 0%,
+    color-mix(in srgb, var(--foam) 8%, transparent) 32%,
+    color-mix(in srgb, var(--silt) 60%, transparent) 100%
+  );
+  box-shadow:
+    0 22px 64px rgba(0, 0, 0, 0.64),
+    0 0 60px color-mix(in srgb, var(--amber) 18%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--foam) 20%, transparent);
 }
 
 .ceremony[data-tier='T2'] .payout-card,
@@ -1840,6 +1941,63 @@ table.data td.num {
   text-shadow: 0 0 30px color-mix(in srgb, var(--amber) 34%, transparent);
 }
 
+/*
+ * The landing.
+ *
+ * A count-up that simply stops has no *moment* in it: the digits settle and the
+ * screen is over. This is the frame where the figure arrives — one 5% overshoot
+ * on the exact tick the count lands, which is the same instant the multiple and
+ * the net begin to arrive under it, so the whole card resolves on one beat
+ * instead of trailing off.
+ *
+ * It is a `scale` on one element and nothing else — no layout, no paint, no
+ * shadow animation — so it is free, and it is the difference between a total
+ * that was displayed and a total that *landed*. Wins only: a round that returned
+ * less than it cost gets the dark and the quiet it earned (§7.1).
+ */
+.ceremony[data-tier='T0-win'] .headline,
+.ceremony[data-tier='T1'] .headline,
+.ceremony[data-tier='T2'] .headline,
+.ceremony[data-tier='T3'] .headline {
+  /*
+   * Two animations on one element, and the second must **not** be `both`: a fill
+   * mode that reaches backwards would apply `figure-land`'s own `scale(1)` from
+   * time zero and cancel the entrance's `translateY` for the 380 ms before it
+   * starts. The entrance keeps its fill; the landing has none and simply happens.
+   */
+  animation:
+    card-line 380ms 150ms cubic-bezier(0.2, 0, 0, 1) both,
+    figure-land 420ms var(--reveal-delay, 230ms) cubic-bezier(0.24, 0.9, 0.3, 1);
+}
+
+@keyframes figure-land {
+  0% {
+    transform: scale(1);
+  }
+  34% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/*
+ * T1 — every win from 2x to 10x, and the tier most wins land in.
+ *
+ * The round-1 build gave it the T0-win treatment and nothing else, so a 9.05x
+ * round and a 1.02x round were the same screen. It is louder than T0-win on
+ * every axis the ceremony has — figure, glow, multiple, the swell on the stage,
+ * the warmth in the frame — and quieter than T2 on every one of them. That is
+ * what a tier *is*.
+ */
+.ceremony[data-tier='T1'] .headline {
+  color: var(--amber);
+  text-shadow:
+    0 0 20px color-mix(in srgb, var(--amber) 48%, transparent),
+    0 0 48px color-mix(in srgb, var(--amber) 22%, transparent);
+}
+
 /* The two loud tiers get a bigger figure and a hotter core, because the figure
    is the thing a player screen-records. */
 .ceremony[data-tier='T2'] .headline {
@@ -1871,16 +2029,38 @@ table.data td.num {
   margin-bottom: 4px;
 }
 
+/* On a win the multiple is the line that *lands* — it arrives after the count-up
+   has finished, so it is the beat that closes the reveal rather than a caption
+   under it. It is sized accordingly from T1 up. */
+.ceremony[data-tier='T1'] .multiple {
+  font-size: 19px;
+  text-shadow: 0 0 14px color-mix(in srgb, var(--amber) 40%, transparent);
+}
+
 .ceremony[data-tier='T2'] .multiple,
 .ceremony[data-tier='T3'] .multiple {
-  font-size: 17px;
+  font-size: 21px;
   color: #fff0d6;
   text-shadow: 0 0 18px color-mix(in srgb, var(--amber) 55%, transparent);
 }
 
-/* §7.1: T2 lifts the frame one exposure stop and T3 takes it to full
-   illumination. The lift is on the ceremony's own scrim, so a round that paid
-   nothing keeps the dark it earned. */
+/*
+ * §7.1: T1 gets a single soft swell, T2 lifts the frame one exposure stop and T3
+ * takes it to full illumination. The lift is on the ceremony's own scrim, so a
+ * round that paid nothing keeps the dark it earned.
+ *
+ * T1's warmth is the smallest of the three and it is the one that was missing:
+ * the colony has just been banked away, so without it the most common winning
+ * screen in the game is an amber number on black — which is a receipt, and a
+ * receipt is what a bank is *not* supposed to feel like.
+ */
+.ceremony[data-tier='T1'] {
+  background:
+    radial-gradient(64% 34% at 50% 46%, color-mix(in srgb, var(--amber) 7%, transparent) 0%, transparent 72%),
+    radial-gradient(52% 28% at 50% 48%, color-mix(in srgb, var(--lumen) 5%, transparent) 0%, transparent 74%),
+    linear-gradient(180deg, rgba(2, 6, 11, 0.44) 0%, rgba(2, 5, 11, 0.7) 44%, rgba(2, 4, 10, 0.88) 100%);
+}
+
 .ceremony[data-tier='T2'] {
   background:
     radial-gradient(70% 40% at 50% 44%, color-mix(in srgb, var(--lumen) 13%, transparent) 0%, transparent 70%),
@@ -1926,6 +2106,27 @@ table.data td.num {
   color: var(--mist);
 }
 
+/* On a win the eyebrow is the round's own word — BANKED, FULL BLOOM — and it is
+   drawn as a word rather than as a protocol reading. It arrives with the card,
+   before the figure has counted anything, so it says what happened without
+   saying how much. */
+.ceremony[data-tier='T0-win'] .terminal,
+.ceremony[data-tier='T1'] .terminal,
+.ceremony[data-tier='T2'] .terminal,
+.ceremony[data-tier='T3'] .terminal {
+  font-size: 13px;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  color: color-mix(in srgb, var(--amber) 78%, var(--foam));
+}
+
+.ceremony[data-tier='T2'] .terminal,
+.ceremony[data-tier='T3'] .terminal {
+  font-size: 14px;
+  color: #ffe6bd;
+  text-shadow: 0 0 16px color-mix(in srgb, var(--amber) 50%, transparent);
+}
+
 /*
  * The round's shape: one bar per generation at the population it resolved to.
  * The player's own record, in the round's own colours — LUMEN when the round
@@ -1941,7 +2142,9 @@ table.data td.num {
   height: 40px;
   margin: 14px 0 12px;
   padding-bottom: 5px;
-  animation: card-line 380ms calc(var(--reveal-delay, 230ms) + 100ms) cubic-bezier(0.2, 0, 0, 1) both;
+  /* With the card, not after the count-up. The trace is the one thing on the card
+     that can be shown while the figure is still counting without answering it. */
+  animation: card-line 380ms 210ms cubic-bezier(0.2, 0, 0, 1) both;
 }
 
 /* A baseline, so the bars read as a record of generations rather than as a mark. */
