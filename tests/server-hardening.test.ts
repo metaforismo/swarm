@@ -1,15 +1,18 @@
-import type { AddressInfo } from 'node:net';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createApp, type App } from '../src/server/http.ts';
-import { seedCommitment } from '../src/server/commitment.ts';
-import { RoundService } from '../src/server/service.ts';
-import type { Receipt, Settlement } from '../src/server/settlement.ts';
-import { verifyRound, type ProofBundle } from '../src/server/verify.ts';
-import { Wallet } from '../src/server/wallet.ts';
+import type { AddressInfo } from "node:net";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createApp, type App } from "../src/server/http.ts";
+import { seedCommitment } from "../src/server/commitment.ts";
+import { RoundService } from "../src/server/service.ts";
+import type { Receipt, Settlement } from "../src/server/settlement.ts";
+import { verifyRound, type ProofBundle } from "../src/server/verify.ts";
+import { parseProofBundle, wireSettlement } from "../src/server/wire.ts";
+import { Wallet } from "../src/server/wallet.ts";
 
-const ENTROPY = 'c'.repeat(64);
-const SEED_A = '9667b8896a62186befbaf96b9ae8e4704e44d065f0ae6aa6a43a4239c63874cb';
-const SEED_B = '0e4ac2893a15a0fc6a7caecedbc56d943eee45377f5ef4f2ecf9cc758bcb1ec2';
+const ENTROPY = "c".repeat(64);
+const SEED_A =
+  "9667b8896a62186befbaf96b9ae8e4704e44d065f0ae6aa6a43a4239c63874cb";
+const SEED_B =
+  "0e4ac2893a15a0fc6a7caecedbc56d943eee45377f5ef4f2ecf9cc758bcb1ec2";
 const ZERO_PACING = Object.freeze({
   roundCycleMs: 0,
   decisionDeadPeriodMs: 0,
@@ -24,7 +27,7 @@ function serviceFor(
   return new RoundService({
     openingBalanceUnits: 2_000_000_000n,
     seedSource: () => SEED_A,
-    roundIdSource: () => 'swarm-fixture-0',
+    roundIdSource: () => "swarm-fixture-0",
     pacing: ZERO_PACING,
     ...options,
   });
@@ -35,17 +38,14 @@ async function openRound(
   request: Record<string, unknown> = {},
 ): Promise<{ roundId: string; result: any }> {
   const roundId = service.createRound().roundId;
-  const result = await service.open(
-    roundId,
-    {
-      idempotencyKey: `open-${roundId}`,
-      expectedFrameRevision: 0,
-      stakeUnits: 1_000_000n,
-      sideBets: [],
-      clientEntropy: ENTROPY,
-      ...request,
-    } as any,
-  );
+  const result = await service.open(roundId, {
+    idempotencyKey: `open-${roundId}`,
+    expectedFrameRevision: 0,
+    stakeUnits: 1_000_000n,
+    sideBets: [],
+    clientEntropy: ENTROPY,
+    ...request,
+  } as any);
   return { roundId, result };
 }
 
@@ -78,8 +78,8 @@ function tryMutation(run: () => void): void {
   }
 }
 
-describe('SWARM-01 — custody-held round state never crosses the public boundary', () => {
-  it('cannot turn a copied receipt deletion into a duplicate wallet credit', async () => {
+describe("SWARM-01 — custody-held round state never crosses the public boundary", () => {
+  it("cannot turn a copied receipt deletion into a duplicate wallet credit", async () => {
     const service = serviceFor();
     const { roundId, result: opened } = await openRound(service);
     const advanced = await service.advance(roundId, {
@@ -105,10 +105,12 @@ describe('SWARM-01 — custody-held round state never crosses the public boundar
     });
     expect(settled.value.creditedUnits).toBe(1_583_333n);
     expect(service.wallet.balanceUnits).toBe(afterBank);
-    expect(service.book(roundId).receipts.map((receipt) => receipt.sequence)).toEqual([1, 2, 3]);
+    expect(
+      service.book(roundId).receipts.map((receipt) => receipt.sequence),
+    ).toEqual([1, 2, 3]);
   });
 
-  it('cannot forge a side bet after its wild outcome is known', async () => {
+  it("cannot forge a side bet after its wild outcome is known", async () => {
     const service = serviceFor();
     const { roundId, result: opened } = await openRound(service);
     const advanced = await service.advance(roundId, {
@@ -118,7 +120,7 @@ describe('SWARM-01 — custody-held round state never crosses the public boundar
     expect(advanced.frame.wildUnits).toBe(4);
     let frame = advanced.frame;
     let step = 0;
-    while (frame.state === 'STAGED') {
+    while (frame.state === "STAGED") {
       const next = await service.advance(roundId, {
         idempotencyKey: `advance-terminal-${roundId}-${(step += 1)}`,
         expectedFrameRevision: frame.revision,
@@ -128,7 +130,8 @@ describe('SWARM-01 — custody-held round state never crosses the public boundar
 
     const exposed = service.book(roundId);
     tryMutation(() => {
-      (exposed.sideBetStakes as Record<string, bigint>).FIRST_LIGHT = 100_000_000n;
+      (exposed.sideBetStakes as Record<string, bigint>).FIRST_LIGHT =
+        100_000_000n;
     });
 
     const settled = await service.settle(roundId, {
@@ -137,17 +140,19 @@ describe('SWARM-01 — custody-held round state never crosses the public boundar
     });
     expect(settled.value.stakedUnits).toBe(1_000_000n);
     expect(settled.value.proof.sideBetStakes).toEqual({});
-    expect(settled.value.receipts.some((receipt) => receipt.line === 'FIRST_LIGHT')).toBe(false);
+    expect(
+      settled.value.receipts.some((receipt) => receipt.line === "FIRST_LIGHT"),
+    ).toBe(false);
   });
 });
 
-describe('SWARM-02 — caller-owned commands are copied once', () => {
-  it('uses one stake snapshot for the session limit, fingerprint and debit', async () => {
+describe("SWARM-02 — caller-owned commands are copied once", () => {
+  it("uses one stake snapshot for the session limit, fingerprint and debit", async () => {
     const service = serviceFor();
-    service.protection.set({ budgetUnits: '100000' });
+    service.protection.set({ budgetUnits: "100000" });
     let reads = 0;
     const request = {
-      idempotencyKey: 'hostile-open',
+      idempotencyKey: "hostile-open",
       expectedFrameRevision: 0,
       get stakeUnits(): bigint {
         reads += 1;
@@ -165,7 +170,7 @@ describe('SWARM-02 — caller-owned commands are copied once', () => {
     expect(service.wallet.stakedUnits).toBe(100_000n);
   });
 
-  it('uses one proxied harvest value for the fingerprint and execution', async () => {
+  it("uses one proxied harvest value for the fingerprint and execution", async () => {
     const service = serviceFor();
     const { roundId, result: opened } = await openRound(service);
     const advanced = await service.advance(roundId, {
@@ -175,13 +180,13 @@ describe('SWARM-02 — caller-owned commands are copied once', () => {
     let unitsReads = 0;
     const hostile = new Proxy(
       {
-        idempotencyKey: 'hostile-harvest',
+        idempotencyKey: "hostile-harvest",
         expectedFrameRevision: advanced.frame.revision,
         units: 1,
       },
       {
         get(target, property, receiver) {
-          if (property === 'units') {
+          if (property === "units") {
             unitsReads += 1;
             return unitsReads === 1 ? 1 : 2;
           }
@@ -192,7 +197,7 @@ describe('SWARM-02 — caller-owned commands are copied once', () => {
 
     const first = await service.harvest(roundId, hostile);
     const retried = await service.harvest(roundId, {
-      idempotencyKey: 'hostile-harvest',
+      idempotencyKey: "hostile-harvest",
       expectedFrameRevision: advanced.frame.revision,
       units: 1,
     });
@@ -204,12 +209,12 @@ describe('SWARM-02 — caller-owned commands are copied once', () => {
   });
 });
 
-describe('SWARM-04 — wallet posting is one transaction', () => {
-  it('leaves every total unchanged when a later debit makes the batch invalid', () => {
+describe("SWARM-04 — wallet posting is one transaction", () => {
+  it("leaves every total unchanged when a later debit makes the batch invalid", () => {
     const wallet = new Wallet(100n);
     const receipts = [
-      { direction: 'DEBIT', amountUnits: 40n },
-      { direction: 'DEBIT', amountUnits: 70n },
+      { direction: "DEBIT", amountUnits: 40n },
+      { direction: "DEBIT", amountUnits: 70n },
     ] as Receipt[];
 
     expect(() => wallet.post(receipts)).toThrow();
@@ -236,16 +241,22 @@ async function startHttp(): Promise<HttpHarness> {
     clock: () => clock.now,
     pacing: ZERO_PACING,
   });
-  await new Promise<void>((resolve) => app.server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) =>
+    app.server.listen(0, "127.0.0.1", resolve),
+  );
   openApps.push(app);
   const port = (app.server.address() as AddressInfo).port;
   return { app, base: `http://127.0.0.1:${port}`, clock };
 }
 
-async function postJson(base: string, path: string, body: unknown = {}): Promise<any> {
+async function postJson(
+  base: string,
+  path: string,
+  body: unknown = {},
+): Promise<any> {
   const response = await fetch(`${base}${path}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    method: "POST",
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
   return response.json();
@@ -264,47 +275,62 @@ afterEach(async () => {
   }
 });
 
-describe('SWARM-05 — exact retries do not become progress', () => {
-  it('keeps the progress deadline fixed and returns the request’s recorded frame over HTTP', async () => {
+describe("SWARM-05 — exact retries do not become progress", () => {
+  it("keeps the progress deadline fixed and returns the request’s recorded frame over HTTP", async () => {
     const { base, clock } = await startHttp();
-    const created = await postJson(base, '/api/rounds');
+    const created = await postJson(base, "/api/rounds");
     const roundId = created.roundId as string;
     const openBody = {
-      idempotencyKey: 'http-open',
+      idempotencyKey: "http-open",
       expectedFrameRevision: 0,
-      stakeUnits: '1000000',
+      stakeUnits: "1000000",
       sideBets: [],
       clientEntropy: ENTROPY,
     };
-    const opened = await postJson(base, `/api/rounds/${roundId}/open`, openBody);
+    const opened = await postJson(
+      base,
+      `/api/rounds/${roundId}/open`,
+      openBody,
+    );
     clock.now += 100;
     const advanceBody = {
-      idempotencyKey: 'http-advance',
+      idempotencyKey: "http-advance",
       expectedFrameRevision: opened.frame.revision,
     };
-    const advanced = await postJson(base, `/api/rounds/${roundId}/advance`, advanceBody);
+    const advanced = await postJson(
+      base,
+      `/api/rounds/${roundId}/advance`,
+      advanceBody,
+    );
     clock.now += 100;
     const harvested = await postJson(base, `/api/rounds/${roundId}/harvest`, {
-      idempotencyKey: 'http-harvest',
+      idempotencyKey: "http-harvest",
       expectedFrameRevision: advanced.frame.revision,
       units: 1,
     });
-    const progressAt = (await getJson(base, `/api/rounds/${roundId}`)).lastCommandAt;
+    const progressAt = (await getJson(base, `/api/rounds/${roundId}`))
+      .lastCommandAt;
 
     for (let attempt = 0; attempt < 12; attempt += 1) {
       clock.now += 10_000;
-      const retried = await postJson(base, `/api/rounds/${roundId}/advance`, advanceBody);
+      const retried = await postJson(
+        base,
+        `/api/rounds/${roundId}/advance`,
+        advanceBody,
+      );
       expect(retried.frame).toEqual(advanced.frame);
       expect(retried.frame).not.toEqual(harvested.frame);
-      expect((await getJson(base, `/api/rounds/${roundId}`)).lastCommandAt).toBe(progressAt);
+      expect(
+        (await getJson(base, `/api/rounds/${roundId}`)).lastCommandAt,
+      ).toBe(progressAt);
     }
   });
 });
 
-describe('SWARM-06 — server seed custody and uniqueness', () => {
-  it('rejects a caller-controlled predictable seed source outside the test harness', () => {
+describe("SWARM-06 — server seed custody and uniqueness", () => {
+  it("rejects a caller-controlled predictable seed source outside the test harness", () => {
     const previous = process.env.NODE_ENV;
-    process.env.NODE_ENV = 'production';
+    process.env.NODE_ENV = "production";
     try {
       expect(
         () =>
@@ -319,7 +345,7 @@ describe('SWARM-06 — server seed custody and uniqueness', () => {
     }
   });
 
-  it('reads a hostile seedSource getter once and regenerates an issued seed', () => {
+  it("reads a hostile seedSource getter once and regenerates an issued seed", () => {
     const candidates = [SEED_A, SEED_A, SEED_B];
     let getterReads = 0;
     let sourceCalls = 0;
@@ -341,6 +367,41 @@ describe('SWARM-06 — server seed custody and uniqueness', () => {
     expect(first.seedCommitment).toBe(seedCommitment(SEED_A, first.roundId));
     expect(second.seedCommitment).toBe(seedCommitment(SEED_B, second.roundId));
   });
+
+  it("keeps issued seeds bounded to rounds retained by the history fence", async () => {
+    let sourceCalls = 0;
+    const service = new RoundService({
+      openingBalanceUnits: 40_000_000n,
+      seedSource: (roundId) => {
+        sourceCalls += 1;
+        const counter = Number(roundId.slice(roundId.lastIndexOf("-") + 1));
+        return counter % 2 === 0 ? SEED_B : SEED_A;
+      },
+      roundIdSource: (counter) => `bounded-seed-${counter}`,
+      abandonedRoundTimeoutHours: 0,
+      historyLimit: 1,
+      pacing: ZERO_PACING,
+    });
+
+    // With a grow-only issued-seed set, round 3 collides with round 1 for all
+    // 16 retries and this loop throws. Keeping only one settled record means the
+    // alternating seed is reusable precisely after its prior round is evicted.
+    for (let counter = 1; counter <= 24; counter += 1) {
+      const created = service.createRound();
+      await service.open(created.roundId, {
+        idempotencyKey: `open-${created.roundId}`,
+        expectedFrameRevision: 0,
+        stakeUnits: 1_000_000n,
+        sideBets: [],
+        clientEntropy: ENTROPY,
+      });
+      service.reconcile(created.roundId);
+      expect(service.history).toHaveLength(1);
+      expect(service.history[0]?.roundId).toBe(created.roundId);
+    }
+
+    expect(sourceCalls).toBe(24);
+  });
 });
 
 function bundleOf(settlement: Settlement): ProofBundle {
@@ -350,44 +411,147 @@ function bundleOf(settlement: Settlement): ProofBundle {
   }) as ProofBundle;
 }
 
-describe('SWARM-07 — verification binds the submitted receipt content', () => {
-  it('fails closed when each meaningful money/transcript field is tampered independently', async () => {
+describe("SWARM-07 — verification binds the submitted receipt content", () => {
+  it("fails closed when each meaningful money/transcript field is tampered independently", async () => {
     const { settlement } = await bankFixture(serviceFor(), [
-      { id: 'FIRST_LIGHT', stakeUnits: 100_000n },
+      { id: "FIRST_LIGHT", stakeUnits: 100_000n },
     ]);
     const honest = bundleOf(settlement);
-    expect(verifyRound(honest).code).toBe('VERIFIED');
-    const harvestAt = honest.receipts.findIndex((receipt) => receipt.kind === 'HARVEST');
-    const settleAt = honest.receipts.findIndex((receipt) => receipt.kind === 'SETTLE');
-    const sideBetAt = honest.receipts.findIndex((receipt) => receipt.kind === 'SIDE_BET');
+    expect(verifyRound(honest).code).toBe("VERIFIED");
+    const harvestAt = honest.receipts.findIndex(
+      (receipt) => receipt.kind === "HARVEST",
+    );
+    const settleAt = honest.receipts.findIndex(
+      (receipt) => receipt.kind === "SETTLE",
+    );
+    const sideBetAt = honest.receipts.findIndex(
+      (receipt) => receipt.kind === "SIDE_BET",
+    );
     expect(harvestAt).toBeGreaterThanOrEqual(0);
     expect(settleAt).toBeGreaterThanOrEqual(0);
     expect(sideBetAt).toBeGreaterThanOrEqual(0);
 
     const cases: readonly [string, (proof: any) => void][] = [
-      ['stakeUnits', (proof) => { proof.stakeUnits += 1n; }],
-      ['sideBetStakes', (proof) => { proof.sideBetStakes.FIRST_LIGHT += 1n; }],
-      ['action outcome', (proof) => { proof.actionLog[0].units -= 1; }],
-      ['population', (proof) => { proof.populations[0] += 1; }],
-      ['terminal', (proof) => { proof.terminal = 'FINAL'; }],
-      ['settlement mode', (proof) => { proof.settlementMode = 'RECONCILED'; }],
-      ['live chain value', (proof) => { proof.liveChainValues[0] = '0'.repeat(64); }],
-      ['side-bet outcome', (proof) => { proof.sideBetResults[0].resolved = 'LOST'; }],
-      ['receipt schema', (proof) => { proof.receipts[0].schema = 'receipt-v1'; }],
-      ['receipt sequence', (proof) => { proof.receipts[0].sequence += 1; }],
-      ['receipt kind', (proof) => { proof.receipts[0].kind = 'SETTLE'; }],
-      ['receipt line', (proof) => { proof.receipts[0].line = 'FIRST_LIGHT'; }],
-      ['receipt direction', (proof) => { proof.receipts[0].direction = 'CREDIT'; }],
-      ['receipt stage', (proof) => { proof.receipts[harvestAt].stage += 1; }],
-      ['receipt amount', (proof) => { proof.receipts[harvestAt].amountUnits += 1n; }],
-      ['receipt unitsHarvested', (proof) => { proof.receipts[harvestAt].unitsHarvested -= 1; }],
-      ['receipt resolved', (proof) => { proof.receipts[sideBetAt].resolved = 'LOST'; }],
       [
-        'receipt theoretical',
-        (proof) => { proof.receipts[harvestAt].theoretical.numerator += 1n; },
+        "stakeUnits",
+        (proof) => {
+          proof.stakeUnits += 1n;
+        },
       ],
-      ['receipt capped', (proof) => { proof.receipts[harvestAt].capped = true; }],
-      ['receipt terminal', (proof) => { proof.receipts[settleAt].terminal = 'FINAL'; }],
+      [
+        "sideBetStakes",
+        (proof) => {
+          proof.sideBetStakes.FIRST_LIGHT += 1n;
+        },
+      ],
+      [
+        "action outcome",
+        (proof) => {
+          proof.actionLog[0].units -= 1;
+        },
+      ],
+      [
+        "population",
+        (proof) => {
+          proof.populations[0] += 1;
+        },
+      ],
+      [
+        "terminal",
+        (proof) => {
+          proof.terminal = "FINAL";
+        },
+      ],
+      [
+        "settlement mode",
+        (proof) => {
+          proof.settlementMode = "RECONCILED";
+        },
+      ],
+      [
+        "live chain value",
+        (proof) => {
+          proof.liveChainValues[0] = "0".repeat(64);
+        },
+      ],
+      [
+        "side-bet outcome",
+        (proof) => {
+          proof.sideBetResults[0].resolved = "LOST";
+        },
+      ],
+      [
+        "receipt schema",
+        (proof) => {
+          proof.receipts[0].schema = "receipt-v1";
+        },
+      ],
+      [
+        "receipt sequence",
+        (proof) => {
+          proof.receipts[0].sequence += 1;
+        },
+      ],
+      [
+        "receipt kind",
+        (proof) => {
+          proof.receipts[0].kind = "SETTLE";
+        },
+      ],
+      [
+        "receipt line",
+        (proof) => {
+          proof.receipts[0].line = "FIRST_LIGHT";
+        },
+      ],
+      [
+        "receipt direction",
+        (proof) => {
+          proof.receipts[0].direction = "CREDIT";
+        },
+      ],
+      [
+        "receipt stage",
+        (proof) => {
+          proof.receipts[harvestAt].stage += 1;
+        },
+      ],
+      [
+        "receipt amount",
+        (proof) => {
+          proof.receipts[harvestAt].amountUnits += 1n;
+        },
+      ],
+      [
+        "receipt unitsHarvested",
+        (proof) => {
+          proof.receipts[harvestAt].unitsHarvested -= 1;
+        },
+      ],
+      [
+        "receipt resolved",
+        (proof) => {
+          proof.receipts[sideBetAt].resolved = "LOST";
+        },
+      ],
+      [
+        "receipt theoretical",
+        (proof) => {
+          proof.receipts[harvestAt].theoretical.numerator += 1n;
+        },
+      ],
+      [
+        "receipt capped",
+        (proof) => {
+          proof.receipts[harvestAt].capped = true;
+        },
+      ],
+      [
+        "receipt terminal",
+        (proof) => {
+          proof.receipts[settleAt].terminal = "FINAL";
+        },
+      ],
     ];
 
     for (const [name, tamper] of cases) {
@@ -395,13 +559,13 @@ describe('SWARM-07 — verification binds the submitted receipt content', () => 
       tamper(proof);
       const result = verifyRound(proof);
       expect(result.ok, name).toBe(false);
-      expect(result.code, name).not.toBe('VERIFIED');
+      expect(result.code, name).not.toBe("VERIFIED");
     }
   });
 });
 
-describe('SWARM-08 — pacing belongs to the service, not its transport', () => {
-  it('holds a direct service command until the decision floor has passed', async () => {
+describe("SWARM-08 — pacing belongs to the service, not its transport", () => {
+  it("holds a direct service command until the decision floor has passed", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_760_000_000_000);
     const service = serviceFor({
@@ -427,5 +591,54 @@ describe('SWARM-08 — pacing belongs to the service, not its transport', () => 
     expect(resolved).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect((await pending).frame.stage).toBe(1);
+  });
+});
+
+describe("the published proof parser accepts the longest honest rounds", () => {
+  it("admits a chain carrying a value per generation and per logged action", async () => {
+    const service = new RoundService({ openingBalanceUnits: 500_000_000_000n });
+    const OLD_BOUND = 18 + 1; // the bound that shipped: stages + 1
+
+    // Colonies die at random depths, so play until one lives long enough to
+    // carry more chain values than the old bound allowed. That is the shape
+    // the parser refused: a value per resolved generation AND one per logged
+    // action, up to 2 * stages + 1.
+    let longest: ProofBundle | null = null;
+    let longestWire: unknown = null;
+    for (let round = 0; round < 60; round += 1) {
+      const { roundId, result: opened } = await openRound(service, {
+        idempotencyKey: `open-long-${round}`,
+      });
+      let frame = opened.frame;
+      for (let index = 0; index < 40 && frame.state === "STAGED"; index += 1) {
+        const advanced = await service.advance(roundId, {
+          idempotencyKey: `advance-long-${round}-${index}`,
+          expectedFrameRevision: frame.revision,
+        });
+        frame = advanced.frame;
+      }
+      const settled = await service.settle(roundId, {
+        idempotencyKey: `settle-long-${round}`,
+        expectedFrameRevision: frame.revision,
+      });
+      const bundle = settled.value.proof as unknown as ProofBundle;
+      if (
+        longest === null ||
+        bundle.liveChainValues.length > longest.liveChainValues.length
+      ) {
+        longest = bundle;
+        // Keep the wire form the endpoint would actually publish for it.
+        longestWire = (wireSettlement(settled.value) as { proof: unknown })
+          .proof;
+      }
+      if (longest.liveChainValues.length > OLD_BOUND) break;
+    }
+
+    expect(longest).not.toBeNull();
+    const bundle = longest as ProofBundle;
+    expect(bundle.liveChainValues.length).toBeGreaterThan(OLD_BOUND);
+    // The published parser is what the client's fairness sheet calls, so it
+    // must admit exactly what the server just sealed and published.
+    expect(() => parseProofBundle(longestWire)).not.toThrow();
   });
 });

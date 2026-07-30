@@ -13,7 +13,8 @@ export default defineConfig({
     // Exact BigInt enumeration and seeded Monte Carlo checks are proof work,
     // not latency assertions. Keep their workload intact and allow completion
     // when this checkout shares a host with other CPU-bound verification jobs.
-    testTimeout: 300_000,
+    // The 25-minute ceiling is over 3x a 480.6 s contended paytable proof.
+    testTimeout: 1_500_000,
     hookTimeout: 60_000,
     // Exact-enumeration files saturate the host. Serial file execution keeps
     // wall-clock pacing tests meaningful without changing a single assertion,

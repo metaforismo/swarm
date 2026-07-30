@@ -1147,6 +1147,7 @@ adapter:
     reachable state leaves a committed seed unpublishable. Settling one round in
     both modes produces two different body commitments, and a verifier handed a
     relabelled mode fails.
+
 Checks 6, 7 and 8 are what make this module different from a generic ride
 ledger. Checks 9 to 12 are what make it a *choice-timed* module rather than a
 choice-timed module's shape. Checks 15 and 17 are the round-4 findings: a command

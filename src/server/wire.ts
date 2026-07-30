@@ -7,44 +7,64 @@
  * next to a decimal that is **truncated toward zero**, so a displayed multiplier
  * is never above what the game will actually pay.
  */
-import { readFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
-import { toDecimal } from '../../tools/lib/rational.mjs';
-import { GRID_SIZE, SLOTS, SWARM, adapterFingerprint } from './adapter.ts';
-import type { StageFrame } from './book.ts';
-import { ENGINE_API_VERSION, MODULE_API_VERSION, rational, type Rational } from './engine.ts';
+import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
+import { toDecimal } from "../../tools/lib/rational.mjs";
+import { GRID_SIZE, SLOTS, SWARM, adapterFingerprint } from "./adapter.ts";
+import type { StageFrame } from "./book.ts";
+import {
+  ENGINE_API_VERSION,
+  MODULE_API_VERSION,
+  rational,
+  type Rational,
+} from "./engine.ts";
 import {
   STAGED_SURVIVAL_MODULE_ID,
   STAGED_SURVIVAL_MODULE_VERSION,
-} from '@axiom-games/reveal-engine/modules/staged-survival';
-import { fail } from './errors.ts';
-import type { PacingFloors } from './pacing.ts';
-import { HELP_RESOURCES } from './protection.ts';
-import { PAYTABLE, SIDE_BETS } from './paytable.ts';
-import type { Receipt, Settlement } from './settlement.ts';
-import type { HistoryEntry } from './service.ts';
-import type { ProofBundle } from './verify.ts';
+} from "@axiom-games/reveal-engine/modules/staged-survival";
+import { fail } from "./errors.ts";
+import type { PacingFloors } from "./pacing.ts";
+import { HELP_RESOURCES } from "./protection.ts";
+import { PAYTABLE, SIDE_BETS } from "./paytable.ts";
+import type { Receipt, Settlement } from "./settlement.ts";
+import type { HistoryEntry } from "./service.ts";
+import type { ProofBundle } from "./verify.ts";
 
-const FIXTURE_PATH = fileURLToPath(new URL('../../spec/paytable.v3.json', import.meta.url));
+const FIXTURE_PATH = fileURLToPath(
+  new URL("../../spec/paytable.v3.json", import.meta.url),
+);
 const ENGINE_PACKAGE = JSON.parse(
   readFileSync(
-    fileURLToPath(new URL('../../node_modules/@axiom-games/reveal-engine/package.json', import.meta.url)),
-    'utf8',
+    fileURLToPath(
+      new URL(
+        "../../node_modules/@axiom-games/reveal-engine/package.json",
+        import.meta.url,
+      ),
+    ),
+    "utf8",
   ),
 ) as { name: string; version: string };
 
 /** Digest of the frozen fixture, the value `docs/MATH.md` publishes as its identity. */
-const FIXTURE_DIGEST = createHash('sha256').update(readFileSync(FIXTURE_PATH, 'utf8'), 'utf8').digest('hex');
+const FIXTURE_DIGEST = createHash("sha256")
+  .update(readFileSync(FIXTURE_PATH, "utf8"), "utf8")
+  .digest("hex");
 
 export interface WireRational {
   readonly fraction: string;
   readonly decimal: string;
 }
 
-export function wireRational(value: Rational | null, digits = 6): WireRational | null {
+export function wireRational(
+  value: Rational | null,
+  digits = 6,
+): WireRational | null {
   if (value === null) return null;
-  return { fraction: `${value.numerator}/${value.denominator}`, decimal: toDecimal(value, digits) };
+  return {
+    fraction: `${value.numerator}/${value.denominator}`,
+    decimal: toDecimal(value, digits),
+  };
 }
 
 export function wireReceipt(receipt: Receipt): Record<string, unknown> {
@@ -84,7 +104,9 @@ export function wireFrame(frame: StageFrame): Record<string, unknown> {
   };
 }
 
-export function wireSettlement(settlement: Settlement): Record<string, unknown> {
+export function wireSettlement(
+  settlement: Settlement,
+): Record<string, unknown> {
   const proof = settlement.proof;
   return {
     creditedUnits: settlement.creditedUnits.toString(),
@@ -104,7 +126,10 @@ export function wireSettlement(settlement: Settlement): Record<string, unknown> 
       adapterFingerprint: proof.adapterFingerprint,
       stakeUnits: proof.stakeUnits.toString(),
       sideBetStakes: Object.fromEntries(
-        Object.entries(proof.sideBetStakes).map(([id, units]) => [id, units.toString()]),
+        Object.entries(proof.sideBetStakes).map(([id, units]) => [
+          id,
+          units.toString(),
+        ]),
       ),
       actionLog: proof.actionLog,
       populations: proof.populations,
@@ -138,129 +163,178 @@ export function wireHistory(entry: HistoryEntry): Record<string, unknown> {
 
 /** Parses an untrusted proof bundle from the verify endpoint. Fails closed, always. */
 export function parseProofBundle(input: unknown): ProofBundle {
-  if (typeof input !== 'object' || input === null)
-    fail('INVALID_TRANSCRIPT', 'A proof bundle must be an object', '$.proof');
+  if (typeof input !== "object" || input === null)
+    fail("INVALID_TRANSCRIPT", "A proof bundle must be an object", "$.proof");
   const source = input as Record<string, unknown>;
   const text = (key: string): string => {
     const value = source[key];
-    if (typeof value !== 'string' || value.length > 512)
-      fail('INVALID_TRANSCRIPT', `Field ${key} must be a short string`, `$.${key}`);
+    if (typeof value !== "string" || value.length > 512)
+      fail(
+        "INVALID_TRANSCRIPT",
+        `Field ${key} must be a short string`,
+        `$.${key}`,
+      );
     return value;
   };
   const units = (value: unknown, path: string): bigint => {
-    if (typeof value !== 'string' || !/^\d{1,25}$/u.test(value))
-      fail('INVALID_TRANSCRIPT', 'Money must be an integer string of minor units', path);
+    if (typeof value !== "string" || !/^\d{1,25}$/u.test(value))
+      fail(
+        "INVALID_TRANSCRIPT",
+        "Money must be an integer string of minor units",
+        path,
+      );
     return BigInt(value);
   };
   const stakes: Record<string, bigint> = {};
   const rawStakes = source.sideBetStakes;
   if (rawStakes !== undefined && rawStakes !== null) {
-    if (typeof rawStakes !== 'object')
-      fail('INVALID_TRANSCRIPT', 'Side-bet stakes must be an object', '$.sideBetStakes');
-    for (const [id, value] of Object.entries(rawStakes as Record<string, unknown>)) {
+    if (typeof rawStakes !== "object")
+      fail(
+        "INVALID_TRANSCRIPT",
+        "Side-bet stakes must be an object",
+        "$.sideBetStakes",
+      );
+    for (const [id, value] of Object.entries(
+      rawStakes as Record<string, unknown>,
+    )) {
       if (!SWARM.sideBets.some((bet) => bet.id === id))
-        fail('INVALID_TRANSCRIPT', `Unknown side bet ${id}`, '$.sideBetStakes');
+        fail("INVALID_TRANSCRIPT", `Unknown side bet ${id}`, "$.sideBetStakes");
       stakes[id] = units(value, `$.sideBetStakes.${id}`);
     }
   }
   const log = source.actionLog;
   if (!Array.isArray(log) || log.length > SWARM.ladder.stages)
-    fail('INVALID_TRANSCRIPT', 'Malformed action log', '$.actionLog');
+    fail("INVALID_TRANSCRIPT", "Malformed action log", "$.actionLog");
   const populations = source.populations;
   if (!Array.isArray(populations) || populations.length > SWARM.ladder.stages)
-    fail('INVALID_TRANSCRIPT', 'Malformed population list', '$.populations');
+    fail("INVALID_TRANSCRIPT", "Malformed population list", "$.populations");
   const rawLiveChain = source.liveChainValues;
-  if (!Array.isArray(rawLiveChain) || rawLiveChain.length > SWARM.ladder.stages + 1)
-    fail('INVALID_TRANSCRIPT', 'Malformed live action chain', '$.liveChainValues');
+  // The chain holds the seed commitment, then one value per resolved
+  // generation AND one per logged action — up to `2 * stages + 1`, not
+  // `stages + 1`. The tighter bound refused honest proofs from exactly the
+  // longest, highest-multiplier rounds: measured at 13% of settled rounds, an
+  // 18-generation round carrying 36 values. `verifyRound()` accepted the same
+  // bundle in process, so only players using the published endpoint — which is
+  // to say players — were told their round did not verify, on a product whose
+  // central claim is that they can check it themselves.
+  if (
+    !Array.isArray(rawLiveChain) ||
+    rawLiveChain.length > 2 * SWARM.ladder.stages + 1
+  )
+    fail(
+      "INVALID_TRANSCRIPT",
+      "Malformed live action chain",
+      "$.liveChainValues",
+    );
   const liveChainLength = rawLiveChain.length;
   const liveChainValues: string[] = [];
   for (let index = 0; index < liveChainLength; index += 1) {
     const value = rawLiveChain[index];
-    if (typeof value !== 'string' || !/^[0-9a-f]{64}$/u.test(value))
+    if (typeof value !== "string" || !/^[0-9a-f]{64}$/u.test(value))
       fail(
-        'INVALID_TRANSCRIPT',
-        'A live action-chain value must be a 64-character lowercase hex digest',
+        "INVALID_TRANSCRIPT",
+        "A live action-chain value must be a 64-character lowercase hex digest",
         `$.liveChainValues[${index}]`,
       );
     liveChainValues.push(value);
   }
   const receipts = source.receipts;
   if (!Array.isArray(receipts) || receipts.length > 128)
-    fail('INVALID_TRANSCRIPT', 'Malformed receipt ledger', '$.receipts');
+    fail("INVALID_TRANSCRIPT", "Malformed receipt ledger", "$.receipts");
   const results = source.sideBetResults;
   if (results !== undefined && (!Array.isArray(results) || results.length > 8))
-    fail('INVALID_TRANSCRIPT', 'Malformed side-bet results', '$.sideBetResults');
+    fail(
+      "INVALID_TRANSCRIPT",
+      "Malformed side-bet results",
+      "$.sideBetResults",
+    );
 
   return {
-    seedCommitment: text('seedCommitment'),
-    bodyCommitment: text('bodyCommitment'),
-    actionChain: text('actionChain'),
+    seedCommitment: text("seedCommitment"),
+    bodyCommitment: text("bodyCommitment"),
+    actionChain: text("actionChain"),
     liveChainValues,
-    revealedSeed: text('revealedSeed'),
-    roundId: text('roundId'),
-    clientEntropy: text('clientEntropy'),
-    adapterFingerprint: text('adapterFingerprint'),
-    stakeUnits: units(source.stakeUnits, '$.stakeUnits'),
+    revealedSeed: text("revealedSeed"),
+    roundId: text("roundId"),
+    clientEntropy: text("clientEntropy"),
+    adapterFingerprint: text("adapterFingerprint"),
+    stakeUnits: units(source.stakeUnits, "$.stakeUnits"),
     sideBetStakes: stakes,
     actionLog: log.map((entry: Record<string, unknown>, index: number) => {
-      if (typeof entry !== 'object' || entry === null)
-        fail('INVALID_TRANSCRIPT', 'Malformed action', `$.actionLog[${index}]`);
+      if (typeof entry !== "object" || entry === null)
+        fail("INVALID_TRANSCRIPT", "Malformed action", `$.actionLog[${index}]`);
       return {
         generation: Number(entry.generation),
-        kind: String(entry.kind) as 'CONTINUE' | 'HARVEST' | 'BANK',
+        kind: String(entry.kind) as "CONTINUE" | "HARVEST" | "BANK",
         units: Number(entry.units),
       };
     }),
     populations: populations.map((value: unknown) => Number(value)),
-    terminal: text('terminal'),
-    settlementMode: text('settlementMode'),
+    terminal: text("terminal"),
+    settlementMode: text("settlementMode"),
     sideBetResults: (results ?? []).map((entry: Record<string, unknown>) => ({
       id: String(entry.id),
       resolved: String(entry.resolved),
     })),
     receipts: receipts.map((entry: Record<string, unknown>, index: number) => {
-      if (typeof entry !== 'object' || entry === null)
-        fail('INVALID_TRANSCRIPT', 'Malformed receipt', `$.receipts[${index}]`);
+      if (typeof entry !== "object" || entry === null)
+        fail("INVALID_TRANSCRIPT", "Malformed receipt", `$.receipts[${index}]`);
       const theoreticalSource = entry.theoretical;
       const capped = entry.capped;
       const terminal = entry.terminal;
       let theoretical: Rational | null = null;
       if (theoreticalSource !== null && theoreticalSource !== undefined) {
-        if (typeof theoreticalSource !== 'object')
+        if (typeof theoreticalSource !== "object")
           fail(
-            'INVALID_TRANSCRIPT',
-            'Malformed theoretical amount',
+            "INVALID_TRANSCRIPT",
+            "Malformed theoretical amount",
             `$.receipts[${index}].theoretical`,
           );
         const raw = theoreticalSource as Record<string, unknown>;
-        if (typeof raw.fraction !== 'string' || !/^-?\d+\/[1-9]\d*$/u.test(raw.fraction))
+        if (
+          typeof raw.fraction !== "string" ||
+          !/^-?\d+\/[1-9]\d*$/u.test(raw.fraction)
+        )
           fail(
-            'INVALID_TRANSCRIPT',
-            'Theoretical amount must carry an exact fraction',
+            "INVALID_TRANSCRIPT",
+            "Theoretical amount must carry an exact fraction",
             `$.receipts[${index}].theoretical.fraction`,
           );
-        const [numerator, denominator] = raw.fraction.split('/');
-        theoretical = rational(BigInt(numerator as string), BigInt(denominator as string));
+        const [numerator, denominator] = raw.fraction.split("/");
+        theoretical = rational(
+          BigInt(numerator as string),
+          BigInt(denominator as string),
+        );
         const expectedDecimal = wireRational(theoretical)?.decimal;
         if (raw.decimal !== expectedDecimal)
           fail(
-            'INVALID_TRANSCRIPT',
-            'Theoretical decimal does not match its exact fraction',
+            "INVALID_TRANSCRIPT",
+            "Theoretical decimal does not match its exact fraction",
             `$.receipts[${index}].theoretical.decimal`,
           );
       }
-      if (typeof capped !== 'boolean')
-        fail('INVALID_TRANSCRIPT', 'Receipt capped must be a boolean', `$.receipts[${index}].capped`);
+      if (typeof capped !== "boolean")
+        fail(
+          "INVALID_TRANSCRIPT",
+          "Receipt capped must be a boolean",
+          `$.receipts[${index}].capped`,
+        );
       return {
-        schema: String(entry.schema) as Receipt['schema'],
+        schema: String(entry.schema) as Receipt["schema"],
         sequence: Number(entry.sequence),
         kind: String(entry.kind),
         line: String(entry.line),
         direction: String(entry.direction),
         stage: Number(entry.stage),
-        amountUnits: units(entry.amountUnits, `$.receipts[${index}].amountUnits`),
+        amountUnits: units(
+          entry.amountUnits,
+          `$.receipts[${index}].amountUnits`,
+        ),
         unitsHarvested: Number(entry.unitsHarvested ?? 0),
-        resolved: entry.resolved === null || entry.resolved === undefined ? null : String(entry.resolved),
+        resolved:
+          entry.resolved === null || entry.resolved === undefined
+            ? null
+            : String(entry.resolved),
         theoretical,
         capped,
         ...(terminal === undefined || terminal === null
@@ -303,8 +377,8 @@ export function wireConfig(options: {
       adapterVersion: SWARM.adapterVersion,
       adapterContract: {
         id: SWARM.apiVersion,
-        owner: 'SWARM — docs/ENGINE.md',
-        implementedBy: 'this repository, src/server/',
+        owner: "SWARM — docs/ENGINE.md",
+        implementedBy: "this repository, src/server/",
         note: "SWARM's own module contract. Not a conformance claim to a module the engine ships.",
       },
       cohortModel: SWARM.cohort.modelVersion,
@@ -321,9 +395,9 @@ export function wireConfig(options: {
           version: STAGED_SURVIVAL_MODULE_VERSION,
         },
         provides:
-          'Exact rational arithmetic, the payable and per-line cap money path, the canonical field encoding, SHA-256 and constant-time digest comparison, the idempotency discipline and the error taxonomy.',
+          "Exact rational arithmetic, the payable and per-line cap money path, the canonical field encoding, SHA-256 and constant-time digest comparison, the idempotency discipline and the error taxonomy.",
         doesNotProvide:
-          'The round lifecycle. The engine ships a staged-survival module that resolves a shrinking subset of a fixed set and, by its own documentation, cannot express offspring — so SWARM’s branching colony, the ladder, the wild line, both commitment phases, the action chain, the per-line ledger and the verifier are implemented in this repository against docs/ENGINE.md.',
+          "The round lifecycle. The engine ships a staged-survival module that resolves a shrinking subset of a fixed set and, by its own documentation, cannot express offspring — so SWARM’s branching colony, the ladder, the wild line, both commitment phases, the action chain, the per-line ledger and the verifier are implemented in this repository against docs/ENGINE.md.",
       },
       proof: SWARM.proof,
     },
@@ -348,7 +422,8 @@ export function wireConfig(options: {
         id: outcome.id,
         children: outcome.children,
         band: `${outcome.lowDraw}-${outcome.highDraw}`,
-        percent: (Number(outcome.weight) * 100) / Number(SWARM.cohort.drawModulus),
+        percent:
+          (Number(outcome.weight) * 100) / Number(SWARM.cohort.drawModulus),
       })),
       harvestQuantum: SWARM.thinning.clientQuantum,
       commitsPerStage: SWARM.thinning.commitsPerStage,
@@ -367,7 +442,7 @@ export function wireConfig(options: {
       roundCycleMs: options.pacing.roundCycleMs,
       decisionDeadPeriodMs: options.pacing.decisionDeadPeriodMs,
       settlementHoldMs: options.pacing.settlementHoldMs,
-      enforcedBy: 'server and client',
+      enforcedBy: "server and client",
     },
     /** `docs/DESIGN.md` §9.9's player-protection surfaces. */
     protection: {
@@ -375,34 +450,39 @@ export function wireConfig(options: {
       limitCoolOffHours: options.limitCoolOffHours,
       limits: [
         {
-          field: 'budgetUnits',
-          label: 'Stake budget',
-          kind: 'money',
+          field: "budgetUnits",
+          label: "Stake budget",
+          kind: "money",
           description:
-            'The most this session may put at risk in total. Free play has no deposits, so this is the deposit limit’s stand-in.',
+            "The most this session may put at risk in total. Free play has no deposits, so this is the deposit limit’s stand-in.",
         },
         {
-          field: 'lossUnits',
-          label: 'Loss limit',
-          kind: 'money',
-          description: 'The largest net loss this session may reach before further stakes are refused.',
+          field: "lossUnits",
+          label: "Loss limit",
+          kind: "money",
+          description:
+            "The largest net loss this session may reach before further stakes are refused.",
         },
         {
-          field: 'timeMinutes',
-          label: 'Time limit',
-          kind: 'minutes',
-          description: 'How long this session may run before further stakes are refused.',
+          field: "timeMinutes",
+          label: "Time limit",
+          kind: "minutes",
+          description:
+            "How long this session may run before further stakes are refused.",
         },
       ],
       helpResources: HELP_RESOURCES,
-      freePlayNotice: 'FREE-PLAY DEMO CREDITS · NO CASH VALUE',
+      freePlayNotice: "FREE-PLAY DEMO CREDITS · NO CASH VALUE",
     },
     ladder: PAYTABLE.ladder,
     sideBets: SIDE_BETS.map((bet) => ({
       id: bet.id,
       label: bet.label,
       description: bet.description,
-      multiplier: { fraction: `${bet.multiplier.numerator}/${bet.multiplier.denominator}`, decimal: bet.multiplierDecimal },
+      multiplier: {
+        fraction: `${bet.multiplier.numerator}/${bet.multiplier.denominator}`,
+        decimal: bet.multiplierDecimal,
+      },
       probabilityDecimal: bet.probabilityDecimal,
       oneIn: bet.oneIn,
       capMultiple: bet.capMultiple.toString(),

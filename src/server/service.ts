@@ -125,6 +125,7 @@ export class RoundService {
   readonly #wallet: Wallet;
   readonly #rounds = new Map<string, RoundRecord>();
   readonly #history: HistoryEntry[] = [];
+  /** Seeds owned by records still retained in `#rounds`; pruned with the record. */
   readonly #issuedSeeds = new Set<string>();
   #counter = 0;
 
@@ -453,8 +454,7 @@ export class RoundService {
       // A round that was created and never opened holds no stake and no
       // transcript: there is nothing to settle, so it is simply dropped.
       if (record.book === null) {
-        this.#rounds.delete(record.roundId);
-        this.pacer.forget(record.roundId);
+        this.#forget(record);
         continue;
       }
       const result = record.book.reconcile(`reconcile:${record.roundId}`);
@@ -472,9 +472,18 @@ export class RoundService {
     while (settled.length > this.#historyLimit) {
       const oldest = settled.shift();
       if (oldest === undefined) continue;
-      this.#rounds.delete(oldest.roundId);
-      this.pacer.forget(oldest.roundId);
+      this.#forget(oldest);
     }
+  }
+
+  /**
+   * Releases every per-round registry together. A seed remains reserved for as
+   * long as its round could collide, then leaves custody with that round.
+   */
+  #forget(record: RoundRecord): void {
+    if (!this.#rounds.delete(record.roundId)) return;
+    this.#issuedSeeds.delete(record.seed);
+    this.pacer.forget(record.roundId);
   }
 
   async #paced<T>(

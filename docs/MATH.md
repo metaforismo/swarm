@@ -1203,8 +1203,9 @@ left to be inferred:
   gives a player pre-reveal evidence of their own decisions. Neither produces a
   log a third party can verify without the player retaining what they were handed
   (`docs/ENGINE.md` §8).
-- **Everything the client does with all this.** No client exists in this
-  repository, so no claim here is evidence about a shipped user interface.
+- **Everything the client does with all this.** A client exists in `src/client`,
+  but no claim here certifies its presentation, rendering or interaction
+  behaviour.
 - **Operator infrastructure.** Deploying this game for real money would require
   independent RNG and seed-custody review, an operator wallet and idempotency
   audit, jurisdictional review, and whatever laboratory process applies — none of

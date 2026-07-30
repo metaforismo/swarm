@@ -320,3 +320,76 @@ read one. Both rows are true.
 
 **Reopen if.** Reveal Engine ships a branching-population module and SWARM adopts
 it. Then there is one identity because there is one implementation.
+
+---
+
+## D10 — The round service keeps one custody boundary
+
+**Decided.** The process-local `RoundService` owns every mutable round book,
+wallet total and sealed seed. Public record, book, history and wallet reads are
+detached frozen views. Each caller-owned command is copied and validated once,
+before a pacing wait or any idempotency decision, and that canonical snapshot is
+the only value the command executes. Wallet receipt batches are validated into
+locals and committed with one state replacement. Exact retries replay their
+recorded result without moving the abandonment clock or consuming another
+pacing floor.
+
+Server seeds are generated inside the service in production, normalized, and
+kept unique for as long as the owning round remains in the registry. The issued
+seed leaves the uniqueness set only when the same round is evicted; a retained
+round can therefore never collide, while the set has the same lifetime bound as
+the registry it protects. At settlement the verifier replays the seed, client
+entropy, action log and receipts and checks every published live-chain value
+rather than accepting redundant proof fields as authority. D8's floors are
+enforced at this service boundary, so direct callers and HTTP callers obey the
+same waits.
+
+**Rejected.** The round-2 build's split authority: returning live `StageBook` and
+wallet objects, reading request getters again after validation, posting a receipt
+batch incrementally, accepting a caller-provided production seed source, moving
+retry deadlines as if a replay were progress, trusting submitted receipt or
+chain values because their enclosing commitment matched, and pacing only the
+HTTP transport.
+
+**Why.** All of those alternatives let an untrusted boundary participate in a
+fact the server later treats as settled: what was requested, what money moved,
+which entropy was sealed, what action was logged, or when the round progressed.
+One custody boundary makes those facts functions of server-held state and one
+canonical command. The verifier then checks the same facts independently instead
+of merely checking that a self-consistent claim was signed.
+
+**What it costs.** Public reads allocate copies, verification replays the round,
+and receipt posting stages a complete batch before committing it. Deterministic
+seed injection is restricted to the test environment. These costs are bounded by
+the existing command, transcript and live-round limits; they do not add accounts,
+authentication or durable storage to this free-play prototype.
+
+**Reopen if.** The service becomes multi-process or durable. The ownership rule
+stays, but the authority moves behind a transactional store and a real seed
+custodian rather than process memory.
+
+---
+
+## D11 — Snapshot and restore are absent, so the contract says so
+
+**Decided.** Correct the engine contract to the implementation: SWARM exposes no
+`snapshot()` or `restore()` surface, declares no snapshot schema identity, and
+makes no cross-process recovery claim ([ENGINE.md §7](ENGINE.md)).
+
+**Rejected.** Implementing a new persistence protocol solely to preserve prose
+that described snapshot round-trips and validation checks the repository had
+never shipped.
+
+**Why.** This repository is explicitly a process-local free-play prototype.
+Inventing a serialized authority boundary is product and protocol work, not a
+documentation repair: it would require versioning, migration, integrity,
+idempotency and seed-custody decisions beyond the closed scope. A conformance
+item for nonexistent code weakens the rest of the conformance list.
+
+**What it costs.** A process restart loses in-memory rounds and there is no
+resume-after-restart claim. That limitation is now visible rather than hidden
+behind an interface sketch.
+
+**Reopen if.** Durable recovery becomes an explicit product requirement. Add the
+implementation, schema and adversarial restore tests together, then version the
+contract around the shipped behavior.
