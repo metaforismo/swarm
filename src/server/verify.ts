@@ -35,6 +35,7 @@ export interface ProofBundle {
   readonly seedCommitment: string;
   readonly bodyCommitment: string;
   readonly actionChain: string;
+  readonly liveChainValues: readonly string[];
   readonly revealedSeed: string;
   readonly roundId: string;
   readonly clientEntropy: string;
@@ -234,6 +235,17 @@ export function verifyRound(proof: ProofBundle): VerificationResult {
     // 7 and 8. The chain and the body, re-sealed over what was actually replayed.
     if (!constantTimeHexEqual(expected.proof.actionChain, snapshot.actionChain))
       return stop('COMMITMENT_MISMATCH', 'action chain does not re-derive');
+    if (snapshot.liveChainValues.length !== expected.proof.liveChainValues.length)
+      return stop('COMMITMENT_MISMATCH', 'live action chain length does not re-derive');
+    for (let index = 0; index < snapshot.liveChainValues.length; index += 1) {
+      if (
+        !constantTimeHexEqual(
+          expected.proof.liveChainValues[index] as string,
+          snapshot.liveChainValues[index] as string,
+        )
+      )
+        return stop('COMMITMENT_MISMATCH', `live action chain value ${index} does not re-derive`);
+    }
     pass(expected.proof.actionChain);
 
     const actualBody = bodyCommitment({
@@ -306,6 +318,13 @@ function snapshotProof(input: ProofBundle): ProofBundle {
   for (let index = 0; index < populationLength; index += 1)
     populations.push(populationSource[index] as number);
 
+  const liveChainSource = source.liveChainValues;
+  if (!Array.isArray(liveChainSource)) throw new Error('live action chain is not an array');
+  const liveChainLength = liveChainSource.length;
+  const liveChainValues: string[] = [];
+  for (let index = 0; index < liveChainLength; index += 1)
+    liveChainValues.push(liveChainSource[index] as string);
+
   const resultSource = source.sideBetResults;
   if (!Array.isArray(resultSource)) throw new Error('side-bet results are not an array');
   const resultLength = resultSource.length;
@@ -359,6 +378,7 @@ function snapshotProof(input: ProofBundle): ProofBundle {
     seedCommitment: source.seedCommitment as string,
     bodyCommitment: source.bodyCommitment as string,
     actionChain: source.actionChain as string,
+    liveChainValues,
     revealedSeed: source.revealedSeed as string,
     roundId: source.roundId as string,
     clientEntropy: source.clientEntropy as string,

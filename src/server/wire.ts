@@ -169,6 +169,21 @@ export function parseProofBundle(input: unknown): ProofBundle {
   const populations = source.populations;
   if (!Array.isArray(populations) || populations.length > SWARM.ladder.stages)
     fail('INVALID_TRANSCRIPT', 'Malformed population list', '$.populations');
+  const rawLiveChain = source.liveChainValues;
+  if (!Array.isArray(rawLiveChain) || rawLiveChain.length > SWARM.ladder.stages + 1)
+    fail('INVALID_TRANSCRIPT', 'Malformed live action chain', '$.liveChainValues');
+  const liveChainLength = rawLiveChain.length;
+  const liveChainValues: string[] = [];
+  for (let index = 0; index < liveChainLength; index += 1) {
+    const value = rawLiveChain[index];
+    if (typeof value !== 'string' || !/^[0-9a-f]{64}$/u.test(value))
+      fail(
+        'INVALID_TRANSCRIPT',
+        'A live action-chain value must be a 64-character lowercase hex digest',
+        `$.liveChainValues[${index}]`,
+      );
+    liveChainValues.push(value);
+  }
   const receipts = source.receipts;
   if (!Array.isArray(receipts) || receipts.length > 128)
     fail('INVALID_TRANSCRIPT', 'Malformed receipt ledger', '$.receipts');
@@ -180,6 +195,7 @@ export function parseProofBundle(input: unknown): ProofBundle {
     seedCommitment: text('seedCommitment'),
     bodyCommitment: text('bodyCommitment'),
     actionChain: text('actionChain'),
+    liveChainValues,
     revealedSeed: text('revealedSeed'),
     roundId: text('roundId'),
     clientEntropy: text('clientEntropy'),
