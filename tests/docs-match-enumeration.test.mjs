@@ -170,6 +170,24 @@ describe('prose numbers agree with the model', () => {
     }
     expect(engine).toContain(`abandonedRoundTimeoutHours: ${ABANDONED_ROUND_TIMEOUT_HOURS}`);
   });
+
+  it('publishes the strict payable bound and no unsupported snapshot contract', () => {
+    const oneLineEngine = flat(engine);
+    expect(oneLineEngine).toMatch(
+      /0 <= sum\(x_i\) - sum\(floor\(x_i\)\) < m minor units/u,
+    );
+    expect(oneLineEngine).toMatch(
+      /strictly less than 18 units = 0\.000018 credits/u,
+    );
+    expect(oneLineEngine).toMatch(
+      /less than `1\.8e-4` of stake, or 0\.018 percentage points of RTP/u,
+    );
+    expect(oneLineEngine).toMatch(
+      /exposes neither `snapshot\(\)` nor `restore\(\)`/u,
+    );
+    expect(engine).not.toContain('snapshot(): StageBookSnapshot');
+    expect(engine).not.toContain('static restore(game: StagedSurvivalDefinition');
+  });
 });
 
 describe('documentation discipline', () => {
