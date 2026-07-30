@@ -371,6 +371,7 @@ describe('SWARM-07 — verification binds the submitted receipt content', () => 
       ['population', (proof) => { proof.populations[0] += 1; }],
       ['terminal', (proof) => { proof.terminal = 'FINAL'; }],
       ['settlement mode', (proof) => { proof.settlementMode = 'RECONCILED'; }],
+      ['live chain value', (proof) => { proof.liveChainValues[0] = '0'.repeat(64); }],
       ['side-bet outcome', (proof) => { proof.sideBetResults[0].resolved = 'LOST'; }],
       ['receipt schema', (proof) => { proof.receipts[0].schema = 'receipt-v1'; }],
       ['receipt sequence', (proof) => { proof.receipts[0].sequence += 1; }],
