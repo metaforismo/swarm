@@ -135,6 +135,17 @@ export class Pacer {
   }
 
   /**
+   * Extends the dead period through command completion. Admission serializes
+   * concurrent callers; this closes the smaller response-time gap so a caller
+   * cannot receive a frame with part of its advertised decision floor already
+   * consumed by server work.
+   */
+  progressed(roundId: string): void {
+    const gate = this.#now() + this.floors.decisionDeadPeriodMs;
+    this.#roundGate.set(roundId, Math.max(this.#roundGate.get(roundId) ?? 0, gate));
+  }
+
+  /**
    * Puts a round's dead period back the way a released command found it.
    *
    * Restoring rather than deleting is the whole of it: an `open` refused on a round

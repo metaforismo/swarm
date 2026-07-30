@@ -1,7 +1,8 @@
 # SWARM — product design specification
 
 Deep-sea colony game for Axiom Games, built on Reveal Engine™.
-Portrait, one-handed, no timers, 95% RTP on every line.
+Portrait, one-handed, no timers, 95% theoretical RTP before rounding on every
+line; payable credits round down by the quantified bound in §9.2.
 
 This document is the build brief: loop, decisions, bets, screen-by-screen UX,
 art direction, sound direction, and the rules the game may not break. Numbers
@@ -44,8 +45,9 @@ clock running anywhere.
    nothing in the game is timed at all, so the entire class of latency-fairness
    problems does not exist here by construction, not by mitigation.
 3. **Provable indifference.** Bank instantly or ride eighteen generations, the
-   return is exactly 95% either way, and we publish the exhaustive proof. The
-   game never pretends a decision is worth more than it is.
+   theoretical return before payable floors is exactly 95% either way, and we
+   publish the exhaustive proof. The game never pretends a decision is worth
+   more than it is.
 
 ### 1.1 Prior art, and what is actually new
 
@@ -123,9 +125,9 @@ distribution of outcomes in a way we can state exactly, or it does not exist.
 
 | Decision | When it is offered | What it changes | What it does not change |
 | --- | --- | --- | --- |
-| Stake | Before generation 1 | Scales every COLONY payout linearly | RTP (95%), the draws |
-| Side bets | Before generation 1 **only** | Adds independent lines, each with its own stake and its own 95%, resolved at settlement on the unharvested "wild line" | The colony, the base bet, the draws |
-| **Client seed** | Before generation 1 **only**, after the server has published its commitment | Changes the whole 270-draw grid. It is the player's half of the fairness handshake: the server sealed its seed first, so it cannot pick a grid to suit the entropy you choose ([ENGINE.md §4.5](ENGINE.md)) | The distribution of anything. Every client seed gives the same 95% and the same odds |
+| Stake | Before generation 1 | Scales every COLONY payout linearly | Theoretical RTP (95% before payable floors), the draws |
+| Side bets | Before generation 1 **only** | Adds independent lines, each with its own stake and its own 95% theoretical RTP before payable floors, resolved at settlement on the unharvested "wild line" | The colony, the base bet, the draws |
+| **Client seed** | Before generation 1 **only**, after the server has published its commitment | Changes the whole 270-draw grid. It is the player's half of the fairness handshake: the server sealed its seed first, so it cannot pick a grid to suit the entropy you choose ([ENGINE.md §4.5](ENGINE.md)) | The distribution of anything. Every client seed gives the same 95% theoretical RTP before payable floors and the same odds |
 | `SEED` | Before generation 1 | Sends the client seed and starts the round | Nothing about the outcome — the grid is fixed the moment both halves exist |
 | `CONTINUE` | After every resolved generation (`t < 18`) | Colony consumes `n` more draws; value moves up the ladder or to zero | Expected return |
 | `HARVEST k` | Same, when `n >= 2`; once per generation | Credits any `k` from 1 to `n - 1` organisms **now** at the current yield; the rest keep climbing. Because a smaller colony consumes fewer draws, this genuinely changes which draws you meet next generation. It also caps how large the colony can become, which is why FULL BLOOM frequencies are published per play pattern ([MATH.md §8.2](MATH.md)) | Expected return |
@@ -162,14 +164,16 @@ proves none does.
 ## 4. Bet types
 
 A ticket is one COLONY bet plus zero to three side bets. **Every bet on the
-ticket carries its own stake, its own cap and its own 95%.** No bet's payout is
-charged against another bet's ceiling, so the size of one bet never changes what
-another one pays ([MATH.md §12](MATH.md)).
+ticket carries its own stake, its own cap and its own 95% theoretical RTP before
+rounding.** No bet's payout is charged against another bet's ceiling, so the size
+of one bet never changes what another one pays ([MATH.md §12](MATH.md)).
 
 ### 4.1 COLONY — the base bet
 
 The game itself. Stake range 0.10 to 1,000.00 credits, in integer minor units
-(`1 credit = 10^6 units`). RTP exactly 95% under any play pattern. Maximum
+(`1 credit = 10^6 units`). Theoretical RTP is exactly 95% under any play pattern
+before floor rounding; payable RTP is lower by less than 18 units per round,
+which is less than 0.018 percentage points at the minimum stake (§9.2). Maximum
 cumulative round credit 905.77x on its own stake; declared cap 906x, proven never
 to bind.
 
@@ -187,9 +191,10 @@ their colony.
 | **SWARM** | The wild line reaches 10+ organisms at any point | 248.798x | 1 in 261.89 | 249x |
 
 Each is priced at exactly `(19/20) / probability`, so all three carry the same
-95% RTP as the base game. Each has its **own stake**, 0.10 to 100.00 credits,
-independent of the colony stake; the ticket's total stake is shown before `SEED`
-so the real amount at risk is never hidden behind three toggles.
+95% theoretical RTP before their one payable credit is rounded down. Each has
+its **own stake**, 0.10 to 100.00 credits, independent of the colony stake; the
+ticket's total stake is shown before `SEED` so the real amount at risk is never
+hidden behind three toggles.
 
 **When they resolve, and what the player sees while the round runs.** Side bets
 are *credited* only at settlement, after the base round is over. But a bet that
@@ -1162,8 +1167,9 @@ The rules that follow are binding.
   whenever you want."* The qualifier is not hedging and it is not optional:
   [MATH.md §6](MATH.md) is a theorem about the exact rational value the paytable
   owes, and what a wallet credits is that value floored at each credit event, so
-  a player who harvests often is behind a player who banks once by up to 18 minor
-  units a round — `0.000018` credits, `0.018` percentage points at the minimum
+  a player who harvests often is behind a player who banks once by strictly less
+  than 18 minor units a round — less than both `0.000018` credits and `0.018`
+  percentage points at the minimum
   stake ([MATH.md §13](MATH.md)). The help screen states the size in the same
   breath as the claim, which is the only way to say both true things at once.
 
@@ -1198,7 +1204,7 @@ The rules that follow are binding.
 - The help screen states plainly: *"Every way of playing SWARM returns the same
   95% on average, before rounding. Every credit is rounded down to the nearest
   0.000001, so harvesting often costs a fraction of a penny more than banking
-  once — at most 0.000018 a round. Your choices change how often you win and how
+  once — strictly less than 0.000018 a round. Your choices change how often you win and how
   much."* The rounding sentence is mandatory. Dropping it makes the claim false,
   and [MATH.md §6](MATH.md) is careful about exactly this distinction — "every
   way of playing returns the same" is true of the theoretical value and false of
@@ -1233,13 +1239,14 @@ shaped side bets are a recognised responsible-gambling concern — blackjack
 insurance is the canonical example — because they increase total stake per round
 while feeling like risk reduction.
 
-Round 3 defended the pairing with "two 95% bets combine to 95% of the total
-staked, on a larger total". That is true, and it is the wrong statistic: §9.3
+Round 3 defended the pairing with "two bets at 95% theoretical RTP before
+payable floors combine to the same theoretical RTP on a larger total". That is
+true, and it is the wrong statistic: §9.3
 makes the **profit rate** the binding figure, and the profit rate of a ticket is
 not the average of its lines'. Enumerated exactly at equal stakes
 ([MATH.md §7.4](MATH.md)):
 
-| Ticket | Ticket RTP | `P(ticket returns more than the ticket stake)` |
+| Ticket | Theoretical ticket RTP before payable floors | `P(ticket returns more than the ticket stake)` |
 | --- | --- | --- |
 | COLONY alone, `BANK_FIRST` | `19/20` | 0.4560000000 |
 | COLONY + DARK VENT, `BANK_FIRST` | `19/20` | **0.3608881499** |

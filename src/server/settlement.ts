@@ -28,6 +28,7 @@ import type { LoggedAction, RoundContext, RoundReplay, WildLine } from './deriva
 import { multiply, payableWithinCap, rational, type Rational } from './engine.ts';
 import { fail } from './errors.ts';
 import { SIDE_BETS } from './paytable.ts';
+import { frozenCopy } from './snapshot.ts';
 
 export const RECEIPT_SCHEMA = 'receipt-v2' as const;
 
@@ -96,12 +97,13 @@ export interface SealInput {
 
 /** Resolves all three side bets against the wild line. A pure function of the grid. */
 export function resolveSideBets(wild: WildLine): ReadonlyMap<string, boolean> {
-  const first = wild.populations[0] ?? 0;
-  return new Map<string, boolean>([
+  const populations = wild.populations;
+  const first = populations[0] ?? 0;
+  return frozenCopy(new Map<string, boolean>([
     ['FIRST_LIGHT', first >= 4],
     ['DARK_VENT', wild.extinctGeneration !== null && wild.extinctGeneration <= 3],
     ['SWARM', wild.peak >= 10],
-  ]);
+  ]));
 }
 
 /**
@@ -256,13 +258,13 @@ export function sealSettlement(input: SealInput): Settlement {
   if (creditedUnits > exposure)
     fail('INVALID_ADAPTER', 'A ticket credited more than its disclosed worst-case exposure');
 
-  return Object.freeze({
-    receipts: Object.freeze(receipts),
+  return frozenCopy({
+    receipts,
     creditedUnits,
     stakedUnits,
     exposureUnits: exposure,
     round,
-    proof: Object.freeze({
+    proof: {
       seedCommitment,
       bodyCommitment: body,
       actionChain: chain.terminal,
@@ -274,11 +276,11 @@ export function sealSettlement(input: SealInput): Settlement {
       stakeUnits,
       sideBetStakes,
       actionLog: round.actions,
-      populations: Object.freeze(round.trace.map((entry) => entry.population)),
+      populations: round.trace.map((entry) => entry.population),
       terminal,
       settlementMode,
-      sideBetResults: Object.freeze(sideBetResults),
+      sideBetResults,
       wild,
-    }),
+    },
   });
 }

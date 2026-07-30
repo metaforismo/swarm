@@ -1,367 +1,430 @@
 import type { AddressInfo } from 'node:net';
-import { afterEach, describe, expect, it } from 'vitest';
-import { SWARM } from '../src/server/adapter.ts';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createApp, type App } from '../src/server/http.ts';
 import { seedCommitment } from '../src/server/commitment.ts';
-import { deriveGrid, replayRound, roundContext, wildLineOf } from '../src/server/derivation.ts';
-import { createApp } from '../src/server/http.ts';
 import { RoundService } from '../src/server/service.ts';
-import { sealSettlement, type Receipt } from '../src/server/settlement.ts';
-import { verifyRound } from '../src/server/verify.ts';
+import type { Receipt, Settlement } from '../src/server/settlement.ts';
+import { verifyRound, type ProofBundle } from '../src/server/verify.ts';
 import { Wallet } from '../src/server/wallet.ts';
 
 const ENTROPY = 'c'.repeat(64);
 const SEED_A = '9667b8896a62186befbaf96b9ae8e4704e44d065f0ae6aa6a43a4239c63874cb';
 const SEED_B = '0e4ac2893a15a0fc6a7caecedbc56d943eee45377f5ef4f2ecf9cc758bcb1ec2';
-const CREDIT = SWARM.money.unitsPerCredit;
-const NO_PACING = { roundCycleMs: 0, decisionDeadPeriodMs: 0, settlementHoldMs: 0 };
+const ZERO_PACING = Object.freeze({
+  roundCycleMs: 0,
+  decisionDeadPeriodMs: 0,
+  settlementHoldMs: 0,
+});
 
-let counter = 0;
-const key = (label: string): string => `hardening-${label}-${(counter += 1)}`;
+let roundCounter = 0;
 
-function service(
-  overrides: ConstructorParameters<typeof RoundService>[0] = {},
+function serviceFor(
+  options: ConstructorParameters<typeof RoundService>[0] = {},
 ): RoundService {
   return new RoundService({
-    openingBalanceUnits: 10_000n * CREDIT,
+    openingBalanceUnits: 2_000_000_000n,
     seedSource: () => SEED_A,
     roundIdSource: () => 'swarm-fixture-0',
-    pacing: NO_PACING,
-    ...overrides,
+    pacing: ZERO_PACING,
+    ...options,
   });
 }
 
-async function openRound(rounds: RoundService, sideBets: readonly { id: string; stakeUnits: bigint }[] = []) {
-  const created = rounds.createRound();
-  const opened = await rounds.open(created.roundId, {
-    idempotencyKey: key('open'),
-    expectedFrameRevision: 0,
-    stakeUnits: CREDIT,
-    sideBets,
-    clientEntropy: ENTROPY,
-  });
-  return { ...created, opened };
+async function openRound(
+  service: RoundService,
+  request: Record<string, unknown> = {},
+): Promise<{ roundId: string; result: any }> {
+  const roundId = service.createRound().roundId;
+  const result = await service.open(
+    roundId,
+    {
+      idempotencyKey: `open-${roundId}`,
+      expectedFrameRevision: 0,
+      stakeUnits: 1_000_000n,
+      sideBets: [],
+      clientEntropy: ENTROPY,
+      ...request,
+    } as any,
+  );
+  return { roundId, result };
 }
 
-describe('finding 1 — public state is a frozen copy, never settlement custody', () => {
-  it('cannot delete a posted harvest receipt and make settlement credit it twice', async () => {
-    const rounds = service();
-    const { roundId, opened } = await openRound(rounds);
-    const advanced = await rounds.advance(roundId, {
-      idempotencyKey: key('advance'),
+async function bankFixture(
+  service: RoundService,
+  sideBets: readonly { id: string; stakeUnits: bigint }[] = [],
+): Promise<{ roundId: string; settlement: Settlement }> {
+  const { roundId, result: opened } = await openRound(service, { sideBets });
+  const advanced = await service.advance(roundId, {
+    idempotencyKey: `advance-${roundId}`,
+    expectedFrameRevision: opened.frame.revision,
+  });
+  const banked = await service.harvest(roundId, {
+    idempotencyKey: `bank-${roundId}`,
+    expectedFrameRevision: advanced.frame.revision,
+    units: advanced.frame.units,
+  });
+  const settled = await service.settle(roundId, {
+    idempotencyKey: `settle-${roundId}`,
+    expectedFrameRevision: banked.frame.revision,
+  });
+  return { roundId, settlement: settled.value };
+}
+
+function tryMutation(run: () => void): void {
+  try {
+    run();
+  } catch {
+    // A frozen public snapshot is expected to reject the write in strict mode.
+  }
+}
+
+describe('SWARM-01 — custody-held round state never crosses the public boundary', () => {
+  it('cannot turn a copied receipt deletion into a duplicate wallet credit', async () => {
+    const service = serviceFor();
+    const { roundId, result: opened } = await openRound(service);
+    const advanced = await service.advance(roundId, {
+      idempotencyKey: `advance-${roundId}`,
       expectedFrameRevision: opened.frame.revision,
     });
-    expect(advanced.frame.units).toBe(4);
-    const banked = await rounds.harvest(roundId, {
-      idempotencyKey: key('bank'),
+    const banked = await service.harvest(roundId, {
+      idempotencyKey: `bank-${roundId}`,
       expectedFrameRevision: advanced.frame.revision,
-      units: 4,
+      units: advanced.frame.units,
     });
-    const afterHarvest = rounds.wallet.balanceUnits;
+    expect(banked.receipts[0]?.amountUnits).toBe(1_583_333n);
+    const afterBank = service.wallet.balanceUnits;
 
-    const exposed = rounds.book(roundId);
-    const receipts = exposed.receipts as Receipt[];
-    const harvestAt = receipts.findIndex((receipt) => receipt.kind === 'HARVEST');
-    expect(harvestAt).toBeGreaterThanOrEqual(0);
-    try {
-      receipts.splice(harvestAt, 1);
-    } catch {
-      // A frozen public snapshot is allowed to reject the attempted mutation.
-    }
+    const exposed = service.book(roundId);
+    tryMutation(() => {
+      (exposed.receipts as Receipt[]).splice(1, 1);
+    });
 
-    const settled = await rounds.settle(roundId, {
-      idempotencyKey: key('settle'),
+    const settled = await service.settle(roundId, {
+      idempotencyKey: `settle-${roundId}`,
       expectedFrameRevision: banked.frame.revision,
     });
-    expect(rounds.wallet.balanceUnits).toBe(afterHarvest);
-    expect(settled.value.receipts.filter((receipt) => receipt.kind === 'HARVEST')).toHaveLength(1);
+    expect(settled.value.creditedUnits).toBe(1_583_333n);
+    expect(service.wallet.balanceUnits).toBe(afterBank);
+    expect(service.book(roundId).receipts.map((receipt) => receipt.sequence)).toEqual([1, 2, 3]);
   });
 
-  it('cannot add a side bet after its wild outcome is known', async () => {
-    const rounds = service();
-    const { roundId, opened } = await openRound(rounds);
-    let frame = (
-      await rounds.advance(roundId, {
-        idempotencyKey: key('advance'),
-        expectedFrameRevision: opened.frame.revision,
-      })
-    ).frame;
-    expect(frame.wildPopulations[0]).toBe(4); // FIRST_LIGHT is already known to have won.
-
-    const exposed = rounds.book(roundId);
-    Reflect.set(exposed.sideBetStakes, 'FIRST_LIGHT', 100_000_000n);
-
+  it('cannot forge a side bet after its wild outcome is known', async () => {
+    const service = serviceFor();
+    const { roundId, result: opened } = await openRound(service);
+    const advanced = await service.advance(roundId, {
+      idempotencyKey: `advance-${roundId}`,
+      expectedFrameRevision: opened.frame.revision,
+    });
+    expect(advanced.frame.wildUnits).toBe(4);
+    let frame = advanced.frame;
+    let step = 0;
     while (frame.state === 'STAGED') {
-      frame = (
-        await rounds.advance(roundId, {
-          idempotencyKey: key('advance'),
-          expectedFrameRevision: frame.revision,
-        })
-      ).frame;
+      const next = await service.advance(roundId, {
+        idempotencyKey: `advance-terminal-${roundId}-${(step += 1)}`,
+        expectedFrameRevision: frame.revision,
+      });
+      frame = next.frame;
     }
-    const settled = await rounds.settle(roundId, {
-      idempotencyKey: key('settle'),
+
+    const exposed = service.book(roundId);
+    tryMutation(() => {
+      (exposed.sideBetStakes as Record<string, bigint>).FIRST_LIGHT = 100_000_000n;
+    });
+
+    const settled = await service.settle(roundId, {
+      idempotencyKey: `settle-${roundId}`,
       expectedFrameRevision: frame.revision,
     });
-    expect(settled.value.stakedUnits).toBe(CREDIT);
-    expect(settled.value.receipts.some((receipt) => receipt.kind === 'SIDE_BET')).toBe(false);
+    expect(settled.value.stakedUnits).toBe(1_000_000n);
+    expect(settled.value.proof.sideBetStakes).toEqual({});
+    expect(settled.value.receipts.some((receipt) => receipt.line === 'FIRST_LIGHT')).toBe(false);
   });
 });
 
-describe('finding 2 — service requests are snapshotted exactly once', () => {
-  it('does not let a stake getter pass the session limit with one value and execute another', async () => {
-    const rounds = service();
-    rounds.protection.set({ budgetUnits: '100000' });
-    const { roundId } = rounds.createRound();
-    let stakeReads = 0;
+describe('SWARM-02 — caller-owned commands are copied once', () => {
+  it('uses one stake snapshot for the session limit, fingerprint and debit', async () => {
+    const service = serviceFor();
+    service.protection.set({ budgetUnits: '100000' });
+    let reads = 0;
     const request = {
-      idempotencyKey: key('hostile-open'),
+      idempotencyKey: 'hostile-open',
       expectedFrameRevision: 0,
-      get stakeUnits() {
-        stakeReads += 1;
-        return stakeReads === 1 ? 100_000n : 1_000_000_000n;
+      get stakeUnits(): bigint {
+        reads += 1;
+        return reads === 1 ? 100_000n : 1_000_000_000n;
       },
       sideBets: [],
       clientEntropy: ENTROPY,
     };
+    const roundId = service.createRound().roundId;
 
-    await rounds.open(roundId, request);
-    expect(stakeReads).toBe(1);
-    expect(rounds.wallet.stakedUnits).toBe(100_000n);
-    expect(rounds.book(roundId).stakeUnits).toBe(100_000n);
+    const opened = await service.open(roundId, request);
+
+    expect(reads).toBe(1);
+    expect(opened.receipts[0]?.amountUnits).toBe(100_000n);
+    expect(service.wallet.stakedUnits).toBe(100_000n);
   });
 
-  it('uses one Proxy snapshot for a harvest fingerprint and its execution', async () => {
-    const rounds = service();
-    const { roundId, opened } = await openRound(rounds);
-    const advanced = await rounds.advance(roundId, {
-      idempotencyKey: key('advance'),
+  it('uses one proxied harvest value for the fingerprint and execution', async () => {
+    const service = serviceFor();
+    const { roundId, result: opened } = await openRound(service);
+    const advanced = await service.advance(roundId, {
+      idempotencyKey: `advance-${roundId}`,
       expectedFrameRevision: opened.frame.revision,
     });
-    let unitReads = 0;
-    const target = {
-      idempotencyKey: key('hostile-harvest'),
+    let unitsReads = 0;
+    const hostile = new Proxy(
+      {
+        idempotencyKey: 'hostile-harvest',
+        expectedFrameRevision: advanced.frame.revision,
+        units: 1,
+      },
+      {
+        get(target, property, receiver) {
+          if (property === 'units') {
+            unitsReads += 1;
+            return unitsReads === 1 ? 1 : 2;
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    );
+
+    const first = await service.harvest(roundId, hostile);
+    const retried = await service.harvest(roundId, {
+      idempotencyKey: 'hostile-harvest',
       expectedFrameRevision: advanced.frame.revision,
       units: 1,
-    };
-    const request = new Proxy(target, {
-      get(object, property, receiver) {
-        if (property === 'units') {
-          unitReads += 1;
-          return unitReads === 1 ? 1 : 2;
-        }
-        return Reflect.get(object, property, receiver);
-      },
     });
 
-    const harvested = await rounds.harvest(roundId, request);
-    expect(unitReads).toBe(1);
-    expect(harvested.receipts[0]?.unitsHarvested).toBe(1);
-    expect(harvested.frame.units).toBe(3);
-
-    const retried = await rounds.harvest(roundId, { ...target, units: 1 });
-    expect(retried).toEqual(harvested);
+    expect(unitsReads).toBe(1);
+    expect(first.receipts[0]?.unitsHarvested).toBe(1);
+    expect(first.frame.units).toBe(3);
+    expect(retried).toEqual(first);
   });
 });
 
-describe('finding 4 — wallet posting is atomic', () => {
-  it('commits no debit when a later receipt in the same posting fails', () => {
-    const wallet = new Wallet(10n);
-    const receipt = (sequence: number, amountUnits: bigint): Receipt => ({
-      schema: 'receipt-v2',
-      sequence,
-      kind: 'OPEN',
-      line: 'COLONY',
-      direction: 'DEBIT',
-      stage: 0,
-      amountUnits,
-      unitsHarvested: 0,
-      resolved: null,
-      theoretical: null,
-      capped: false,
-    });
+describe('SWARM-04 — wallet posting is one transaction', () => {
+  it('leaves every total unchanged when a later debit makes the batch invalid', () => {
+    const wallet = new Wallet(100n);
+    const receipts = [
+      { direction: 'DEBIT', amountUnits: 40n },
+      { direction: 'DEBIT', amountUnits: 70n },
+    ] as Receipt[];
 
-    expect(() => wallet.post([receipt(1, 5n), receipt(2, 20n)])).toThrow();
-    expect(wallet.balanceUnits).toBe(10n);
+    expect(() => wallet.post(receipts)).toThrow();
+    expect(wallet.balanceUnits).toBe(100n);
     expect(wallet.stakedUnits).toBe(0n);
     expect(wallet.creditedUnits).toBe(0n);
   });
 });
 
-const servers: ReturnType<typeof createApp>[] = [];
+interface HttpHarness {
+  readonly app: App;
+  readonly base: string;
+  readonly clock: { now: number };
+}
+
+const openApps: App[] = [];
+
+async function startHttp(): Promise<HttpHarness> {
+  const clock = { now: 1_760_000_000_000 };
+  const app = createApp({
+    openingBalanceUnits: 2_000_000_000n,
+    seedSource: () => SEED_A,
+    roundIdSource: () => `http-hardening-${(roundCounter += 1)}`,
+    clock: () => clock.now,
+    pacing: ZERO_PACING,
+  });
+  await new Promise<void>((resolve) => app.server.listen(0, '127.0.0.1', resolve));
+  openApps.push(app);
+  const port = (app.server.address() as AddressInfo).port;
+  return { app, base: `http://127.0.0.1:${port}`, clock };
+}
+
+async function postJson(base: string, path: string, body: unknown = {}): Promise<any> {
+  const response = await fetch(`${base}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return response.json();
+}
+
+async function getJson(base: string, path: string): Promise<any> {
+  const response = await fetch(`${base}${path}`);
+  return response.json();
+}
+
 afterEach(async () => {
-  while (servers.length > 0) {
-    const app = servers.pop();
-    if (app === undefined || !app.server.listening) continue;
-    app.server.closeAllConnections();
+  vi.useRealTimers();
+  while (openApps.length > 0) {
+    const app = openApps.pop() as App;
     await new Promise<void>((resolve) => app.server.close(() => resolve()));
   }
 });
 
-async function startHttp(clock: { now: number }) {
-  const app = createApp({
-    openingBalanceUnits: 10_000n * CREDIT,
-    seedSource: () => SEED_A,
-    roundIdSource: (round) => `retry-round-${round}`,
-    clock: () => clock.now,
-    pacing: NO_PACING,
-  });
-  servers.push(app);
-  await new Promise<void>((resolve, reject) => {
-    app.server.once('error', reject);
-    app.server.listen(0, '127.0.0.1', () => {
-      app.server.off('error', reject);
-      resolve();
-    });
-  });
-  const { port } = app.server.address() as AddressInfo;
-  const post = async (path: string, body: unknown = {}) => {
-    const response = await fetch(`http://127.0.0.1:${port}${path}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    return { status: response.status, body: await response.json() as any };
-  };
-  return { app, post };
-}
-
-describe('finding 5 — exact retries neither move abandonment nor substitute a frame', () => {
-  it('replays the recorded frame over HTTP without moving lastCommandAt', async () => {
-    const clock = { now: 1_800_000_000_000 };
-    const { app, post } = await startHttp(clock);
-    const created = await post('/api/rounds');
-    const roundId = created.body.roundId as string;
+describe('SWARM-05 — exact retries do not become progress', () => {
+  it('keeps the progress deadline fixed and returns the request’s recorded frame over HTTP', async () => {
+    const { base, clock } = await startHttp();
+    const created = await postJson(base, '/api/rounds');
+    const roundId = created.roundId as string;
     const openBody = {
-      idempotencyKey: key('retry-open'),
+      idempotencyKey: 'http-open',
       expectedFrameRevision: 0,
-      stakeUnits: CREDIT.toString(),
+      stakeUnits: '1000000',
       sideBets: [],
       clientEntropy: ENTROPY,
     };
-    const opened = await post(`/api/rounds/${roundId}/open`, openBody);
-    clock.now += 1_000;
-    const advanced = await post(`/api/rounds/${roundId}/advance`, {
-      idempotencyKey: key('advance'),
-      expectedFrameRevision: opened.body.frame.revision,
+    const opened = await postJson(base, `/api/rounds/${roundId}/open`, openBody);
+    clock.now += 100;
+    const advanceBody = {
+      idempotencyKey: 'http-advance',
+      expectedFrameRevision: opened.frame.revision,
+    };
+    const advanced = await postJson(base, `/api/rounds/${roundId}/advance`, advanceBody);
+    clock.now += 100;
+    const harvested = await postJson(base, `/api/rounds/${roundId}/harvest`, {
+      idempotencyKey: 'http-harvest',
+      expectedFrameRevision: advanced.frame.revision,
+      units: 1,
     });
-    const progressAt = app.service.record(roundId).lastCommandAt;
-    expect(advanced.body.frame).not.toEqual(opened.body.frame);
+    const progressAt = (await getJson(base, `/api/rounds/${roundId}`)).lastCommandAt;
 
     for (let attempt = 0; attempt < 12; attempt += 1) {
-      clock.now += 1_000;
-      const retried = await post(`/api/rounds/${roundId}/open`, openBody);
-      expect(retried.status).toBe(200);
-      expect(retried.body.frame).toEqual(opened.body.frame);
-      expect(retried.body.receipts).toEqual(opened.body.receipts);
-      expect(app.service.record(roundId).lastCommandAt).toBe(progressAt);
+      clock.now += 10_000;
+      const retried = await postJson(base, `/api/rounds/${roundId}/advance`, advanceBody);
+      expect(retried.frame).toEqual(advanced.frame);
+      expect(retried.frame).not.toEqual(harvested.frame);
+      expect((await getJson(base, `/api/rounds/${roundId}`)).lastCommandAt).toBe(progressAt);
     }
   });
 });
 
-describe('finding 6 — seeds remain in server custody and are unique', () => {
-  it('regenerates a colliding seed and ignores caller seed-shaped input', () => {
-    const issued = [SEED_A, SEED_A, SEED_B];
-    let reads = 0;
-    const rounds = service({
-      seedSource: () => issued[reads++] as string,
-      roundIdSource: (round) => `seed-round-${round}`,
-    });
-    const first = (rounds.createRound as unknown as (request: unknown) => ReturnType<RoundService['createRound']>)({
-      seed: 'f'.repeat(64),
-    });
-    const second = rounds.createRound();
+describe('SWARM-06 — server seed custody and uniqueness', () => {
+  it('rejects a caller-controlled predictable seed source outside the test harness', () => {
+    const previous = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      expect(
+        () =>
+          new RoundService({
+            seedSource: () => SEED_A,
+            pacing: ZERO_PACING,
+          }),
+      ).toThrow();
+    } finally {
+      if (previous === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previous;
+    }
+  });
 
+  it('reads a hostile seedSource getter once and regenerates an issued seed', () => {
+    const candidates = [SEED_A, SEED_A, SEED_B];
+    let getterReads = 0;
+    let sourceCalls = 0;
+    const service = new RoundService({
+      openingBalanceUnits: 2_000_000_000n,
+      get seedSource() {
+        getterReads += 1;
+        return () => candidates[sourceCalls++] as string;
+      },
+      roundIdSource: (counter) => `unique-seed-${counter}`,
+      pacing: ZERO_PACING,
+    });
+
+    const first = service.createRound();
+    const second = service.createRound();
+
+    expect(getterReads).toBe(1);
+    expect(sourceCalls).toBe(3);
     expect(first.seedCommitment).toBe(seedCommitment(SEED_A, first.roundId));
     expect(second.seedCommitment).toBe(seedCommitment(SEED_B, second.roundId));
-    expect(second.seedCommitment).not.toBe(seedCommitment(SEED_A, second.roundId));
-    expect(reads).toBe(3);
-    expect(JSON.stringify(rounds.record(first.roundId))).not.toContain(SEED_A);
   });
 });
 
-describe('finding 7 — every meaningful receipt field is verified', () => {
-  const context = roundContext('verify-hardening', ENTROPY);
-  const grid = deriveGrid(SEED_A, context);
-  const round = replayRound(grid, (_stage, units) => Math.floor(units / 2));
-  const settlement = sealSettlement({
-    seedHex: SEED_A,
-    context,
-    seedCommitment: seedCommitment(SEED_A, context.roundId),
-    stakeUnits: CREDIT,
-    sideBetStakes: { FIRST_LIGHT: 100_000n },
-    round,
-    wild: wildLineOf(grid),
-    settlementMode: 'PLAYER',
-  });
-  const bundle = { ...settlement.proof, receipts: settlement.receipts };
+function bundleOf(settlement: Settlement): ProofBundle {
+  return structuredClone({
+    ...settlement.proof,
+    receipts: settlement.receipts,
+  }) as ProofBundle;
+}
 
-  it('fails closed when each receipt field is changed one at a time', () => {
-    const creditAt = bundle.receipts.findIndex(
-      (receipt) => receipt.direction === 'CREDIT' && receipt.theoretical !== null,
-    );
-    const settleAt = bundle.receipts.findIndex((receipt) => receipt.kind === 'SETTLE');
-    expect(creditAt).toBeGreaterThanOrEqual(0);
+describe('SWARM-07 — verification binds the submitted receipt content', () => {
+  it('fails closed when each meaningful money/transcript field is tampered independently', async () => {
+    const { settlement } = await bankFixture(serviceFor(), [
+      { id: 'FIRST_LIGHT', stakeUnits: 100_000n },
+    ]);
+    const honest = bundleOf(settlement);
+    expect(verifyRound(honest).code).toBe('VERIFIED');
+    const harvestAt = honest.receipts.findIndex((receipt) => receipt.kind === 'HARVEST');
+    const settleAt = honest.receipts.findIndex((receipt) => receipt.kind === 'SETTLE');
+    const sideBetAt = honest.receipts.findIndex((receipt) => receipt.kind === 'SIDE_BET');
+    expect(harvestAt).toBeGreaterThanOrEqual(0);
     expect(settleAt).toBeGreaterThanOrEqual(0);
+    expect(sideBetAt).toBeGreaterThanOrEqual(0);
 
-    const cases: readonly [string, number, Partial<Receipt>][] = [
-      ['schema', 0, { schema: 'receipt-v2-tampered' as Receipt['schema'] }],
-      ['sequence', 0, { sequence: 99 }],
-      ['kind', 0, { kind: 'HARVEST' }],
-      ['line', 0, { line: 'FIRST_LIGHT' }],
-      ['direction', 0, { direction: 'CREDIT' }],
-      ['stage', 0, { stage: 7 }],
-      ['amountUnits', 0, { amountUnits: CREDIT + 1n }],
-      ['unitsHarvested', creditAt, { unitsHarvested: 99 }],
-      ['resolved', 0, { resolved: 'WON' }],
+    const cases: readonly [string, (proof: any) => void][] = [
+      ['stakeUnits', (proof) => { proof.stakeUnits += 1n; }],
+      ['sideBetStakes', (proof) => { proof.sideBetStakes.FIRST_LIGHT += 1n; }],
+      ['action outcome', (proof) => { proof.actionLog[0].units -= 1; }],
+      ['population', (proof) => { proof.populations[0] += 1; }],
+      ['terminal', (proof) => { proof.terminal = 'FINAL'; }],
+      ['settlement mode', (proof) => { proof.settlementMode = 'RECONCILED'; }],
+      ['side-bet outcome', (proof) => { proof.sideBetResults[0].resolved = 'LOST'; }],
+      ['receipt schema', (proof) => { proof.receipts[0].schema = 'receipt-v1'; }],
+      ['receipt sequence', (proof) => { proof.receipts[0].sequence += 1; }],
+      ['receipt kind', (proof) => { proof.receipts[0].kind = 'SETTLE'; }],
+      ['receipt line', (proof) => { proof.receipts[0].line = 'FIRST_LIGHT'; }],
+      ['receipt direction', (proof) => { proof.receipts[0].direction = 'CREDIT'; }],
+      ['receipt stage', (proof) => { proof.receipts[harvestAt].stage += 1; }],
+      ['receipt amount', (proof) => { proof.receipts[harvestAt].amountUnits += 1n; }],
+      ['receipt unitsHarvested', (proof) => { proof.receipts[harvestAt].unitsHarvested -= 1; }],
+      ['receipt resolved', (proof) => { proof.receipts[sideBetAt].resolved = 'LOST'; }],
       [
-        'theoretical',
-        creditAt,
-        {
-          theoretical: {
-            numerator: (bundle.receipts[creditAt]?.theoretical?.numerator ?? 0n) + 1n,
-            denominator: bundle.receipts[creditAt]?.theoretical?.denominator ?? 1n,
-          },
-        },
+        'receipt theoretical',
+        (proof) => { proof.receipts[harvestAt].theoretical.numerator += 1n; },
       ],
-      ['capped', creditAt, { capped: true }],
-      ['terminal', settleAt, { terminal: 'FINAL' }],
+      ['receipt capped', (proof) => { proof.receipts[harvestAt].capped = true; }],
+      ['receipt terminal', (proof) => { proof.receipts[settleAt].terminal = 'FINAL'; }],
     ];
 
-    for (const [field, at, patch] of cases) {
-      const receipts = bundle.receipts.map((receipt, index) =>
-        index === at ? ({ ...receipt, ...patch } as Receipt) : receipt,
-      );
-      const result = verifyRound({ ...bundle, receipts });
-      expect(result.ok, `${field} was accepted as VERIFIED`).toBe(false);
-      expect(result.code, field).not.toBe('VERIFIED');
+    for (const [name, tamper] of cases) {
+      const proof = structuredClone(honest) as any;
+      tamper(proof);
+      const result = verifyRound(proof);
+      expect(result.ok, name).toBe(false);
+      expect(result.code, name).not.toBe('VERIFIED');
     }
   });
 });
 
-describe('finding 8 — pacing is enforced by the service without HTTP', () => {
-  it('holds direct service calls to the configured floor', async () => {
-    const rounds = service({
-      seedSource: (roundId) => roundId.endsWith('-1') ? SEED_A : SEED_B,
-      roundIdSource: (round) => `paced-round-${round}`,
-      pacing: { roundCycleMs: 30, decisionDeadPeriodMs: 20, settlementHoldMs: 10 },
+describe('SWARM-08 — pacing belongs to the service, not its transport', () => {
+  it('holds a direct service command until the decision floor has passed', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_760_000_000_000);
+    const service = serviceFor({
+      pacing: {
+        roundCycleMs: 0,
+        decisionDeadPeriodMs: 350,
+        settlementHoldMs: 0,
+      },
     });
-    const first = rounds.createRound();
-    const second = rounds.createRound();
-    const startedAt = Date.now();
-    await rounds.open(first.roundId, {
-      idempotencyKey: key('paced-open'),
-      expectedFrameRevision: 0,
-      stakeUnits: CREDIT,
-      sideBets: [],
-      clientEntropy: ENTROPY,
+    const { roundId, result: opened } = await openRound(service);
+    let resolved = false;
+    const pending = Promise.resolve(
+      service.advance(roundId, {
+        idempotencyKey: `paced-advance-${roundId}`,
+        expectedFrameRevision: opened.frame.revision,
+      }),
+    ).then((result) => {
+      resolved = true;
+      return result;
     });
-    await rounds.open(second.roundId, {
-      idempotencyKey: key('paced-open'),
-      expectedFrameRevision: 0,
-      stakeUnits: CREDIT,
-      sideBets: [],
-      clientEntropy: ENTROPY,
-    });
-    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(25);
+
+    await vi.advanceTimersByTimeAsync(349);
+    expect(resolved).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await pending).frame.stage).toBe(1);
   });
 });

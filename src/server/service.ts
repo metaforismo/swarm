@@ -8,24 +8,37 @@
  * holds a commitment and nothing else.
  *
  * Everything is in memory. This is a free-play prototype: there is no persistence,
- * no authenticated storage and no seed custody worth the name — `docs/MATH.md` §15
- * lists what a real deployment would need, and nothing here substitutes for it.
+ * no authenticated storage and no durable seed custody — `docs/MATH.md` §15 lists
+ * what a real deployment would need, and nothing here substitutes for it.
  */
 import { randomBytes } from 'node:crypto';
 import { SWARM } from './adapter.ts';
-import { StageBook, type CommandResult, type StageFrame } from './book.ts';
+import {
+  StageBook,
+  type CommandResult,
+  type StageBookView,
+  type StageFrame,
+} from './book.ts';
 import { seedCommitment } from './commitment.ts';
 import { roundContext } from './derivation.ts';
+import { normalizeSeed } from './engine.ts';
 import { fail } from './errors.ts';
-import { Pacer, parsePacing, type PacingFloors } from './pacing.ts';
+import { Pacer, parsePacing, type Admission, type PacingFloors } from './pacing.ts';
 import { SessionProtection } from './protection.ts';
+import {
+  frozenCopy,
+  snapshotAdvanceRequest,
+  snapshotHarvestRequest,
+  snapshotOpenRequest,
+  snapshotSettleRequest,
+} from './snapshot.ts';
 import type { Settlement } from './settlement.ts';
 import { Wallet } from './wallet.ts';
 
 export interface ServiceOptions {
   /** Free-play opening balance, in minor units. */
   readonly openingBalanceUnits?: bigint;
-  /** Sealed seeds. Injectable so a test can drive a known grid. */
+  /** Test-only deterministic seed seam. Rejected unless `NODE_ENV === 'test'`. */
   readonly seedSource?: (roundId: string) => string;
   /**
    * Operator round ids. Injectable because the id is a field of every draw and of
@@ -53,7 +66,7 @@ export interface ServiceOptions {
   readonly limitCoolOffHours?: number;
 }
 
-export interface RoundRecord {
+interface RoundRecord {
   readonly roundId: string;
   /** Null until `open()`: the grid is a function of the client entropy too. */
   book: StageBook | null;
@@ -61,8 +74,27 @@ export interface RoundRecord {
   /** Phase 1, published before the round could accept a stake. */
   readonly seedCommitment: string;
   readonly createdAt: number;
+  /** Last receipt sequence committed to the wallet, independent of public copies. */
+  postedLedgerSequence: number;
   lastCommandAt: number;
   settledAt: number | null;
+}
+
+export interface RoundRecordView {
+  readonly roundId: string;
+  readonly book: StageBookView | null;
+  readonly seedCommitment: string;
+  readonly createdAt: number;
+  readonly lastCommandAt: number;
+  readonly settledAt: number | null;
+}
+
+export interface WalletView {
+  readonly openingUnits: bigint;
+  readonly balanceUnits: bigint;
+  readonly stakedUnits: bigint;
+  readonly creditedUnits: bigint;
+  readonly netUnits: bigint;
 }
 
 export interface HistoryEntry {
@@ -79,7 +111,6 @@ export interface HistoryEntry {
 const DEFAULT_OPENING = 1000n * SWARM.money.unitsPerCredit;
 
 export class RoundService {
-  readonly wallet: Wallet;
   readonly startedAt: number;
   readonly abandonedRoundTimeoutHours: number;
   /** §9.7's floors, and the gate that enforces them. */
@@ -91,27 +122,47 @@ export class RoundService {
   readonly #roundIdSource: (counter: number) => string;
   readonly #maxLiveRounds: number;
   readonly #historyLimit: number;
+  readonly #wallet: Wallet;
   readonly #rounds = new Map<string, RoundRecord>();
   readonly #history: HistoryEntry[] = [];
+  readonly #issuedSeeds = new Set<string>();
   #counter = 0;
 
   constructor(options: ServiceOptions = {}) {
-    this.wallet = new Wallet(options.openingBalanceUnits ?? DEFAULT_OPENING);
-    this.#clock = options.clock ?? (() => Date.now());
-    this.#seedSource = options.seedSource ?? (() => randomBytes(32).toString('hex'));
+    // Options are an in-process public boundary too. Copy each property once so
+    // a getter cannot pass a custody check and then install a different value.
+    const openingBalanceUnits = options.openingBalanceUnits;
+    const seedSource = options.seedSource;
+    const roundIdSource = options.roundIdSource;
+    const clock = options.clock;
+    const abandonedRoundTimeoutHours = options.abandonedRoundTimeoutHours;
+    const maxLiveRounds = options.maxLiveRounds;
+    const historyLimit = options.historyLimit;
+    const pacing = options.pacing;
+    const realityCheckMinutes = options.realityCheckMinutes;
+    const limitCoolOffHours = options.limitCoolOffHours;
+    if (seedSource !== undefined && process.env.NODE_ENV !== 'test')
+      fail(
+        'INVALID_REQUEST',
+        'A caller-provided seed source is available only to the test harness',
+        '$.seedSource',
+      );
+    this.#wallet = new Wallet(openingBalanceUnits ?? DEFAULT_OPENING);
+    this.#clock = clock ?? (() => Date.now());
+    this.#seedSource = seedSource ?? (() => randomBytes(32).toString('hex'));
     this.#roundIdSource =
-      options.roundIdSource ?? ((counter) => `swarm-${counter}-${randomBytes(6).toString('hex')}`);
+      roundIdSource ?? ((counter) => `swarm-${counter}-${randomBytes(6).toString('hex')}`);
     this.abandonedRoundTimeoutHours =
-      options.abandonedRoundTimeoutHours ?? SWARM.lifecycle.abandonedRoundTimeoutHours;
-    this.#maxLiveRounds = options.maxLiveRounds ?? 64;
-    this.#historyLimit = options.historyLimit ?? 50;
+      abandonedRoundTimeoutHours ?? SWARM.lifecycle.abandonedRoundTimeoutHours;
+    this.#maxLiveRounds = maxLiveRounds ?? 64;
+    this.#historyLimit = historyLimit ?? 50;
     this.startedAt = this.#clock();
-    this.pacer = new Pacer(parsePacing(options.pacing));
+    this.pacer = new Pacer(parsePacing(pacing));
     this.protection = new SessionProtection({
       clock: this.#clock,
       startedAt: this.startedAt,
-      realityCheckMinutes: options.realityCheckMinutes,
-      limitCoolOffHours: options.limitCoolOffHours,
+      realityCheckMinutes,
+      limitCoolOffHours,
     });
   }
 
@@ -126,8 +177,10 @@ export class RoundService {
    * every real stake is refused, and the client would render an unlocked screen
    * in front of a locked session.
    */
-  limitReached(ticketUnits = SWARM.risk.minStakeUnits): { field: string; message: string; path: string } | null {
-    return this.protection.reached(ticketUnits, this.wallet.stakedUnits, this.wallet.netUnits);
+  limitReached(
+    ticketUnits = SWARM.risk.minStakeUnits,
+  ): { field: string; message: string; path: string } | null {
+    return this.protection.reached(ticketUnits, this.#wallet.stakedUnits, this.#wallet.netUnits);
   }
 
   get now(): number {
@@ -135,7 +188,17 @@ export class RoundService {
   }
 
   get history(): readonly HistoryEntry[] {
-    return this.#history;
+    return frozenCopy(this.#history);
+  }
+
+  get wallet(): WalletView {
+    return frozenCopy({
+      openingUnits: this.#wallet.openingUnits,
+      balanceUnits: this.#wallet.balanceUnits,
+      stakedUnits: this.#wallet.stakedUnits,
+      creditedUnits: this.#wallet.creditedUnits,
+      netUnits: this.#wallet.netUnits,
+    });
   }
 
   /**
@@ -152,7 +215,16 @@ export class RoundService {
     const roundId = this.#roundIdSource(this.#counter);
     if (this.#rounds.has(roundId))
       fail('INVALID_REQUEST', 'That round id is already in use', '$.roundId');
-    const seed = this.#seedSource(roundId);
+    let seed: string | null = null;
+    for (let attempt = 0; attempt < 16; attempt += 1) {
+      const candidate = normalizeSeed(this.#seedSource(roundId));
+      if (this.#issuedSeeds.has(candidate)) continue;
+      seed = candidate;
+      break;
+    }
+    if (seed === null)
+      fail('INVALID_REQUEST', 'The server seed source repeatedly produced a collision', '$.seed');
+    this.#issuedSeeds.add(seed);
     const commitment = seedCommitment(seed, roundId);
     const createdAt = this.#clock();
     this.#rounds.set(roundId, {
@@ -161,26 +233,43 @@ export class RoundService {
       seed,
       seedCommitment: commitment,
       createdAt,
+      postedLedgerSequence: 0,
       lastCommandAt: createdAt,
       settledAt: null,
     });
     // The book cannot exist before the client entropy does — every draw is a
     // function of both halves — so the record holds the seed and waits.
-    return { roundId, seedCommitment: commitment, createdAt };
+    return Object.freeze({ roundId, seedCommitment: commitment, createdAt });
   }
 
-  record(roundId: unknown): RoundRecord {
+  #record(roundId: unknown): RoundRecord {
     if (typeof roundId !== 'string') fail('INVALID_REQUEST', 'Round id must be a string', '$.roundId');
     const record = this.#rounds.get(roundId);
     if (record === undefined) fail('ROUND_NOT_FOUND', 'No such round', '$.roundId');
     return record;
   }
 
-  book(roundId: unknown): StageBook {
-    const record = this.record(roundId);
+  #book(roundId: unknown): StageBook {
+    const record = this.#record(roundId);
     if (record.book === null)
       fail('INVALID_REQUEST', 'This round has not been opened', '$.roundId');
     return record.book;
+  }
+
+  record(roundId: unknown): RoundRecordView {
+    const record = this.#record(roundId);
+    return frozenCopy({
+      roundId: record.roundId,
+      book: record.book?.view ?? null,
+      seedCommitment: record.seedCommitment,
+      createdAt: record.createdAt,
+      lastCommandAt: record.lastCommandAt,
+      settledAt: record.settledAt,
+    });
+  }
+
+  book(roundId: unknown): StageBookView {
+    return this.#book(roundId).view;
   }
 
   /**
@@ -198,64 +287,90 @@ export class RoundService {
       sideBets: readonly { id: string; stakeUnits: bigint }[];
       clientEntropy: string;
     },
-  ): CommandResult<null> {
-    const record = this.record(roundId);
-    if (record.book !== null) {
-      // A retry lands on the existing book, which replays it through the
-      // idempotency store rather than opening a second round.
-      const result = record.book.open(request);
+  ): Promise<CommandResult<null>> {
+    const snapshot = snapshotOpenRequest(request);
+    const record = this.#record(roundId);
+    const admission = this.pacer.admitOpen(record.roundId);
+    return this.#paced(admission, () => {
+      if (record.book !== null) {
+        // An existing book can only return an exact retry here. Conflicts and stale
+        // fences throw, and neither outcome advances the abandonment clock.
+        const result = record.book.open(snapshot);
+        return { result, progressed: false };
+      }
+      const total =
+        snapshot.stakeUnits +
+        snapshot.sideBets.reduce((sum, selection) => sum + selection.stakeUnits, 0n);
+      // A player-set limit is checked before the wallet and before the grid: the
+      // one thing a limit refuses is a stake, and it refuses it before any money
+      // moves and before a seed-dependent value exists (`docs/DESIGN.md` §9.9).
+      this.protection.assertMayStake(total, this.#wallet.stakedUnits, this.#wallet.netUnits);
+      this.#wallet.assertCanAfford(total);
+      const context = roundContext(record.roundId, snapshot.clientEntropy);
+      const book = new StageBook(context, record.seed, record.seedCommitment);
+      const result = book.open(snapshot);
+      // The money moves before the round is registered: a wallet that refused the
+      // debit must not leave an opened round behind it.
+      this.#postReceipts(record, result.receipts);
+      record.book = book;
       record.lastCommandAt = this.#clock();
-      return result;
-    }
-    const total =
-      request.stakeUnits +
-      (request.sideBets ?? []).reduce((sum, selection) => sum + selection.stakeUnits, 0n);
-    // A player-set limit is checked before the wallet and before the grid: the
-    // one thing a limit refuses is a stake, and it refuses it before any money
-    // moves and before a seed-dependent value exists (`docs/DESIGN.md` §9.9).
-    this.protection.assertMayStake(total, this.wallet.stakedUnits, this.wallet.netUnits);
-    this.wallet.assertCanAfford(total);
-    const context = roundContext(roundId, request.clientEntropy);
-    const book = new StageBook(context, record.seed, record.seedCommitment);
-    const result = book.open(request);
-    // The money moves before the round is registered: a wallet that refused the
-    // debit must not leave an opened round behind it.
-    this.wallet.post(result.receipts);
-    record.book = book;
-    record.lastCommandAt = this.#clock();
-    return result;
+      this.pacer.progressed(record.roundId);
+      return { result, progressed: true };
+    });
   }
 
-  advance(roundId: string, request: { idempotencyKey: string; expectedFrameRevision: number }): CommandResult<null> {
-    const record = this.record(roundId);
-    const result = this.book(roundId).advance(request);
-    record.lastCommandAt = this.#clock();
-    return result;
+  advance(
+    roundId: string,
+    request: { idempotencyKey: string; expectedFrameRevision: number },
+  ): Promise<CommandResult<null>> {
+    const snapshot = snapshotAdvanceRequest(request);
+    const record = this.#record(roundId);
+    const book = this.#book(roundId);
+    return this.#paced(this.pacer.admitCommand(record.roundId), () => {
+      const before = book.revision;
+      const result = book.advance(snapshot);
+      const progressed = book.revision !== before;
+      if (progressed) {
+        record.lastCommandAt = this.#clock();
+        this.pacer.progressed(record.roundId);
+      }
+      return { result, progressed };
+    });
   }
 
   harvest(
     roundId: string,
     request: { idempotencyKey: string; expectedFrameRevision: number; units: number },
-  ): CommandResult<null> {
-    const record = this.record(roundId);
-    const book = this.book(roundId);
-    const before = book.receipts.length;
-    const result = book.harvest(request);
-    if (book.receipts.length > before) this.wallet.post(result.receipts);
-    record.lastCommandAt = this.#clock();
-    return result;
+  ): Promise<CommandResult<null>> {
+    const snapshot = snapshotHarvestRequest(request);
+    const record = this.#record(roundId);
+    const book = this.#book(roundId);
+    return this.#paced(this.pacer.admitCommand(record.roundId), () => {
+      const before = book.ledgerSequence;
+      const result = book.harvest(snapshot);
+      const progressed = book.ledgerSequence !== before;
+      if (progressed) {
+        this.#postReceipts(record, result.receipts);
+        record.lastCommandAt = this.#clock();
+        this.pacer.progressed(record.roundId);
+      }
+      return { result, progressed };
+    });
   }
 
   settle(
     roundId: string,
     request: { idempotencyKey: string; expectedFrameRevision: number },
-  ): CommandResult<Settlement> {
-    const record = this.record(roundId);
-    const book = this.book(roundId);
-    const alreadySettled = book.settlement !== null;
-    const result = book.settle({ ...request, revealedSeed: record.seed });
-    if (!alreadySettled) this.#closeRound(record, result);
-    return result;
+  ): Promise<CommandResult<Settlement>> {
+    const record = this.#record(roundId);
+    const snapshot = snapshotSettleRequest(request, record.seed);
+    const book = this.#book(roundId);
+    return this.#paced(this.pacer.admitCommand(record.roundId), () => {
+      const alreadySettled = book.settled;
+      const result = book.settle(snapshot);
+      if (!alreadySettled) this.#closeRound(record, result);
+      return { result, progressed: !alreadySettled };
+    });
   }
 
   /**
@@ -264,9 +379,9 @@ export class RoundService {
    * without waiting three days.
    */
   reconcile(roundId: string): CommandResult<Settlement> {
-    const record = this.record(roundId);
-    const book = this.book(roundId);
-    const alreadySettled = book.settlement !== null;
+    const record = this.#record(roundId);
+    const book = this.#book(roundId);
+    const alreadySettled = book.settled;
     // A settled round goes straight to the book: a reconciliation that already
     // ran replays through its reserved key, and a player-settled round answers
     // `ROUND_SETTLED`. Checking the clock first would answer `TOO_EARLY` to a
@@ -284,11 +399,11 @@ export class RoundService {
   }
 
   frame(roundId: string): StageFrame {
-    return this.book(roundId).frame;
+    return this.#book(roundId).frame;
   }
 
   #closeRound(record: RoundRecord, result: CommandResult<Settlement>): void {
-    this.wallet.post(result.receipts);
+    this.#postReceipts(record, result.receipts);
     // The settlement hold (§9.7): the next round cannot open inside it.
     this.pacer.settled(record.roundId);
     const settlement = result.value;
@@ -306,6 +421,23 @@ export class RoundService {
     });
     while (this.#history.length > this.#historyLimit) this.#history.pop();
     this.#evict();
+  }
+
+  /**
+   * Commits only the next contiguous custody-held ledger suffix. Public receipt
+   * arrays never participate in this cursor, so changing a returned copy cannot
+   * make an old movement look unposted.
+   */
+  #postReceipts(record: RoundRecord, receipts: readonly import('./settlement.ts').Receipt[]): void {
+    if (receipts.length === 0) return;
+    let expected = record.postedLedgerSequence + 1;
+    for (const receipt of receipts) {
+      if (receipt.sequence !== expected)
+        fail('INTERNAL', 'The wallet posting is not the next ledger suffix');
+      expected += 1;
+    }
+    this.#wallet.post(receipts);
+    record.postedLedgerSequence = expected - 1;
   }
 
   #isAbandoned(record: RoundRecord): boolean {
@@ -342,6 +474,30 @@ export class RoundService {
       if (oldest === undefined) continue;
       this.#rounds.delete(oldest.roundId);
       this.pacer.forget(oldest.roundId);
+    }
+  }
+
+  async #paced<T>(
+    admission: Admission,
+    run: () => { readonly result: T; readonly progressed: boolean },
+  ): Promise<T> {
+    // Timers may wake a millisecond early because their delay and Date.now() use
+    // different rounding boundaries. Re-check the wall-clock deadline so the
+    // published floor is a true minimum, including for direct service callers.
+    const admittedAt = Date.now();
+    const notBefore = admittedAt + admission.waitMs;
+    let remaining = notBefore - Date.now();
+    while (remaining > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, remaining));
+      remaining = notBefore - Date.now();
+    }
+    try {
+      const outcome = run();
+      if (!outcome.progressed) admission.release();
+      return outcome.result;
+    } catch (error) {
+      admission.release();
+      throw error;
     }
   }
 }

@@ -59,7 +59,6 @@ frame-revision / idempotency / receipt discipline of `RoundBook`.
 | Action chain domain | `reveal-engine/stage-action-chain-v1` | New value for any change to the live chain |
 | Transcript | `reveal-engine/stage-transcript-v1` | Bounded migration parser, fail closed on unknown |
 | Receipt | `receipt-v2` | Immutable money-movement record; v2 added `line` and `direction` |
-| Snapshot | `stage-book-v1` | Reject unknown versions |
 | Paytable fixture | `swarm/paytable-v3` | Regenerated and re-frozen with any of the above |
 
 **Adapter changelog.** `1.1.0` replaced the single round-level max-win multiple
@@ -318,6 +317,26 @@ trusted with money: a cap that could bite would break the invariance theorem
 ([MATH.md §12](MATH.md)). `assertCommitmentIsTwoPhase` is the reason it can be
 trusted with a decision: a choice-timed round whose body does not bind its own
 action log has a verifier that verifies nothing about what the player did.
+
+#### 3.1.1 The payable boundary
+
+The invariant is exact for the **theoretical rational value**. Wallet credits are
+integer minor units and apply `floor` once per credit event, so payable value is
+never higher:
+
+```
+0 <= sum(x_i) - sum(floor(x_i)) < m minor units
+```
+
+for `m` credit events. The shipped one-commit-per-generation protocol permits at
+most `m = 18` COLONY credits (`17` harvests plus settlement), so its absolute
+shortfall is **strictly less than 18 units = 0.000018 credits**. At the minimum
+COLONY stake of `100,000` units, that is **less than `1.8e-4` of stake, or 0.018
+percentage points of RTP**. Each selected side bet has one independently floored
+credit on its own stake, so a four-line ticket has at most 21 floor events across
+four separate bases. Splitting value across more payable events can only move the
+result downward (`floor(x) + floor(y) <= floor(x + y)`), never in the player's
+favor. [MATH.md §13](MATH.md) derives the 18-event maximum by dynamic program.
 
 ### 3.2 The SWARM adapter
 
@@ -808,8 +827,6 @@ export class StageBook {
   harvest(request: HarvestRequest): Promise<CommandResult<null>>;  // one COLONY CREDIT
   settle(request: SettleRequest): Promise<CommandResult<SettlementProof>>;
   reconcile(request: ReconcileRequest): Promise<CommandResult<SettlementProof>>;
-  snapshot(): StageBookSnapshot;            // schema 'stage-book-v1'
-  static restore(game: StagedSurvivalDefinition, snapshot: unknown): StageBook;
 }
 
 /** What settlement publishes. Exactly the input set §4.6 verifies. */
@@ -1090,7 +1107,8 @@ adapter:
    maximum cumulative COLONY credit (dynamic program), every side bet's cap
    strictly exceeds its exact multiplier, and the worst admissible ticket sits
    strictly below the exposure limit. No cap may be reachable.
-8. Every side bet is priced at exactly `targetRtp`:
+8. Every side bet is priced at exactly the theoretical `targetRtp` before its
+   payable credit is floored:
    `sideBetMultiplier(id) * sideBetProbability(id) === targetRtp`.
 9. **Two-phase commitment.** `assertCommitmentIsTwoPhase` passes; a definition
    missing either phase or the entropy policy fails to build. The seed
@@ -1129,12 +1147,6 @@ adapter:
     reachable state leaves a committed seed unpublishable. Settling one round in
     both modes produces two different body commitments, and a verifier handed a
     relabelled mode fails.
-18. Snapshot round-trips: restore validates adapter identity, receipt ordering,
-    per-line cap accounting, the action log against the chain, and a
-    deterministic checksum, and rejects any unknown schema version. Anything the
-    snapshot asserts about *what the player did* is re-derived from the receipt
-    log and the chain, never read out of the snapshot.
-
 Checks 6, 7 and 8 are what make this module different from a generic ride
 ledger. Checks 9 to 12 are what make it a *choice-timed* module rather than a
 choice-timed module's shape. Checks 15 and 17 are the round-4 findings: a command
@@ -1151,7 +1163,7 @@ state with no defined settlement. All of them are cheap enough to run in CI.
 | `encodeFields`, `uniformBigInt`, error codes, limits | Yes | Reuse verbatim |
 | Constant-time digest comparison | Yes | Reuse verbatim |
 | Two-phase commitment for a choice-timed round | Yes, as a contract | The engine mandates it; SWARM is the first adapter that has to satisfy it |
-| Frame fence, idempotency, receipts, snapshots | Yes, in `RoundBook` | Generalize, do not fork |
+| Frame fence, idempotency, receipts | Yes, in `RoundBook` | Reuse the discipline; SWARM implements no snapshot/restore surface |
 | Client entropy in the sampler payload | **No** | New `EntropyPolicy` and a new sampler domain |
 | Live action chain returned on every frame | **No** | New; the pre-reveal witness of §4.3 |
 | Population-based pricing with no posterior | **No** | New `ladderValue` / `cohortValue` |
@@ -1163,6 +1175,10 @@ state with no defined settlement. All of them are cheap enough to run in CI.
 | Lagged counterfactual-line disclosure | **No** | New; §5.2 |
 | Server-initiated reconciliation with no in-play timer | **No** | New `reconcile()` |
 | Staged conformance suite | **No** | New, per §6 |
+
+This free-play implementation is deliberately process-local. It exposes neither
+`snapshot()` nor `restore()`, makes no cross-process recovery claim, and does not
+present an in-memory object graph as durable persistence.
 
 The engine's own documentation already flags the gap: continuation economics are
 declared out of scope of its within-round invariance theorem and its core

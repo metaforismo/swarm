@@ -23,6 +23,7 @@
  * waiting on something invisible.
  */
 import { fail } from './errors.ts';
+import { frozenCopy } from './snapshot.ts';
 
 /** `docs/DESIGN.md` §9.9: "a reality check every 30 minutes". */
 export const REALITY_CHECK_MINUTES = 30;
@@ -115,23 +116,25 @@ export class SessionProtection {
     const now = this.#clock();
     for (const [field, entry] of [...this.#pending]) {
       if (entry.effectiveAt > now) continue;
-      this.#limits = { ...this.#limits, [field]: entry.value } as Limits;
+      this.#limits = Object.freeze({ ...this.#limits, [field]: entry.value }) as Limits;
       this.#pending.delete(field);
     }
   }
 
   get limits(): Limits {
     this.#resolve();
-    return this.#limits;
+    return frozenCopy(this.#limits);
   }
 
   get pending(): readonly PendingLimit[] {
     this.#resolve();
-    return [...this.#pending.entries()].map(([field, entry]) => ({
-      field,
-      value: entry.value === null ? null : entry.value.toString(),
-      effectiveAt: entry.effectiveAt,
-    }));
+    return frozenCopy(
+      [...this.#pending.entries()].map(([field, entry]) => ({
+        field,
+        value: entry.value === null ? null : entry.value.toString(),
+        effectiveAt: entry.effectiveAt,
+      })),
+    );
   }
 
   /**
@@ -148,7 +151,7 @@ export class SessionProtection {
       const current = this.#limits[field] as bigint | number | null;
       const tighter = value !== null && (current === null || value <= current);
       if (tighter) {
-        this.#limits = { ...this.#limits, [field]: value } as Limits;
+        this.#limits = Object.freeze({ ...this.#limits, [field]: value }) as Limits;
         // A tightening supersedes a scheduled loosening of the same field: the
         // player who just lowered a limit is not also asking to raise it later.
         this.#pending.delete(field);
@@ -187,23 +190,23 @@ export class SessionProtection {
   ): { field: LimitField; message: string; path: string } | null {
     const limits = this.limits;
     if (limits.timeMinutes !== null && this.elapsedMs >= limits.timeMinutes * 60 * 1000)
-      return {
+      return Object.freeze({
         field: 'timeMinutes',
         message: 'You reached the session time limit you set. It can be raised after the cool-off.',
         path: '$.limits.timeMinutes',
-      };
+      });
     if (limits.lossUnits !== null && -netUnits >= limits.lossUnits)
-      return {
+      return Object.freeze({
         field: 'lossUnits',
         message: 'You reached the session loss limit you set. It can be raised after the cool-off.',
         path: '$.limits.lossUnits',
-      };
+      });
     if (limits.budgetUnits !== null && stakedUnits + ticketUnits > limits.budgetUnits)
-      return {
+      return Object.freeze({
         field: 'budgetUnits',
         message: 'This ticket would pass the stake budget you set for this session.',
         path: '$.limits.budgetUnits',
-      };
+      });
     return null;
   }
 
@@ -220,12 +223,12 @@ export class SessionProtection {
   } {
     const now = this.#clock();
     const dueAt = this.#realityCheckFrom + this.realityCheckMinutes * 60 * 1000;
-    return {
+    return Object.freeze({
       intervalMinutes: this.realityCheckMinutes,
       dueAt,
       due: now >= dueAt,
       sinceMs: Math.max(0, now - this.#realityCheckFrom),
-    };
+    });
   }
 
   /**

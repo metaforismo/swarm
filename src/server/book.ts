@@ -34,6 +34,7 @@ import {
   deriveGrid,
   replayRound,
   resolveStage,
+  roundContext,
   stageOutcomes,
   wildLineOf,
   wildPeakThrough,
@@ -50,6 +51,13 @@ import {
 import { assertIdempotencyKey, commandFingerprint, payableWithinCap, rational, multiply, type Rational } from './engine.ts';
 import { fail } from './errors.ts';
 import { sealSettlement, type Receipt, type Settlement } from './settlement.ts';
+import {
+  frozenCopy,
+  snapshotAdvanceRequest,
+  snapshotFullSettleRequest,
+  snapshotHarvestRequest,
+  snapshotOpenRequest,
+} from './snapshot.ts';
 
 export type BookState = 'STAGED' | 'AWAITING_SETTLEMENT' | 'SETTLED';
 
@@ -101,6 +109,19 @@ export interface CommandResult<T> {
   readonly value: T;
 }
 
+export interface StageBookView {
+  readonly context: RoundContext;
+  readonly seedCommitment: string;
+  readonly frame: StageFrame;
+  readonly receipts: readonly Receipt[];
+  readonly settlement: Settlement | null;
+  readonly opened: boolean;
+  readonly stakeUnits: bigint;
+  readonly sideBetStakes: Readonly<Record<string, bigint>>;
+  readonly state: BookState;
+  readonly exposureUnits: bigint;
+}
+
 export interface OpenRequest {
   readonly idempotencyKey: string;
   readonly expectedFrameRevision: number;
@@ -136,6 +157,11 @@ interface StoredCommand {
   readonly result: CommandResult<unknown>;
 }
 
+interface TicketSnapshot {
+  readonly stakeUnits: bigint;
+  readonly sideBetStakes: Readonly<Record<string, bigint>>;
+}
+
 export class StageBook {
   readonly context: RoundContext;
   readonly seedCommitment: string;
@@ -152,22 +178,24 @@ export class StageBook {
   #published: PublishedTerminal | null = null;
   #opened = false;
 
-  #stakeUnits = 0n;
-  #sideBetStakes: Record<string, bigint> = {};
+  #ticket: TicketSnapshot | null = null;
   #trace: TraceEntry[] = [];
   #actions: LoggedAction[] = [];
   #chain: string[] = [];
   #receipts: Receipt[] = [];
+  #ledgerSequence = 0;
   #colonyCredited = 0n;
   #settlement: Settlement | null = null;
   #lastResolution: StageResolution | null = null;
   readonly #commands = new Map<string, StoredCommand>();
 
   constructor(context: RoundContext, seedHex: string, seedCommitment: string) {
-    this.context = context;
+    const roundId = context.roundId;
+    const clientEntropy = context.clientEntropy;
+    this.context = roundContext(roundId, clientEntropy);
     this.#seed = seedHex;
     this.seedCommitment = seedCommitment;
-    this.#grid = deriveGrid(seedHex, context);
+    this.#grid = deriveGrid(seedHex, this.context);
     this.#wild = wildLineOf(this.#grid);
     this.#chain.push(seedCommitment);
   }
@@ -177,11 +205,11 @@ export class StageBook {
   }
 
   get receipts(): readonly Receipt[] {
-    return this.#receipts;
+    return frozenCopy(this.#receipts);
   }
 
   get settlement(): Settlement | null {
-    return this.#settlement;
+    return frozenCopy(this.#settlement);
   }
 
   get opened(): boolean {
@@ -189,20 +217,49 @@ export class StageBook {
   }
 
   get stakeUnits(): bigint {
-    return this.#stakeUnits;
+    return this.#ticket?.stakeUnits ?? 0n;
   }
 
   get sideBetStakes(): Readonly<Record<string, bigint>> {
-    return this.#sideBetStakes;
+    return frozenCopy(this.#ticket?.sideBetStakes ?? {});
   }
 
   get state(): BookState {
     return this.#state;
   }
 
+  get revision(): number {
+    return this.#revision;
+  }
+
+  get settled(): boolean {
+    return this.#settlement !== null;
+  }
+
   /** Exposure disclosed at `open()`, in minor units. A disclosure, never a clip. */
   get exposureUnits(): bigint {
-    return this.#opened ? ticketExposureUnits(this.#stakeUnits, this.#sideBetStakes) : 0n;
+    return this.#ticket === null
+      ? 0n
+      : ticketExposureUnits(this.#ticket.stakeUnits, this.#ticket.sideBetStakes);
+  }
+
+  get ledgerSequence(): number {
+    return this.#ledgerSequence;
+  }
+
+  get view(): StageBookView {
+    return frozenCopy({
+      context: this.context,
+      seedCommitment: this.seedCommitment,
+      frame: this.#frame(),
+      receipts: this.#receipts,
+      settlement: this.#settlement,
+      opened: this.#opened,
+      stakeUnits: this.#ticket?.stakeUnits ?? 0n,
+      sideBetStakes: this.#ticket?.sideBetStakes ?? {},
+      state: this.#state,
+      exposureUnits: this.exposureUnits,
+    });
   }
 
   // ---------------------------------------------------------------- commands
@@ -212,27 +269,28 @@ export class StageBook {
    * and nothing else: no seed-dependent value may leave this call (§5.2).
    */
   open(request: OpenRequest): CommandResult<null> {
+    const snapshot = snapshotOpenRequest(request);
     return this.#command(
       'open',
-      request.idempotencyKey,
-      request.expectedFrameRevision,
+      snapshot.idempotencyKey,
+      snapshot.expectedFrameRevision,
       [
-        request.stakeUnits,
-        String(request.clientEntropy ?? '').toLowerCase(),
-        ...this.#sideBetFields(request.sideBets),
+        snapshot.stakeUnits,
+        snapshot.clientEntropy.toLowerCase(),
+        ...this.#sideBetFields(snapshot.sideBets),
       ],
       () => {
         if (this.#opened) fail('INVALID_REQUEST', 'This round is already open', '$.roundId');
-        if (String(request.clientEntropy ?? '').toLowerCase() !== this.context.clientEntropy)
+        if (snapshot.clientEntropy.toLowerCase() !== this.context.clientEntropy)
           fail('INVALID_REQUEST', 'This round is bound to a different client seed', '$.clientEntropy');
         const stakeUnits = assertStake(
-          request.stakeUnits,
+          snapshot.stakeUnits,
           SWARM.risk.minStakeUnits,
           SWARM.risk.maxStakeUnits,
           '$.stakeUnits',
         );
         const sideBetStakes: Record<string, bigint> = {};
-        for (const selection of request.sideBets ?? []) {
+        for (const selection of snapshot.sideBets) {
           if (!SIDE_BET_IDS.includes(selection.id))
             fail('INVALID_REQUEST', `No such side bet: ${selection.id}`, '$.sideBets');
           if (sideBetStakes[selection.id] !== undefined)
@@ -250,8 +308,10 @@ export class StageBook {
         if (exposure >= SWARM.risk.maxTicketExposureUnits)
           fail('EXPOSURE_LIMIT', 'This ticket exceeds the operator exposure limit', '$.stakeUnits');
 
-        this.#stakeUnits = stakeUnits;
-        this.#sideBetStakes = sideBetStakes;
+        this.#ticket = Object.freeze({
+          stakeUnits,
+          sideBetStakes: Object.freeze(sideBetStakes),
+        });
         this.#opened = true;
         const receipts: Receipt[] = [
           this.#push({
@@ -291,7 +351,8 @@ export class StageBook {
    * open commits that stage as `CONTINUE` (`k = 0`) before the next row resolves.
    */
   advance(request: AdvanceRequest): CommandResult<null> {
-    return this.#command('advance', request.idempotencyKey, request.expectedFrameRevision, [], () => {
+    const snapshot = snapshotAdvanceRequest(request);
+    return this.#command('advance', snapshot.idempotencyKey, snapshot.expectedFrameRevision, [], () => {
       this.#requireLive();
       if (this.#stage >= 1 && this.#decisionOpen) this.#logAction(this.#stage, 0);
       const stage = this.#stage + 1;
@@ -321,25 +382,26 @@ export class StageBook {
    * volatility interval reachable (`docs/MATH.md` §11).
    */
   harvest(request: HarvestRequest): CommandResult<null> {
+    const snapshot = snapshotHarvestRequest(request);
     return this.#command(
       'harvest',
-      request.idempotencyKey,
-      request.expectedFrameRevision,
-      [request.units],
+      snapshot.idempotencyKey,
+      snapshot.expectedFrameRevision,
+      [snapshot.units],
       () => {
         this.#requireLive();
         if (this.#stage === 0)
           fail('INVALID_REQUEST', 'Generation 1 is mandatory and carries no decision', '$.units');
         if (!this.#decisionOpen)
           fail('INVALID_REQUEST', 'This generation has already committed its decision', '$.units');
-        const units = request.units;
+        const units = snapshot.units;
         if (!Number.isSafeInteger(units) || units <= 0 || units > this.#units)
           fail('INVALID_REQUEST', `Harvest must be between 1 and ${this.#units}`, '$.units');
 
         const multiplier = cohortValue(this.#stage, units);
         const credit = payableWithinCap(
-          multiply(rational(this.#stakeUnits), multiplier),
-          this.#stakeUnits,
+          multiply(rational(this.#ticketStakeUnits()), multiplier),
+          this.#ticketStakeUnits(),
           SWARM.risk.colonyMaxWinMultiple,
           this.#colonyCredited,
         );
@@ -375,12 +437,13 @@ export class StageBook {
    * round nobody can verify.
    */
   settle(request: SettleRequest): CommandResult<Settlement> {
+    const snapshot = snapshotFullSettleRequest(request);
     return this.#command(
       'settle',
-      request.idempotencyKey,
-      request.expectedFrameRevision,
-      [request.revealedSeed],
-      () => this.#seal(request.revealedSeed, 'PLAYER'),
+      snapshot.idempotencyKey,
+      snapshot.expectedFrameRevision,
+      [snapshot.revealedSeed],
+      () => this.#seal(snapshot.revealedSeed, 'PLAYER'),
     );
   }
 
@@ -404,7 +467,7 @@ export class StageBook {
       if (!this.#opened) fail('INVALID_REQUEST', 'This round was never opened', '$.roundId');
       // Everything from here is posted by this one call, including the forced
       // bank: unlike a player harvest, nobody credited it on the way in.
-      const posted = this.#receipts.length;
+      const posted = this.#ledgerSequence;
       let guard = 0;
       while (this.#state === 'STAGED') {
         if (guard++ > SWARM.ladder.stages + 1)
@@ -443,8 +506,8 @@ export class StageBook {
     const units = this.#units;
     const multiplier = cohortValue(this.#stage, units);
     const credit = payableWithinCap(
-      multiply(rational(this.#stakeUnits), multiplier),
-      this.#stakeUnits,
+      multiply(rational(this.#ticketStakeUnits()), multiplier),
+      this.#ticketStakeUnits(),
       SWARM.risk.colonyMaxWinMultiple,
       this.#colonyCredited,
     );
@@ -485,8 +548,8 @@ export class StageBook {
       seedHex: this.#seed,
       context: this.context,
       seedCommitment: this.seedCommitment,
-      stakeUnits: this.#stakeUnits,
-      sideBetStakes: this.#sideBetStakes,
+      stakeUnits: this.#ticketStakeUnits(),
+      sideBetStakes: this.#ticketSideBetStakes(),
       round: replay,
       wild: this.#wild,
       settlementMode: mode,
@@ -494,7 +557,7 @@ export class StageBook {
 
     // The live ledger must be a prefix of the sealed one, amount for amount.
     // Anything else is an internal accounting bug, never a payout.
-    for (let index = 0; index < this.#receipts.length; index += 1) {
+    for (let index = 0; index < this.#ledgerSequence; index += 1) {
       const live = this.#receipts[index] as Receipt;
       const sealedReceipt = sealed.receipts[index];
       if (
@@ -508,8 +571,9 @@ export class StageBook {
         fail('INTERNAL', 'The live ledger disagrees with the sealed settlement');
     }
 
-    const posted = sealed.receipts.slice(this.#receipts.length);
+    const posted = sealed.receipts.slice(this.#ledgerSequence);
     this.#receipts = [...sealed.receipts];
+    this.#ledgerSequence = sealed.receipts.length;
     this.#settlement = sealed;
     this.#published = sealed.proof.terminal;
     this.#state = 'SETTLED';
@@ -565,11 +629,22 @@ export class StageBook {
       });
   }
 
+  #ticketStakeUnits(): bigint {
+    if (this.#ticket === null) return fail('INTERNAL', 'An opened round has no wager ticket');
+    return this.#ticket.stakeUnits;
+  }
+
+  #ticketSideBetStakes(): Readonly<Record<string, bigint>> {
+    if (this.#ticket === null) return fail('INTERNAL', 'An opened round has no wager ticket');
+    return this.#ticket.sideBetStakes;
+  }
+
   #push(receipt: Omit<Receipt, 'schema' | 'sequence' | 'unitsHarvested' | 'resolved'> &
     Partial<Pick<Receipt, 'unitsHarvested' | 'resolved'>>): Receipt {
+    this.#ledgerSequence += 1;
     const sealed = Object.freeze({
       schema: 'receipt-v2' as const,
-      sequence: this.#receipts.length + 1,
+      sequence: this.#ledgerSequence,
       unitsHarvested: 0,
       resolved: null,
       ...receipt,
@@ -615,7 +690,7 @@ export class StageBook {
           'This idempotency key was used for a different command',
           '$.idempotencyKey',
         );
-      return stored.result as CommandResult<T>;
+      return frozenCopy(stored.result as CommandResult<T>);
     }
     // A round that has reached its terminal answers a play command with its
     // terminal, before the fence: a duplicate tap should show the player what
@@ -637,19 +712,19 @@ export class StageBook {
       );
     const { receipts, value } = run();
     const result: CommandResult<T> = Object.freeze({
-      receipts: Object.freeze(receipts),
+      receipts: Object.freeze([...receipts]),
       frame: this.#frame(),
       value,
     });
     this.#commands.set(idempotencyKey, { fingerprint, result });
-    return result;
+    return frozenCopy(result);
   }
 
   #frame(): StageFrame {
     const stage = this.#stage;
     const settled = this.#state === 'SETTLED';
     const live = this.#state === 'STAGED';
-    return Object.freeze({
+    return frozenCopy({
       revision: this.#revision,
       stage,
       units: this.#units,
@@ -662,9 +737,7 @@ export class StageBook {
       actionChain: this.#chain[this.#chain.length - 1] as string,
       wildUnits: stage === 0 ? SWARM.seedUnits : (this.#wild.populations[stage - 1] as number),
       wildPeakUnits: settled ? this.#wild.peak : wildPeakThrough(this.#wild, stage),
-      wildPopulations: Object.freeze(
-        this.#wild.populations.slice(0, settled ? undefined : stage),
-      ),
+      wildPopulations: this.#wild.populations.slice(0, settled ? undefined : stage),
       lastResolution: this.#lastResolution,
       creditedUnits: this.#receipts
         .filter((receipt) => receipt.direction === 'CREDIT')

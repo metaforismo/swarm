@@ -152,7 +152,7 @@ export function renderBlocks(paytable = buildPaytable()) {
   blocks.policies = table(
     [
       'Policy',
-      'Exact RTP',
+      'Exact theoretical RTP',
       'Standard deviation',
       'Profit rate `P(>stake)`',
       'Hit rate `P(>0)`',
@@ -314,13 +314,13 @@ export function renderBlocks(paytable = buildPaytable()) {
       ],
       [
         'Absolute floor loss on the COLONY line, whatever the stake',
-        `${paytable.roundingBound.maximumLossUnits} units = ${paytable.roundingBound.maximumLossCredits} credits`,
+        `< ${paytable.roundingBound.maximumLossUnits} units = < ${paytable.roundingBound.maximumLossCredits} credits`,
       ],
       [
         'Relative, at the minimum stake',
-        `${paytable.roundingBound.relativeAtMinimumStake} = ${paytable.roundingBound.relativeAtMinimumStakePercentagePoints} percentage points`,
+        `< ${paytable.roundingBound.relativeAtMinimumStake} = < ${paytable.roundingBound.relativeAtMinimumStakePercentagePoints} percentage points`,
       ],
-      ['Relative, at the maximum stake', paytable.roundingBound.relativeAtMaximumStake],
+      ['Relative, at the maximum stake', `< ${paytable.roundingBound.relativeAtMaximumStake}`],
     ],
   );
 
@@ -360,7 +360,7 @@ export function renderBlocks(paytable = buildPaytable()) {
       'Multiplier (exact)',
       'Multiplier',
       'Own cap',
-      'RTP',
+      'Theoretical RTP before payable floors',
     ],
     paytable.sideBets.map((row) => [
       `**${row.label}**`,
@@ -466,7 +466,10 @@ export function renderBlocks(paytable = buildPaytable()) {
   blocks.headline = table(
     ['Quantity', 'Exact value'],
     [
-      ['Target RTP, every bet type', `\`${paytable.totals.rtp}\` = ${paytable.config.targetRtpPercent}%`],
+      [
+        'Theoretical target RTP before payable floors, every bet type',
+        `\`${paytable.totals.rtp}\` = ${paytable.config.targetRtpPercent}%`,
+      ],
       ['Total probability mass', `\`${paytable.totals.probabilityMass}\``],
       ['Terminal states enumerated', String(paytable.totals.terminalCount)],
       ['Decision states proven', String(paytable.proof.statesChecked)],

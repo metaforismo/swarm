@@ -12,6 +12,7 @@
  *   C  swarm-fixture-1   1 → 1 → 0   extinct, and DARK VENT wins on the same grid
  */
 import type { AddressInfo } from 'node:net';
+import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createApp, type AppOptions } from '../src/server/http.ts';
 import * as reference from '../tools/simulate.mjs';
@@ -45,9 +46,15 @@ async function start(
   options: AppOptions = {},
 ): Promise<Harness> {
   const clock = { now: 1_760_000_000_000 };
+  let seedCounter = 0;
   const { server } = createApp({
     openingBalanceUnits: 1_000n * CREDIT,
-    seedSource: () => fixture.seed,
+    seedSource: (roundId) => {
+      seedCounter += 1;
+      return seedCounter === 1
+        ? fixture.seed
+        : createHash('sha256').update(`${fixture.seed}:${roundId}:${seedCounter}`).digest('hex');
+    },
     roundIdSource: () => fixture.roundId,
     clock: () => clock.now,
     // `docs/DESIGN.md` §9.7's floors are real elapsed time on a real clock, and a

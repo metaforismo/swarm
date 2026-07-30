@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { toDecimal } from '../../tools/lib/rational.mjs';
 import { GRID_SIZE, SLOTS, SWARM, adapterFingerprint } from './adapter.ts';
 import type { StageFrame } from './book.ts';
-import { ENGINE_API_VERSION, MODULE_API_VERSION, type Rational } from './engine.ts';
+import { ENGINE_API_VERSION, MODULE_API_VERSION, rational, type Rational } from './engine.ts';
 import {
   STAGED_SURVIVAL_MODULE_ID,
   STAGED_SURVIVAL_MODULE_VERSION,
@@ -205,8 +205,38 @@ export function parseProofBundle(input: unknown): ProofBundle {
     receipts: receipts.map((entry: Record<string, unknown>, index: number) => {
       if (typeof entry !== 'object' || entry === null)
         fail('INVALID_TRANSCRIPT', 'Malformed receipt', `$.receipts[${index}]`);
+      const theoreticalSource = entry.theoretical;
+      const capped = entry.capped;
+      const terminal = entry.terminal;
+      let theoretical: Rational | null = null;
+      if (theoreticalSource !== null && theoreticalSource !== undefined) {
+        if (typeof theoreticalSource !== 'object')
+          fail(
+            'INVALID_TRANSCRIPT',
+            'Malformed theoretical amount',
+            `$.receipts[${index}].theoretical`,
+          );
+        const raw = theoreticalSource as Record<string, unknown>;
+        if (typeof raw.fraction !== 'string' || !/^-?\d+\/[1-9]\d*$/u.test(raw.fraction))
+          fail(
+            'INVALID_TRANSCRIPT',
+            'Theoretical amount must carry an exact fraction',
+            `$.receipts[${index}].theoretical.fraction`,
+          );
+        const [numerator, denominator] = raw.fraction.split('/');
+        theoretical = rational(BigInt(numerator as string), BigInt(denominator as string));
+        const expectedDecimal = wireRational(theoretical)?.decimal;
+        if (raw.decimal !== expectedDecimal)
+          fail(
+            'INVALID_TRANSCRIPT',
+            'Theoretical decimal does not match its exact fraction',
+            `$.receipts[${index}].theoretical.decimal`,
+          );
+      }
+      if (typeof capped !== 'boolean')
+        fail('INVALID_TRANSCRIPT', 'Receipt capped must be a boolean', `$.receipts[${index}].capped`);
       return {
-        schema: 'receipt-v2',
+        schema: String(entry.schema) as Receipt['schema'],
         sequence: Number(entry.sequence),
         kind: String(entry.kind),
         line: String(entry.line),
@@ -215,8 +245,11 @@ export function parseProofBundle(input: unknown): ProofBundle {
         amountUnits: units(entry.amountUnits, `$.receipts[${index}].amountUnits`),
         unitsHarvested: Number(entry.unitsHarvested ?? 0),
         resolved: entry.resolved === null || entry.resolved === undefined ? null : String(entry.resolved),
-        theoretical: null,
-        capped: entry.capped === true,
+        theoretical,
+        capped,
+        ...(terminal === undefined || terminal === null
+          ? {}
+          : { terminal: String(terminal) }),
       } as unknown as Receipt;
     }),
   };

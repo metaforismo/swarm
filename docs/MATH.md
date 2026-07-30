@@ -32,7 +32,7 @@ npm test                     # re-derive and assert every published number
 <!-- generated:headline -->
 | Quantity | Exact value |
 | --- | --- |
-| Target RTP, every bet type | `19/20` = 95.0000% |
+| Theoretical target RTP before payable floors, every bet type | `19/20` = 95.0000% |
 | Total probability mass | `1/1` |
 | Terminal states enumerated | 267 |
 | Decision states proven | 255 |
@@ -296,16 +296,16 @@ in `proveStrategyInvariance()`: for every one of the **255** decision states the
 tool computes the exact value of every one of the **2295** legal actions and
 asserts (a) each action's value equals `c(t) * n` exactly, (b) the maximum over
 actions equals `c(t) * n` exactly, and (c) the continuation value of `j`
-organisms equals `c(t) * j` exactly. Mismatches found: **0**. Optimal-play RTP:
-`19/20`.
+organisms equals `c(t) * j` exactly. Mismatches found: **0**. Optimal-play
+theoretical RTP before payable floors: `19/20`.
 
 Eight materially different policies are then evaluated independently by exact
 backward induction — including one that banks immediately, one that never banks,
 one that harvests half every generation, and two threshold rules — and all eight
-return exactly `19/20`:
+return exactly `19/20` in theoretical rational value before §13's payable floors:
 
 <!-- generated:policies -->
-| Policy | Exact RTP | Standard deviation | Profit rate `P(>stake)` | Hit rate `P(>0)` | Description |
+| Policy | Exact theoretical RTP | Standard deviation | Profit rate `P(>stake)` | Hit rate `P(>0)` | Description |
 | --- | --- | --- | --- | --- | --- |
 | `BANK_FIRST` | `19/20` | 0.513058 | 0.4560000000 | 0.9360000000 | Bank at generation 1 |
 | `RUN` | `19/20` | 7.569291 | 0.0224631637 | 0.0224631637 | Never harvest, ride to the end |
@@ -352,7 +352,8 @@ of it.
 ## 7. Bet types
 
 A ticket is one **COLONY** bet plus zero to three optional side bets. Every bet
-on the ticket carries **its own stake, its own cap basis and its own 95%**; no
+on the ticket carries **its own stake, its own cap basis and its own 95%
+theoretical RTP before payable floors**; no
 bet's payout is charged against another bet's ceiling. The engine surface for
 this is `docs/ENGINE.md` §5.
 
@@ -360,7 +361,8 @@ this is `docs/ENGINE.md` §5.
 
 Stake `S` buys the colony described above. Credits are `floor(S * c(t) * k)` at
 each harvest and at settlement, in integer minor units (section 13). Theoretical
-RTP: exactly `19/20`, for every policy, by section 6.
+Theoretical RTP before payable floors: exactly `19/20`, for every policy, by
+section 6.
 
 ### 7.2 Side bets
 
@@ -370,13 +372,14 @@ independent of the player's decisions. The wild line is a deterministic function
 of the committed draw grid alone, so a side bet cannot be moved by play, and it
 equals the player's own colony exactly whenever they never harvest.
 
-Each side bet is priced at exactly the target RTP by construction:
+Each side bet is priced at exactly the theoretical target RTP before payable
+flooring, by construction:
 `multiplier = (19/20) / probability`. Multipliers are therefore exact rationals,
 not rounded decimals; a client displays the value truncated toward zero, so the
 credited amount is never below the displayed multiplier times the stake.
 
 <!-- generated:sidebets -->
-| Bet | Resolves on | Probability | One in | Multiplier (exact) | Multiplier | Own cap | RTP |
+| Bet | Resolves on | Probability | One in | Multiplier (exact) | Multiplier | Own cap | Theoretical RTP before payable floors |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | **FIRST LIGHT** | The wild line holds 4 or more organisms after generation 1. | `1/5` | 5.00 | `19/4` | 4.750000x | 5x | `19/20` |
 | **DARK VENT** | The wild line is extinct at or before generation 3. | `168434389083176/476837158203125` | 2.83 | `1811981201171875/673737556332704` | 2.689446x | 3x | `19/20` |
@@ -397,10 +400,11 @@ next to a small colony bet is priced and paid exactly, with no interaction.
 
 `DARK VENT` pays when your own colony is most likely to have died, which makes
 it *feel* like insurance. It is not sold as insurance and must not be presented
-as one: it is an independent bet at the same 95%, so pairing it with the base bet
-neither hedges the house edge away nor adds one — two 95% bets combine to 95% of
-the total staked, on a larger total. See `docs/DESIGN.md` §9.4 for the copy rules
-this forces.
+as one: it is an independent bet at the same 95% theoretical RTP before payable
+floors, so pairing it with the base bet neither hedges the theoretical house edge
+away nor adds one — two such 95% lines combine to 95% theoretical RTP of the
+total staked, on a larger total. See `docs/DESIGN.md` §9.4 for the copy rules this
+forces.
 
 ### 7.3 Exactly when a side bet may be revealed
 
@@ -439,7 +443,7 @@ and the player's own `N(t+1)` is a partial sum of *those same draws*, over slots
 > has learned that all 10 of those slots produced no children — including the
 > slots their own colony occupies. Their colony is certainly extinct next
 > generation, `BANK` is now a strictly winning move, and the round no longer
-> returns `19/20`.
+> has a `19/20` theoretical return before payable floors.
 
 **Rule, binding on the protocol and not only the UI:** a response may carry
 wild-line state for generation `t` and every earlier generation once the player's
@@ -459,11 +463,12 @@ later row will reach 10.
 
 ### 7.4 What a ticket does, as opposed to what a line does
 
-RTP is linear, so it survives being added up: every line returns exactly `19/20`
-of its own stake, and therefore any ticket returns exactly `19/20` of the total
-staked, at any stake ratio, under any policy. That is the whole of what the RTP
-argument establishes, and it is the argument `docs/DESIGN.md` §9.4 uses to
-defend pairing `DARK VENT` with the base bet.
+Theoretical RTP is linear, so it survives being added up: before payable floors,
+every line returns exactly `19/20` of its own stake, and therefore any ticket
+returns exactly `19/20` of the total staked, at any stake ratio, under any policy.
+Section 13 quantifies the strictly downward payable shortfall. That is the whole
+of what the RTP argument establishes, and it is the argument
+`docs/DESIGN.md` §9.4 uses to defend pairing `DARK VENT` with the base bet.
 
 **The profit rate is not linear, and it is the figure the design makes binding.**
 `docs/DESIGN.md` §9.3 rules that any published "how often do I win" number is
@@ -490,7 +495,8 @@ with that containment as its kernel — for the COLONY bet plus one side bet at
 <!-- /generated:ticket-pairings -->
 
 Read the `BANK_FIRST` / `DARK VENT` row, because it is the pairing §9.4 flags:
-the ticket returns `19/20` like everything else, it can never return nothing, and
+the ticket has `19/20` theoretical RTP before payable floors like everything
+else, it can never return nothing, and
 it cuts the chance of finishing the round ahead from `0.4560000000` to
 `0.3608881499` — 9.5 percentage points — while doubling the amount staked. Under
 `RUN` the same pairing moves the same number the other way, from `0.0224631637`
@@ -839,8 +845,8 @@ old top band went silent.
   rounding, and the number of credit events depends on how the player plays: a
   single bank rounds once, harvesting at every generation rounds up to 18 times
   (section 13 computes that bound rather than asserting it). At the minimum stake
-  of `0.10` credits that is worth at most `1.80000e-04` of the stake, i.e.
-  **0.018 percentage points**, so `HALF_EVERY` is at most 0.018 pp behind
+  of `0.10` credits that is worth less than `1.80000e-04` of the stake, i.e.
+  **less than 0.018 percentage points**, so `HALF_EVERY` is less than 0.018 pp behind
   `BANK_FIRST` in payable terms. It is negligible; it is not zero; it means
   harvesting is very slightly the worse policy in payable terms, which is worth
   saying out loud in a game whose signature beat rewards harvesting
@@ -863,8 +869,9 @@ The base bet is a *volatility dial*, not a fixed profile:
 | Extreme | `RUN` | 7.56 | 2.24% | 2.24% | Nothing, or 17.57x and up |
 <!-- /generated:volatility -->
 
-Every row returns exactly `19/20` (section 6): the player chooses variance, never
-expectation. Note how far the profit rate and the hit rate can diverge —
+Every row returns exactly `19/20` in theoretical rational value before §13's
+payable floors: the player chooses variance, never theoretical expectation. Note
+how far the profit rate and the hit rate can diverge —
 `BANK_FIRST` returns something 93.60% of the time and profits 45.60% of the
 time, while `RUN`'s two numbers coincide because its smallest non-zero payout is
 already above the stake.
@@ -886,8 +893,8 @@ including history-dependent and randomized ones:
 
 `RUN` is close to the maximum but is not the maximum: the maximum-variance policy
 harvests exactly one organism whenever the colony reaches 15, which dodges the
-FULL BLOOM force-settle and keeps the round alive for a heavier tail. It returns
-`19/20`, like everything else.
+FULL BLOOM force-settle and keeps the round alive for a heavier tail. Its
+theoretical RTP before payable floors is `19/20`, like everything else.
 
 **The client can reach both ends of that interval.** `HARVEST ONE` is not a
 hypothetical button: `thinning.clientQuantum` is `any`, and `docs/DESIGN.md` §4.3
@@ -985,8 +992,9 @@ maximum, so:
 - no credit is ever truncated, on any line, at any stake ratio;
 - the invariance theorem's no-clipping precondition holds for the COLONY line and
   each side bet independently;
-- each line's RTP is exactly `19/20`, so any ticket, being a sum of lines, returns
-  exactly `19/20` of the *total* staked.
+- each line's theoretical RTP before rounding is exactly `19/20`, so any ticket,
+  being a sum of lines, has theoretical return exactly `19/20` of the *total*
+  staked; §13's independently floored payable credits are strictly no higher.
 
 ### 12.2 Ticket liability, disclosed and admitted rather than clipped
 
@@ -1034,9 +1042,9 @@ than after a win.
 | Maximum COLONY credit events in a round, over every grid and every policy | 18 |
 | The same bound if a stage accepted repeated harvests (rejected) | 117 |
 | Maximum credit events on each selected side-bet line | 1 |
-| Absolute floor loss on the COLONY line, whatever the stake | 18 units = 0.00001800 credits |
-| Relative, at the minimum stake | 1.80000e-04 = 0.018000 percentage points |
-| Relative, at the maximum stake | 1.80000e-08 |
+| Absolute floor loss on the COLONY line, whatever the stake | < 18 units = < 0.00001800 credits |
+| Relative, at the minimum stake | < 1.80000e-04 = < 0.018000 percentage points |
+| Relative, at the maximum stake | < 1.80000e-08 |
 <!-- /generated:rounding-bound -->
 
 **The count is computed, not asserted.** `maximumCreditEvents()` in
@@ -1128,9 +1136,9 @@ property: "returns more than the ticket stake" has no tie case either.
 
 | Claim | Command |
 | --- | --- |
-| Total mass is exactly 1, RTP exactly 19/20 | `npm run enumerate` (section 5 of the report) |
+| Total mass is exactly 1, theoretical RTP exactly 19/20 before payable floors | `npm run enumerate` (section 5 of the report) |
 | Every action at every state ties | `npm run enumerate` (section 9 of the report) |
-| Eight policies all return 19/20, with profit rates | `npm run enumerate` (section 8 of the report) |
+| Eight policies all have theoretical RTP 19/20 before payable floors, with profit rates | `npm run enumerate` (section 8 of the report) |
 | How often each policy blooms, and which never do | `npm run enumerate` (section 8 of the report) |
 | What a second bet line does to the profit rate | `npm run enumerate` (section 10 of the report) |
 | The floor-rounding bound, and the alternative it rejects | `npm run enumerate` (section 11 of the report) |
@@ -1149,7 +1157,8 @@ property: "returns more than the ticket stake" has no tie case either.
 
 The Monte Carlo simulator exists only as a cross-check on the written rules; it
 never sources a published number. At 50,000 deterministic rounds under RUN it
-returns an empirical RTP of 0.960842 against the exact 0.95 (0.32 standard
+returns an empirical RTP of 0.960842 against the exact theoretical 0.95 before
+payable floors (0.32 standard
 errors, on a policy whose standard deviation is 7.57) and a mean round length of
 5.8636 against the exact 5.85032978. The same run settles one ticket end to end,
 publishes both commitment phases, re-publishes it under a forged action log so

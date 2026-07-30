@@ -11,18 +11,19 @@
  * every failure is one of the public codes in `./errors.ts` with a path — never a
  * stack trace.
  *
- * Two responsible-design surfaces are enforced here rather than in the client,
- * because a rule that only exists in the client is not a rule: `docs/DESIGN.md`
- * §9.7's speed-of-play floors hold every round command until its floor has
- * passed (a wait, never a refusal — no floor can cost a payout), and §9.9's
- * session limits refuse a stake with `LIMIT_REACHED` and nothing else.
+ * Two responsible-design surfaces are enforced by the service rather than in
+ * the client or this transport wrapper, because a rule that only exists in one
+ * adapter is not a rule: `docs/DESIGN.md` §9.7's speed-of-play floors hold every
+ * round command until its floor has passed (a wait, never a refusal — no floor
+ * can cost a payout), and §9.9's session limits refuse a stake with
+ * `LIMIT_REACHED` and nothing else.
  */
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { StageFrame } from './book.ts';
 import { SwarmError, fail, statusFor, toSwarmError } from './errors.ts';
-import type { Admission } from './pacing.ts';
 import { RoundService, type ServiceOptions } from './service.ts';
 import { verifyRound } from './verify.ts';
 import {
@@ -171,56 +172,48 @@ async function handle(
 
       const body = await readJson(request);
       if (command === 'open') {
-        const result = await paced(service.pacer.admitOpen(roundId), () =>
-          service.open(roundId, {
-            idempotencyKey: readKey(body.idempotencyKey),
-            expectedFrameRevision: readRevision(body.expectedFrameRevision),
-            stakeUnits: readUnits(body.stakeUnits, '$.stakeUnits'),
-            sideBets: readSideBets(body.sideBets),
-            clientEntropy: String(body.clientEntropy ?? ''),
-          }),
-        );
+        const result = await service.open(roundId, {
+          idempotencyKey: readKey(body.idempotencyKey),
+          expectedFrameRevision: readRevision(body.expectedFrameRevision),
+          stakeUnits: readUnits(body.stakeUnits, '$.stakeUnits'),
+          sideBets: readSideBets(body.sideBets),
+          clientEntropy: String(body.clientEntropy ?? ''),
+        });
         return sendJson(response, 200, {
-          ...roundView(service, roundId),
+          ...roundView(service, roundId, result.frame),
           receipts: result.receipts.map(wireReceipt),
         });
       }
       if (command === 'advance') {
-        const result = await paced(service.pacer.admitCommand(roundId), () =>
-          service.advance(roundId, {
-            idempotencyKey: readKey(body.idempotencyKey),
-            expectedFrameRevision: readRevision(body.expectedFrameRevision),
-          }),
-        );
+        const result = await service.advance(roundId, {
+          idempotencyKey: readKey(body.idempotencyKey),
+          expectedFrameRevision: readRevision(body.expectedFrameRevision),
+        });
         return sendJson(response, 200, {
-          ...roundView(service, roundId),
+          ...roundView(service, roundId, result.frame),
           receipts: result.receipts.map(wireReceipt),
         });
       }
       if (command === 'harvest') {
         const units = body.units;
         if (!Number.isSafeInteger(units)) fail('INVALID_REQUEST', 'units must be an integer', '$.units');
-        const result = await paced(service.pacer.admitCommand(roundId), () =>
-          service.harvest(roundId, {
-            idempotencyKey: readKey(body.idempotencyKey),
-            expectedFrameRevision: readRevision(body.expectedFrameRevision),
-            units: units as number,
-          }),
-        );
+        const result = await service.harvest(roundId, {
+          idempotencyKey: readKey(body.idempotencyKey),
+          expectedFrameRevision: readRevision(body.expectedFrameRevision),
+          units: units as number,
+        });
         return sendJson(response, 200, {
-          ...roundView(service, roundId),
+          ...roundView(service, roundId, result.frame),
           receipts: result.receipts.map(wireReceipt),
         });
       }
       if (command === 'settle') {
-        const result = await paced(service.pacer.admitCommand(roundId), () =>
-          service.settle(roundId, {
-            idempotencyKey: readKey(body.idempotencyKey),
-            expectedFrameRevision: readRevision(body.expectedFrameRevision),
-          }),
-        );
+        const result = await service.settle(roundId, {
+          idempotencyKey: readKey(body.idempotencyKey),
+          expectedFrameRevision: readRevision(body.expectedFrameRevision),
+        });
         return sendJson(response, 200, {
-          ...roundView(service, roundId),
+          ...roundView(service, roundId, result.frame),
           receipts: result.receipts.map(wireReceipt),
         });
       }
@@ -285,36 +278,15 @@ function limitsOf(service: RoundService): Record<string, unknown> {
   return { limits: wireLimits(service) };
 }
 
-/** §9.7's floors: a wait before the command runs, never a refusal of it. */
-function hold(milliseconds: number): Promise<void> {
-  if (!(milliseconds > 0)) return Promise.resolve();
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-/**
- * Runs a round command behind its §9.7 floor.
- *
- * The floor is a wait and never a refusal — and a command that is *itself* refused
- * pays no floor at all. §9.7's floors govern how fast a round may be cycled, and a
- * malformed payload, a stake a session limit refuses, or a command fenced to a
- * stale frame has not cycled a round: it gets its slot back, so arguing with the
- * API is not slower than playing it and a client cannot hold a connection per
- * piece of garbage it sends. A command that *succeeds* keeps its slot, which is
- * what makes the floor a floor.
- */
-async function paced<T>(admission: Admission, run: () => T): Promise<T> {
-  await hold(admission.waitMs);
-  try {
-    return run();
-  } catch (error) {
-    admission.release();
-    throw error;
-  }
-}
-
-function roundView(service: RoundService, roundId: string): Record<string, unknown> {
+function roundView(
+  service: RoundService,
+  roundId: string,
+  commandFrame?: StageFrame,
+): Record<string, unknown> {
   const record = service.record(roundId);
-  const book = service.book(roundId);
+  const book = record.book;
+  if (book === null)
+    fail('INVALID_REQUEST', 'This round has not been opened', '$.roundId');
   const settlement = book.settlement;
   return {
     roundId,
@@ -327,7 +299,7 @@ function roundView(service: RoundService, roundId: string): Record<string, unkno
       Object.entries(book.sideBetStakes).map(([id, units]) => [id, units.toString()]),
     ),
     exposureUnits: book.exposureUnits.toString(),
-    frame: wireFrame(book.frame),
+    frame: wireFrame(commandFrame ?? book.frame),
     ledger: book.receipts.map(wireReceipt),
     settlement: settlement === null ? null : wireSettlement(settlement),
     session: sessionOf(service),

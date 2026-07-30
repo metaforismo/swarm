@@ -13,9 +13,12 @@ survives — so unlike a crash multiplier, **this number can go down and come
 back**, and you can take part of it off the table at any point. Extinction zeroes
 whatever you did not harvest. Nothing in the game is timed, so no decision
 depends on your connection. Every strategy, from banking instantly to riding
-eighteen generations, returns exactly the same 95%: your choices move the risk,
-never the return, and that is proven by exhaustive enumeration rather than
-asserted.
+eighteen generations, has exactly the same **95% theoretical RTP before
+rounding**: your choices move the risk, not that theoretical value. Payable
+credits are floored to minor units; the strategy-dependent shortfall is always
+downward and, on the COLONY line, is strictly less than 18 units (`0.000018`
+credits), or 0.018 percentage points at the minimum stake. Both claims are
+proven by exhaustive enumeration rather than asserted.
 
 ---
 
@@ -93,7 +96,7 @@ answer for rather than hide ([docs/DESIGN.md §9.2](docs/DESIGN.md)).
 | How often you profit | `P(return > stake)`: 45.60% banking at once, 30.75% harvesting half every generation, 2.24% never banking. A side bet on the same ticket moves this a long way in either direction — adding DARK VENT at an equal stake takes 45.60% to 36.09% for the first, and 2.24% to 37.57% for the last ([docs/MATH.md §7.4](docs/MATH.md)) |
 | How often you get back less than you staked | 48.00% banking at once, 50.04% harvesting half every generation — the most common outcome class in the game, and the settlement screen says so ([docs/DESIGN.md §7.1](docs/DESIGN.md)) |
 | Round length | 5.85 generations on average, 18 maximum |
-| Side bets | FIRST LIGHT `4.75x`, DARK VENT `2.689x`, SWARM `248.798x` — all at 95%, each with its own stake and cap |
+| Side bets | FIRST LIGHT `4.75x`, DARK VENT `2.689x`, SWARM `248.798x` — all at 95% theoretical RTP before their single payable credit is floored, each with its own stake and cap |
 
 Full derivations, exact fractions and the strategy proof: [docs/MATH.md](docs/MATH.md).
 
@@ -132,8 +135,8 @@ Full derivations, exact fractions and the strategy proof: [docs/MATH.md](docs/MA
   the only rounding is a single floor at each credit, in integer minor units
   (`1 credit = 10^6 units`). A round can produce at most **18** such credits on
   the colony line — a number computed by dynamic program over every grid and
-  every play pattern, not asserted — so the floor costs at most `1.8e-4` of the
-  minimum stake, or 0.018 percentage points of RTP. It is the one quantity that
+  every play pattern, not asserted — so the floor costs less than `1.8e-4` of the
+  minimum stake, or less than 0.018 percentage points of RTP. It is the one quantity that
   depends on how you play, and it is disclosed rather than rounded away
   ([docs/MATH.md §13](docs/MATH.md)).
 - **No latency-sensitive decisions.** No decision in SWARM has a deadline. A slow
