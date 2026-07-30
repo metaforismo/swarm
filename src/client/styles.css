@@ -43,14 +43,22 @@
 
   /* §6.2's pressure glass: 8% FOAM fill, background blur, a 1 px inner stroke at
      20% LUMEN and a 2 px outer shadow at 60% ABYSS. Corner radius 16. */
+  /* §6.2's pressure glass, with the colour the round-1 build left out: the panels
+     sat on near-neutral fill over near-black, which is most of why the product
+     measured as one hue on black. The glass is now tinted by the two colours the
+     water actually has — LUMEN below, PLANKTON above — and it is still glass. */
   --panel: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--foam) 10%, transparent) 0%,
-    color-mix(in srgb, var(--foam) 5%, transparent) 40%,
-    color-mix(in srgb, var(--silt) 34%, transparent) 100%
+    color-mix(in srgb, var(--foam) 11%, transparent) 0%,
+    color-mix(in srgb, var(--plankton) 7%, transparent) 34%,
+    color-mix(in srgb, var(--lumen) 6%, transparent) 68%,
+    color-mix(in srgb, var(--silt) 44%, transparent) 100%
   );
-  --panel-stroke: color-mix(in srgb, var(--lumen) 20%, transparent);
-  --panel-shadow: 0 2px 18px rgba(2, 4, 10, 0.6), inset 0 1px 0 color-mix(in srgb, var(--foam) 12%, transparent);
+  --panel-stroke: color-mix(in srgb, var(--lumen) 30%, transparent);
+  --panel-shadow:
+    0 2px 18px rgba(2, 4, 10, 0.6),
+    0 0 26px color-mix(in srgb, var(--lumen) 7%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--foam) 14%, transparent);
   --radius: 16px;
   --hairline: color-mix(in srgb, var(--crust) 42%, transparent);
 }
@@ -207,12 +215,14 @@ button {
   color: var(--foam);
 }
 
+/* §9.6 puts the floor on the *short* side, so a 40 x 44 control does not meet
+   it. Both icon buttons are 44 x 44. */
 .icon-button {
   position: relative;
   flex: 0 0 auto;
   display: grid;
   place-items: center;
-  width: 40px;
+  width: 44px;
   height: 44px;
   border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--crust) 60%, transparent);
@@ -314,8 +324,46 @@ button {
   clip-path: inset(50%);
 }
 
+/*
+ * §6.2's 2% monochrome grain, animated at 12 fps.
+ *
+ * A repeating background on its own layer rather than a per-frame pattern fill
+ * on the canvas: the texture is identical on every frame of the game, so paying
+ * a full screen of fill rate for it every frame was the difference between the
+ * resolve beat fitting in a 16.7 ms budget and missing it. `background-position`
+ * in steps gives the 12 fps cycle for free.
+ */
+.stage-grain {
+  position: absolute;
+  /* Over-sized by one tile on every side, so the layer can be *translated* to
+     cycle the noise without ever exposing an edge. `background-position` would
+     have done the same thing but it is paint-driven: it repaints and re-blends
+     the whole layer 12 times a second on top of a canvas that is already using
+     the frame budget. A transform is composited and costs nothing. */
+  inset: -96px;
+  z-index: 1;
+  opacity: 0.035;
+  pointer-events: none;
+  background-repeat: repeat;
+  /* `screen` is the compositor's name for the `lighter` the canvas pass used, so
+     the grain lifts the blacks by the same tiny amount rather than greying them. */
+  mix-blend-mode: screen;
+  will-change: transform;
+  animation: grain-shift 500ms steps(6) infinite;
+}
+
+@keyframes grain-shift {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(96px, 96px, 0);
+  }
+}
+
 .legend {
   position: absolute;
+  z-index: 2;
   top: 10px;
   left: 50%;
   transform: translateX(-50%);
@@ -334,6 +382,7 @@ button {
 
 .stage-note {
   position: absolute;
+  z-index: 2;
   left: 16px;
   /* Clears the vessel, which sits in the bottom-right of the stage. */
   right: 88px;
@@ -363,8 +412,16 @@ button {
   padding: 9px 14px 9px;
   border-top: 1px solid var(--hairline);
   border-bottom: 1px solid var(--hairline);
+  /* The strip is instrument glass lit from the stage above it, so it carries the
+     water's colour rather than sitting on neutral black. */
   background:
-    linear-gradient(180deg, rgba(6, 16, 25, 0.2) 0%, color-mix(in srgb, var(--silt) 62%, transparent) 100%);
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--plankton) 5%, transparent) 0%,
+      color-mix(in srgb, var(--lumen) 4%, transparent) 44%,
+      color-mix(in srgb, var(--silt) 72%, transparent) 100%
+    ),
+    linear-gradient(180deg, rgba(4, 12, 19, 0.55) 0%, rgba(3, 9, 15, 0.8) 100%);
 }
 
 /* The strip is lit by the stage above it: the hairline brightens with the frame's
@@ -383,8 +440,56 @@ button {
   opacity: calc(0.25 + 0.6 * var(--strip-exposure, 0.146));
 }
 
+/*
+ * The verdict, on the strip (§6.5).
+ *
+ * One composited pass — opacity and a horizontal scale — tinted by the band the
+ * generation landed in. A gain sends light across the reading; a loss pulls the
+ * dark across it, because loss is communicated by the removal of light and never
+ * by an alarm colour (§6.1). It is driven from `app.js` through the Web
+ * Animations API so it replays on every generation rather than only when the
+ * band changes.
+ */
+.strip-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  opacity: 0;
+  pointer-events: none;
+  transform-origin: 50% 50%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--lumen) 20%, transparent) 50%,
+    transparent 100%
+  );
+}
+
+.strip[data-band='large-gain'] .strip-flash {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--medusa) 34%, transparent) 50%,
+    transparent 100%
+  );
+}
+
+.strip[data-band='loss'] .strip-flash,
+.strip[data-band='heavy-loss'] .strip-flash {
+  background: linear-gradient(90deg, transparent 0%, rgba(2, 4, 10, 0.82) 50%, transparent 100%);
+}
+
 .strip .strip-main {
+  position: relative;
+  z-index: 1;
   min-width: 0;
+}
+
+.strip .yield,
+.strip .chips,
+.strip .stakeline {
+  position: relative;
+  z-index: 1;
 }
 
 /* The yield line owns the full width of the strip. A side-bet chip sits beside
@@ -412,6 +517,9 @@ button {
   line-height: 42px;
   letter-spacing: -0.02em;
   color: var(--foam);
+  /* The verdict beat scales this from the left, so the reading grows into the
+     strip rather than drifting across it. Transform only: no layout moves. */
+  transform-origin: 0% 50%;
   text-shadow: 0 0 calc(6px + 22px * var(--strip-exposure, 0.146))
     color-mix(in srgb, var(--lumen) 30%, transparent);
 }
@@ -495,7 +603,7 @@ button {
 .chip {
   font-family: var(--numerals);
   font-variant-numeric: tabular-nums;
-  font-size: 10.5px;
+  font-size: 11px;
   letter-spacing: 0.07em;
   padding: 4px 9px;
   border-radius: 999px;
@@ -520,9 +628,17 @@ button {
   box-shadow: inset 0 0 10px color-mix(in srgb, var(--amber) 14%, transparent);
 }
 
+/*
+ * A resolved-and-lost bet, and the one state a player is most likely to want to
+ * check. The round-1 build dimmed it with `opacity: 0.65`, which composited ASH
+ * down to rgb(91, 102, 114) on the strip — 3.38:1, under §9.6's 4.5:1 floor at
+ * body size. The "spent" read now lives in the border and the fill, where it
+ * costs no contrast: ASH at full strength measures 6.6:1 on this ground.
+ */
 .chip[data-state='LOST'] {
   color: var(--ash);
-  opacity: 0.65;
+  border-color: color-mix(in srgb, var(--crust) 40%, transparent);
+  background: rgba(4, 10, 16, 0.5);
 }
 
 /* ---------------------------------------------------------------- action bar */
@@ -744,12 +860,37 @@ button {
  * One EMBER wash is kept on top, because the vent sits below the fold on the
  * taller sheets and the frame's warm anchor should not disappear with it.
  */
+/*
+ * The round-1 scrim was `0.90 → 0.76` black under a 14 px blur, which is opaque
+ * enough that the stage behind it was invisible — so the screen whose whole job
+ * is to establish the setting was the one screen not showing it, and measured
+ * out at 45% featureless rows. The scrim now *opens downward*: dense where the
+ * type is, nearly clear where the vent is, on a light blur. The picture the
+ * screen is about is the picture the screen shows.
+ */
 .overlay.vent-idle {
   background:
-    radial-gradient(38% 9% at 50% 100%, color-mix(in srgb, var(--ember) 30%, transparent) 0%, transparent 70%),
-    radial-gradient(80% 28% at 50% 104%, color-mix(in srgb, var(--ember) 13%, transparent) 0%, transparent 74%),
-    linear-gradient(180deg, rgba(2, 4, 10, 0.9) 0%, rgba(3, 8, 14, 0.82) 46%, rgba(4, 11, 17, 0.76) 100%);
-  backdrop-filter: blur(9px) saturate(120%);
+    radial-gradient(42% 11% at 50% 100%, color-mix(in srgb, var(--ember) 24%, transparent) 0%, transparent 72%),
+    radial-gradient(86% 30% at 50% 104%, color-mix(in srgb, var(--ember) 10%, transparent) 0%, transparent 76%),
+    /*
+     * Dense only where unglassed type sits — the wordmark at the top and the
+     * footer controls at the bottom — and open through the middle, which is
+     * exactly the band the vent plume rises through. Everything in between is a
+     * pressure-glass panel that carries its own legibility (§6.2), so it does not
+     * need the scrim to be opaque behind it, and putting the water behind the
+     * glass is what the material was specified to look like in the first place.
+     */
+    linear-gradient(
+      180deg,
+      rgba(2, 4, 10, 0.94) 0%,
+      rgba(2, 4, 10, 0.88) 15%,
+      rgba(3, 9, 15, 0.4) 25%,
+      rgba(3, 9, 15, 0.3) 44%,
+      rgba(4, 11, 17, 0.42) 62%,
+      rgba(4, 12, 19, 0.62) 82%,
+      rgba(4, 12, 19, 0.54) 100%
+    );
+  backdrop-filter: blur(4px) saturate(140%);
 }
 
 /*
@@ -760,8 +901,13 @@ button {
  * what holds the numerals at their contrast floor over a lit stage (§9.6).
  */
 .overlay.live-scrim {
-  background: linear-gradient(180deg, rgba(2, 4, 10, 0.66) 0%, rgba(2, 4, 10, 0.9) 100%);
-  backdrop-filter: blur(6px) saturate(115%);
+  background: linear-gradient(
+    180deg,
+    rgba(2, 4, 10, 0.34) 0%,
+    rgba(2, 4, 10, 0.62) 44%,
+    rgba(2, 4, 10, 0.88) 100%
+  );
+  backdrop-filter: blur(4px) saturate(125%);
 }
 
 .frame[data-screen='s0'] .strip,
@@ -1477,15 +1623,85 @@ table.data td.num {
  * The first thing it splits on is whether the player is up or down. A round that
  * returned less than it cost gets no count-up, no amber and no share card, and
  * its signed net result is at least as prominent as the credited amount.
+ *
+ * **Everything below is a sequence, not a state.** The round-1 build declared no
+ * transition and no animation here, so the payout card cut from absent to fully
+ * opaque in a single frame and then held still for its whole duration — which
+ * made an 18x win and a total loss the same screen with a different headline
+ * colour. A win now *arrives*: the scrim opens, the card lands with weight, the
+ * figure counts, and above 10x the frame lifts behind it. A loss arrives too,
+ * but quickly and quietly, which is the other half of the same rule.
+ *
+ * The resting style of every element here is its *settled* state, and the
+ * entrance animates toward it. That is what makes `prefers-reduced-motion` —
+ * which cuts every duration to 1 ms — land on a correctly composed screen
+ * instead of a pile of un-run keyframes.
  */
 .ceremony {
   align-items: stretch;
   justify-content: center;
   text-align: center;
   gap: 6px;
-  /* Translucent, so the settled colony is still on screen behind the payout. */
+  /* Translucent, so the settled colony is still on screen behind the payout —
+     but blurred far enough that the value strip behind it reads as light rather
+     than as text. A banked round leaves `0.00x` on the strip, which is true and
+     is exactly the wrong number to be legible behind an 11x payout. */
   background: linear-gradient(180deg, rgba(2, 4, 10, 0.62) 0%, rgba(2, 4, 10, 0.86) 100%);
-  backdrop-filter: blur(3px) saturate(115%);
+  backdrop-filter: blur(8px) saturate(118%);
+  animation: ceremony-open 260ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+/*
+ * The rays: light behind the card, and the reason a big win reads as a big win
+ * from across a room. They exist at T2 and T3 only — §7.1 gives the lift to
+ * those two tiers and to nothing else, so a round that paid nothing keeps the
+ * dark it earned. One rasterized conic gradient, transformed; never repainted.
+ */
+/* The card and the light behind it are one box, so the rays are centred on the
+   figure rather than on the overlay — which is what stopped them reading as a
+   perspective floor under the card. */
+.payout-stage {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.ceremony-rays {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 150vh;
+  height: 150vh;
+  margin: -75vh 0 0 -75vh;
+  opacity: 0;
+  pointer-events: none;
+  background: repeating-conic-gradient(
+    from 0deg,
+    color-mix(in srgb, var(--lumen) 26%, transparent) 0deg 2.6deg,
+    transparent 2.6deg 10deg
+  );
+  -webkit-mask-image: radial-gradient(closest-side, transparent 8%, rgba(0, 0, 0, 0.9) 17%, rgba(0, 0, 0, 0.34) 34%, transparent 56%);
+  mask-image: radial-gradient(closest-side, transparent 8%, rgba(0, 0, 0, 0.9) 17%, rgba(0, 0, 0, 0.34) 34%, transparent 56%);
+  will-change: transform, opacity;
+}
+
+.ceremony[data-tier='T2'] .ceremony-rays {
+  opacity: 0.26;
+  animation: rays-in 900ms cubic-bezier(0.2, 0, 0, 1) both, rays-spin 44s linear infinite;
+}
+
+.ceremony[data-tier='T3'] .ceremony-rays {
+  opacity: 0.44;
+  /* The top tier runs hot: at settlement the colony is gone and what is filling
+     the frame is banked money, so T3's light is mostly AMBER where T2's is
+     mostly the colony's own LUMEN. That is the visible difference between the
+     two loudest screens in the game, and it is in the right currency. */
+  background: repeating-conic-gradient(
+    from 0deg,
+    color-mix(in srgb, var(--amber) 34%, transparent) 0deg 3.4deg,
+    color-mix(in srgb, var(--lumen) 16%, transparent) 3.4deg 5deg,
+    transparent 5deg 11deg
+  );
+  animation: rays-in 1100ms cubic-bezier(0.2, 0, 0, 1) both, rays-spin 30s linear infinite;
 }
 
 .payout-card {
@@ -1500,13 +1716,104 @@ table.data td.num {
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.62), inset 0 1px 0 color-mix(in srgb, var(--foam) 14%, transparent);
   backdrop-filter: blur(22px) saturate(130%);
   padding: 20px 18px 18px;
+  overflow: hidden;
+  /* The loss entrance, and the default: quick, small, over in 200 ms. A losing
+     round is not made kinder by being drawn out. */
+  animation: card-quiet 200ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+/*
+ * The win entrance. It overshoots — that is the weight — and it takes longer the
+ * more the round paid, which is §7.1's own scaling applied to the entrance
+ * rather than only to the count-up.
+ */
+.ceremony[data-tier='T0-win'] .payout-card,
+.ceremony[data-tier='T1'] .payout-card {
+  border-color: color-mix(in srgb, var(--amber) 40%, transparent);
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.62),
+    0 0 40px color-mix(in srgb, var(--amber) 12%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--foam) 16%, transparent);
+  animation: card-land 460ms cubic-bezier(0.18, 1.14, 0.36, 1) both;
+}
+
+.ceremony[data-tier='T2'] .payout-card,
+.ceremony[data-tier='T3'] .payout-card {
+  border-color: color-mix(in srgb, var(--amber) 62%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--amber) 12%, transparent) 0%,
+    color-mix(in srgb, var(--foam) 7%, transparent) 34%,
+    color-mix(in srgb, var(--silt) 62%, transparent) 100%
+  );
+  box-shadow:
+    0 26px 70px rgba(0, 0, 0, 0.66),
+    0 0 90px color-mix(in srgb, var(--amber) 26%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--foam) 24%, transparent);
+  animation: card-land 620ms cubic-bezier(0.16, 1.2, 0.32, 1) both;
+}
+
+/* The specular sweep: one pass across the card as it lands, on wins only. It is
+   a transform on a pre-composited gradient, so it costs nothing per frame. */
+.card-sweep {
+  position: absolute;
+  inset: -40% -60%;
+  opacity: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 38%,
+    color-mix(in srgb, var(--foam) 26%, transparent) 50%,
+    transparent 62%
+  );
+}
+
+.ceremony[data-tier='T0-win'] .card-sweep,
+.ceremony[data-tier='T1'] .card-sweep,
+.ceremony[data-tier='T2'] .card-sweep,
+.ceremony[data-tier='T3'] .card-sweep {
+  animation: card-sweep 900ms 260ms cubic-bezier(0.3, 0, 0.2, 1) both;
+}
+
+/* The card's contents arrive after the card does, in reading order. */
+.ceremony .terminal,
+.ceremony .headline,
+.ceremony .multiple,
+.ceremony .net,
+.ceremony .payout-card .small {
+  animation: card-line 380ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+/*
+ * The terminal and the figure arrive with the card. Everything that *confirms*
+ * the figure waits until the count-up has landed — `--reveal-delay` is set from
+ * the tier's own count-up duration — because a total printed beside a counting
+ * figure has already given the answer away, which is how the round-1 build's
+ * count would have felt even if it had run.
+ */
+.ceremony .terminal {
+  animation-delay: 90ms;
+}
+.ceremony .headline {
+  animation-delay: 150ms;
+}
+.ceremony .multiple {
+  animation-delay: var(--reveal-delay, 230ms);
+}
+.ceremony .net {
+  animation-delay: calc(var(--reveal-delay, 230ms) + 70ms);
+}
+.ceremony .payout-card .small {
+  animation-delay: calc(var(--reveal-delay, 230ms) + 140ms);
 }
 
 .ceremony .headline {
   font-family: var(--numerals);
   font-variant-numeric: tabular-nums;
   font-size: 56px;
-  line-height: 60px;
+  /* Relative, because `app.js` sizes the figure to fit the card at any stake and
+     a fixed leading would stop tracking it. */
+  line-height: 1.07;
   margin: 6px 0;
   letter-spacing: -0.03em;
 }
@@ -1533,20 +1840,59 @@ table.data td.num {
   text-shadow: 0 0 30px color-mix(in srgb, var(--amber) 34%, transparent);
 }
 
+/* The two loud tiers get a bigger figure and a hotter core, because the figure
+   is the thing a player screen-records. */
+.ceremony[data-tier='T2'] .headline {
+  font-size: 66px;
+  color: var(--amber);
+  text-shadow:
+    0 0 24px color-mix(in srgb, var(--amber) 60%, transparent),
+    0 0 60px color-mix(in srgb, var(--amber) 30%, transparent);
+}
+
+.ceremony[data-tier='T3'] .headline {
+  font-size: 72px;
+  color: #fff1d8;
+  text-shadow:
+    0 0 26px color-mix(in srgb, var(--amber) 78%, transparent),
+    0 0 76px color-mix(in srgb, var(--amber) 42%, transparent);
+}
+
+/* The round's credited multiple of what the ticket cost — the tier's own basis
+   (§7.1). Wins only: below the stake the signed net is the headline and a third
+   figure beside it would dilute the one number §9.3 requires to lead. */
+.ceremony .multiple {
+  font-family: var(--numerals);
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--amber);
+  margin-bottom: 4px;
+}
+
+.ceremony[data-tier='T2'] .multiple,
+.ceremony[data-tier='T3'] .multiple {
+  font-size: 17px;
+  color: #fff0d6;
+  text-shadow: 0 0 18px color-mix(in srgb, var(--amber) 55%, transparent);
+}
+
 /* §7.1: T2 lifts the frame one exposure stop and T3 takes it to full
    illumination. The lift is on the ceremony's own scrim, so a round that paid
    nothing keeps the dark it earned. */
 .ceremony[data-tier='T2'] {
   background:
-    radial-gradient(70% 40% at 50% 44%, color-mix(in srgb, var(--lumen) 9%, transparent) 0%, transparent 70%),
-    linear-gradient(180deg, rgba(3, 10, 15, 0.3) 0%, rgba(3, 9, 14, 0.62) 42%, rgba(2, 6, 11, 0.86) 100%);
+    radial-gradient(70% 40% at 50% 44%, color-mix(in srgb, var(--lumen) 13%, transparent) 0%, transparent 70%),
+    radial-gradient(50% 26% at 50% 46%, color-mix(in srgb, var(--amber) 10%, transparent) 0%, transparent 72%),
+    linear-gradient(180deg, rgba(3, 10, 15, 0.24) 0%, rgba(3, 9, 14, 0.56) 42%, rgba(2, 6, 11, 0.84) 100%);
 }
 
 .ceremony[data-tier='T3'] {
   background:
-    radial-gradient(80% 46% at 50% 42%, color-mix(in srgb, var(--lumen) 18%, transparent) 0%, transparent 72%),
-    radial-gradient(60% 30% at 50% 46%, color-mix(in srgb, var(--amber) 9%, transparent) 0%, transparent 70%),
-    linear-gradient(180deg, rgba(5, 16, 22, 0.2) 0%, rgba(4, 12, 18, 0.55) 40%, rgba(3, 9, 14, 0.84) 100%);
+    radial-gradient(80% 46% at 50% 42%, color-mix(in srgb, var(--lumen) 22%, transparent) 0%, transparent 72%),
+    radial-gradient(60% 30% at 50% 46%, color-mix(in srgb, var(--amber) 15%, transparent) 0%, transparent 70%),
+    linear-gradient(180deg, rgba(5, 16, 22, 0.14) 0%, rgba(4, 12, 18, 0.48) 40%, rgba(3, 9, 14, 0.82) 100%);
 }
 
 .ceremony[data-tier='T-nil'],
@@ -1554,7 +1900,14 @@ table.data td.num {
   background: linear-gradient(180deg, rgba(2, 4, 10, 0.88) 0%, rgba(2, 4, 10, 0.96) 100%);
 }
 
+/* Two readings that wrap as units. A single run of text broke between `NET` and
+   its own figure whenever the payout was wide enough to need two lines. */
 .ceremony .net {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 2px 16px;
   font-family: var(--numerals);
   font-variant-numeric: tabular-nums;
   font-size: 20px;
@@ -1562,11 +1915,189 @@ table.data td.num {
   letter-spacing: 0.02em;
 }
 
+.ceremony .net span {
+  white-space: nowrap;
+}
+
 .ceremony .terminal {
   font-size: 11px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--mist);
+}
+
+/*
+ * The round's shape: one bar per generation at the population it resolved to.
+ * The player's own record, in the round's own colours — LUMEN when the round
+ * finished ahead, ASH when it did not. It carries information, so it is drawn
+ * either way; it carries no emphasis, so it does not change size with the money.
+ */
+.ceremony .trace {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 4px;
+  height: 40px;
+  margin: 14px 0 12px;
+  padding-bottom: 5px;
+  animation: card-line 380ms calc(var(--reveal-delay, 230ms) + 100ms) cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+/* A baseline, so the bars read as a record of generations rather than as a mark. */
+.ceremony .trace::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: calc(100% - 40px);
+  max-width: 232px;
+  height: 1px;
+  transform: translateX(-50%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--crust) 85%, transparent) 20%,
+    color-mix(in srgb, var(--crust) 85%, transparent) 80%,
+    transparent
+  );
+}
+
+.ceremony .trace-bar {
+  width: 7px;
+  min-height: 2px;
+  border-radius: 2px 2px 0 0;
+  transform-origin: 50% 100%;
+  animation: trace-grow 320ms cubic-bezier(0.2, 0, 0, 1) both;
+  animation-delay: inherit;
+}
+
+.ceremony .trace[data-tone='won'] .trace-bar {
+  background: linear-gradient(180deg, var(--lumen) 0%, color-mix(in srgb, var(--lumen-deep) 55%, transparent) 100%);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--lumen) 34%, transparent);
+}
+
+.ceremony .trace[data-tone='spent'] .trace-bar {
+  background: linear-gradient(180deg, var(--ash) 0%, color-mix(in srgb, var(--ash) 30%, transparent) 100%);
+}
+
+/* A generation that resolved to nothing is a gap in the record, not a bar. */
+.ceremony .trace-bar.gone {
+  background: none;
+  box-shadow: none;
+  border-bottom: 2px solid color-mix(in srgb, var(--ash) 55%, transparent);
+}
+
+@keyframes trace-grow {
+  from {
+    transform: scaleY(0.06);
+    opacity: 0;
+  }
+  to {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+/* The share card itself, in its sheet. It is drawn at 1080x1350 and displayed
+   at whatever the frame is wide, so the saved image is full resolution and the
+   preview is the same picture rather than a different composition. */
+.share-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 12px 0 6px;
+  border-radius: 14px;
+  border: 1px solid var(--panel-stroke);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
+}
+
+/* The share control (§7.1): offered at T2 and T3, and never below the stake. */
+.cta.share-cta {
+  background: linear-gradient(180deg, #ffe3b0 0%, var(--amber) 48%, #d99a45 100%);
+  color: #2a1704;
+  box-shadow:
+    0 0 26px color-mix(in srgb, var(--amber) 34%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  animation: card-line 420ms calc(var(--reveal-delay, 230ms) + 220ms) cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+@keyframes ceremony-open {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes card-quiet {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes card-land {
+  from {
+    opacity: 0;
+    transform: translateY(38px) scale(0.9);
+  }
+  60% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes card-line {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes card-sweep {
+  from {
+    opacity: 0;
+    transform: translateX(-72%);
+  }
+  22% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translateX(72%);
+  }
+}
+
+@keyframes rays-in {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+@keyframes rays-spin {
+  from {
+    rotate: 0deg;
+  }
+  to {
+    rotate: 360deg;
+  }
 }
 
 /* ---------------------------------------------------------------- misc */
@@ -1646,6 +2177,17 @@ table.data td.num {
   *::before,
   *::after {
     animation-duration: 1ms !important;
+    /*
+     * Delays have to go too, and this is not a detail.
+     *
+     * The settlement ceremony staggers its card, its figure and the lines that
+     * confirm it, and the stagger is measured from the tier's own count-up — up
+     * to about 1.7 s at T3. Cutting only the *duration* leaves those delays
+     * intact, so a reduced-motion player would sit in front of a payout card
+     * whose numbers arrive a second and a half later with no motion to explain
+     * the wait. The whole screen composes at once instead.
+     */
+    animation-delay: 0s !important;
     animation-iteration-count: 1 !important;
     transition-duration: 1ms !important;
   }

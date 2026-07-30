@@ -47,12 +47,20 @@
             nothing the bet depends on (§9.6).
           -->
           <div class="colony-aria" id="colony" role="img" aria-live="polite" aria-label="Colony"></div>
+          <!-- §6.2's grain, composited rather than drawn: the tile is generated
+               in `stage.js` from the same seeded noise and handed here as a data
+               URL, so the render loop spends no fill rate on a static texture. -->
+          <div class="stage-grain" id="stage-grain" aria-hidden="true"></div>
           <div class="legend" id="legend">DIE 40% · HOLD 40% · SPLIT 20%</div>
           <div class="stage-note" id="stage-note"></div>
         </section>
 
         <!-- value strip: yield, colony value, the stake line, side-bet chips -->
-        <section class="strip" aria-label="Colony value">
+        <section class="strip" id="strip" aria-label="Colony value">
+          <!-- The verdict, on the strip. Its tint is the band and its beat is one
+               composited opacity/transform pass, so the largest reading on the
+               play surface carries the generation's result too (§6.5). -->
+          <div class="strip-flash" id="strip-flash" aria-hidden="true"></div>
           <!-- The yield line spans the strip: it is a one-line reading (§5) and a
                side-bet chip beside it must not be able to fold it onto two. -->
           <div class="yield" id="yield">YIELD —</div>
@@ -198,6 +206,18 @@
             </div>
           </div>
 
+          <!--
+            §9.3: "profit rate leads". In the round-1 build this node lived inside
+            the side-bets drawer, which is collapsed by default — so the one
+            figure the rule exists to put in front of the player was invisible
+            unless they went looking for a bet they had not selected. It stands on
+            the stake screen now, above the fold, on every round.
+          -->
+          <div class="panel rates-panel">
+            <div class="label">Before you stake</div>
+            <div id="profit-rates" class="small muted"></div>
+          </div>
+
           <button class="cta ghost disclosure" id="sidebets-toggle" type="button">
             <span>+ SIDE BETS</span><span class="hint">optional · off by default</span>
           </button>
@@ -211,7 +231,9 @@
             <div class="row total">
               <span class="k">Total at risk</span><span class="v" id="total-at-risk">1.00</span>
             </div>
-            <div id="profit-rates" class="small muted"></div>
+            <p class="small muted" style="margin: 8px 0 0">
+              The profit rates for this ticket are above, with the colony bet’s own.
+            </p>
           </div>
 
           <button class="cta ghost disclosure" id="fairness-toggle" type="button">
@@ -281,6 +303,14 @@
         </section>
 
         <!-- S7 — settlement ceremony --------------------------------------- -->
+        <!--
+          The ceremony is a *sequence*, not a card that appears (§7.1). Its beats
+          are staged in CSS from `data-tier` and `data-phase`, so every tier gets
+          its own entrance and a win can never look like a loss that changed
+          colour: the rays and the sweep only exist above the stake, the card
+          enters with weight, the figure counts, and the round's take visibly
+          leaves the vessel for the balance chip.
+        -->
         <section class="overlay ceremony" id="settlement" hidden aria-label="Settlement">
           <div class="spacer"></div>
           <!--
@@ -289,19 +319,42 @@
             the frame lifting (§7.1, T2 and T3), and for an extinction there is
             nothing behind it but the vent, which is the point. The card is what
             keeps the numerals at their contrast floor over a lit stage (§9.6).
+
+            The rays are a sibling inside the card's own box rather than a child
+            of the overlay, so they radiate from the *card* — centred on the
+            overlay they sat below it and read as a perspective floor.
           -->
-          <div class="payout-card">
-            <div class="terminal" id="settlement-terminal">—</div>
-            <div class="headline" id="settlement-headline">—</div>
-            <div class="net" id="settlement-net">—</div>
-            <p class="small" id="settlement-copy"></p>
+          <div class="payout-stage">
+            <div class="ceremony-rays" aria-hidden="true"></div>
+            <div class="payout-card" id="payout-card">
+              <div class="card-sweep" aria-hidden="true"></div>
+              <div class="terminal" id="settlement-terminal">—</div>
+              <div class="headline" id="settlement-headline">—</div>
+              <!-- The round's credited multiple of what the ticket cost: the
+                   tier's own basis (§7.1), shown on wins only, truncated like
+                   every other figure on screen. It arrives *after* the count-up
+                   lands, because a total printed beside a counting figure is a
+                   total that has already given the answer away. -->
+              <div class="multiple" id="settlement-multiple" hidden>—</div>
+              <div class="net" id="settlement-net">—</div>
+              <!-- The round's own shape: what the colony did, generation by
+                   generation. It is the player's own resolved history and it is
+                   already in the receipt — never a colony they could have had
+                   (§9.8), and never anything forward-looking. -->
+              <div class="trace" id="settlement-trace" aria-hidden="true"></div>
+              <p class="small" id="settlement-copy"></p>
+            </div>
           </div>
           <div class="spacer"></div>
+          <!-- §7.1: available at T1, offered at T2 and T3, and never below the
+               stake — the control does not exist on a losing round. -->
+          <button class="cta share-cta" id="share-open" type="button" hidden>SHARE THIS ROUND</button>
           <button class="cta" id="new-round" type="button">NEW ROUND</button>
           <div class="linkrow">
             <button id="open-receipt" type="button">Receipt</button>
             <button id="open-verify" type="button">Verify</button>
             <button id="open-wild" type="button" hidden>Wild line</button>
+            <button id="share-link" type="button" hidden>Share</button>
           </div>
         </section>
 

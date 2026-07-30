@@ -305,6 +305,28 @@ function ringSprite(colour) {
   return canvas;
 }
 
+/**
+ * The colony's light in the water: LUMEN at the core, cooling through LUMEN DEEP
+ * to PLANKTON at the edge, so the field the colony sits in is two hues rather
+ * than the single one the round-1 build had. Baked once and blitted; the whole
+ * point is that this is one `drawImage` a frame and not a gradient fill.
+ */
+function waterSprite() {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  gradient.addColorStop(0, rgba(C.lumen, 0.44));
+  gradient.addColorStop(0.34, rgba(C.lumenDeep, 0.25));
+  gradient.addColorStop(0.72, rgba(C.plankton, 0.1));
+  gradient.addColorStop(1, rgba(C.plankton, 0));
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+  return canvas;
+}
+
 /** A fine monochrome grain tile — §6.2's 2% noise, animated at 12 fps. */
 function grainTile(seed) {
   const size = 96;
@@ -389,6 +411,11 @@ export class Stage {
       medusaGlow: glowSprite(C.medusa, 2.6),
       foamGlow: glowSprite(C.foam, 1.8),
       pulseRing: ringSprite(C.lumen),
+      medusaRing: ringSprite(C.medusa),
+      ashRing: ringSprite([4, 9, 16]),
+      // The colony's light in the water: LUMEN at the core cooling to PLANKTON
+      // at the edge, so the field is two hues rather than one. Baked once.
+      waterBody: waterSprite(),
       bells: [
         bellSprite(0, C.lumen, C.lumenHigh, C.lumenDeep),
         bellSprite(1, C.lumen, C.lumenHigh, C.lumenDeep),
@@ -399,7 +426,9 @@ export class Stage {
         bellSprite(1, C.amber, [255, 224, 168], [196, 132, 56]),
         bellSprite(2, C.amber, [255, 224, 168], [196, 132, 56]),
       ],
-      grain: [grainTile(11), grainTile(29), grainTile(47)],
+      // One tile: the 12 fps cycle is `background-position` on the compositor
+      // now, so the three the canvas pass used to swap between are dead weight.
+      grain: [grainTile(11)],
     };
 
     /** Live bodies, in slot order. */
@@ -429,12 +458,38 @@ export class Stage {
     this.camera = 1;
     /** Screen-wide bloom flood, staged by the environment reveal. */
     this.flood = 0;
+    /**
+     * What colour the flood is. The environment reveal is the colony's own light,
+     * so it is LUMEN; the settlement flood is banked money arriving, so it is
+     * AMBER. Nothing else may set this — the two are the only screen-wide washes
+     * in the game and they mean different things.
+     */
+    this.floodTint = 'lumen';
+    /** Celebration sparks, alive only during a T2/T3 settlement. */
+    this.sparks = [];
     /** Whether the frame has been worth `475/48` at any point this round (§7.2). */
     this.envRevealed = false;
     /** MEDUSA rim strength, and only ever on a `D >= +1.00x` verdict (§6.5). */
     this.medusaRim = 0;
     /** The draw-flash contraction: every body contracts 4% for 120 ms. */
     this.contract = 0;
+    /**
+     * The anticipation of §2's draw flash: the frame holds its breath before the
+     * generation resolves. It is a *dip*, identical for every generation and
+     * fired before any outcome is known, so it leaks nothing and it can never
+     * make a frame brighter than a frame worth more (§6.3) — it only ever makes
+     * one darker, and only for 120 ms.
+     */
+    this.charge = 0;
+    /**
+     * The verdict's weight: how far the exposure change of §6.4 overshoots its
+     * new `E(V)` before settling. Signed, and a function of `D` alone (§6.5 R1) —
+     * a gain arrives above its steady state and falls into it, a loss arrives
+     * below and rises into it. Monotone in `D`, which is R4.
+     */
+    this.verdictBoost = 0;
+    /** The verdict's ring, and the tint it carries. */
+    this.verdictRing = null;
     /** The pulse wave that carries a generation's outcomes outward. */
     this.wave = null;
     /** Banked-this-round value, as a stake multiple. Drives the vessel. */
@@ -456,9 +511,22 @@ export class Stage {
     this.time = 0;
     this.lastFrame = 0;
     this.running = false;
+    /**
+     * Which round the stage is drawing.
+     *
+     * The settlement beats are long — the flood runs about two seconds and the
+     * pour a second — and `NEW ROUND` unlocks after 600 ms, so a player can start
+     * the next round while the last one's ceremony is still running. `reset()`
+     * ends the animations, but an `async` beat parked on a `wait()` resumes the
+     * moment `skip()` resolves it and then keeps going: it would clear the bodies
+     * of a colony that had just been seeded, or flood a stake screen with amber.
+     * Every beat that outlives a frame checks this before touching anything.
+     */
+    this.generation = 0;
 
     this.observer = new ResizeObserver(() => this.resize());
     this.observer.observe(root);
+    this.installGrain();
     this.resize();
     this.start();
   }
@@ -492,6 +560,17 @@ export class Stage {
     this.shaft = shaftSprite(width * 0.78, height * 0.72);
     this.seedParticles();
     this.relayout(true);
+    /*
+     * Setting `canvas.width` clears the backing store, and the loop idles itself
+     * whenever nothing is animating — so a resize that landed while the stage was
+     * idle left a **blank canvas** with nothing scheduled to repaint it. That is
+     * the whole reason S1 was a black void: the ResizeObserver fires once on
+     * observe, just after the constructor's first paint and just after the loop
+     * has parked itself, so the very first thing a player ever saw was the vent
+     * scene wiped out. No scrim tuning could have fixed it, because there was
+     * nothing behind the scrim.
+     */
+    this.start();
   }
 
   /**
@@ -530,6 +609,32 @@ export class Stage {
     vignette.addColorStop(1, 'rgba(0, 0, 0, 0.72)');
     ctx.fillStyle = vignette;
     ctx.fillRect(0, 0, width, height);
+
+    /*
+     * The ambient floor §6.3 specifies at `V = 0` — the vent's fixed rim light
+     * and the 2% PLANKTON ambient — baked in rather than composited every frame.
+     *
+     * It is a *constant*: the same contribution in every frame of every round, so
+     * it cannot reorder two frames by value and §6.3's promise is untouched. And
+     * because it is constant it belongs in the background, which is rendered once
+     * per resize. Compositing it live cost two extra full-screen passes a frame
+     * for a term that never changes, which took the resolve beat from 60 fps to
+     * about 20 in the headless harness.
+     */
+    const cold = ctx.createLinearGradient(0, 0, 0, height * 0.66);
+    cold.addColorStop(0, rgba(C.plankton, 0.05));
+    cold.addColorStop(0.55, rgba(C.plankton, 0.022));
+    cold.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = cold;
+    ctx.fillRect(0, 0, width, height * 0.66);
+
+    const warm = ctx.createLinearGradient(0, height * 0.58, 0, height);
+    warm.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    warm.addColorStop(1, rgba(C.ember, 0.06));
+    ctx.fillStyle = warm;
+    ctx.fillRect(0, height * 0.58, width, height * 0.42);
+    ctx.globalCompositeOperation = 'source-over';
     return canvas;
   }
 
@@ -658,7 +763,28 @@ export class Stage {
       this.wave.t += dt;
       if (this.wave.t > this.wave.ms) this.wave = null;
     }
+    if (this.verdictRing !== null) {
+      this.verdictRing.t += dt;
+      if (this.verdictRing.t > this.verdictRing.ms) this.verdictRing = null;
+    }
     if (this.vesselPulse > 0) this.vesselPulse = Math.max(0, this.vesselPulse - dt / 380);
+
+    // Celebration sparks: ballistic, with a light drag, rising out of frame. The
+    // array is only rebuilt on the frames where one actually expired — filtering
+    // eighty-six of them every frame allocates through the loudest two seconds
+    // in the game for nothing.
+    if (this.sparks.length > 0) {
+      let expired = false;
+      for (const spark of this.sparks) {
+        spark.life += dt;
+        spark.x += spark.vx * dt * 0.06;
+        spark.y += spark.vy * dt * 0.06;
+        spark.vy += dt * 0.0009 * this.scale;
+        spark.vx *= 1 - dt * 0.0009;
+        if (spark.life >= spark.ms) expired = true;
+      }
+      if (expired) this.sparks = this.sparks.filter((spark) => spark.life < spark.ms);
+    }
   }
 
   setNote(html) {
@@ -714,6 +840,23 @@ export class Stage {
   /** True once the frame is worth at least `475/48`, i.e. the world is lit. */
   get environmentLit() {
     return this.environment > 0.001;
+  }
+
+  /**
+   * A copy of the last painted frame, for the share card (§7.1).
+   *
+   * The picture on a share card has to be the round's own, so this is taken while
+   * the colony is still standing — the caller freezes before the beat that takes
+   * it away, not after. One `drawImage` into an offscreen canvas, at most twice a
+   * round; nothing is captured per frame.
+   */
+  freeze() {
+    if (this.canvas.width === 0 || this.canvas.height === 0) return null;
+    const snapshot = document.createElement('canvas');
+    snapshot.width = this.canvas.width;
+    snapshot.height = this.canvas.height;
+    snapshot.getContext('2d').drawImage(this.canvas, 0, 0);
+    return snapshot;
   }
 
   // -------------------------------------------------------------------- layout
@@ -857,12 +1000,23 @@ export class Stage {
    * sound the mark on the same frame the body moves.
    */
   async resolveOutcomes(resolution, nextUnits, onOutcome) {
-    // Draw flash: the vent pulses once and all bodies contract 4% (§6.4).
+    /*
+     * Draw flash, and the anticipation the round-1 build did not have (§6.4).
+     *
+     * The vent pulses once and all bodies contract 4% — and the frame *holds its
+     * breath*: the light dips and the colony draws in for 120 ms before anything
+     * resolves. It is the same dip on every generation, fired before a single
+     * outcome is read, so it cannot leak what is coming; and it is what turns
+     * "the numbers changed" into "something is about to happen".
+     */
     this.contract = 1;
     this.tween(this, 'contract', 0, 260, ease.standard);
+    this.charge = 0;
+    this.tween(this, 'charge', 1, 110, ease.standard);
     this.ventFlash = 1;
     this.tween(this, 'ventFlash', 0, 320, ease.accel);
     await this.wait(120);
+    this.tween(this, 'charge', 0, 240, ease.decel);
 
     const { x: cx, y: cy } = this.centre;
     // The wave reaches just past the colony and stops: it is a pulse through the
@@ -873,10 +1027,16 @@ export class Stage {
     const bodies = this.bodies;
     const children = [];
     let nextSlot = 0;
+    let lastLead = 0;
     for (const outcome of resolution.outcomes) {
       const body = bodies[outcome.slot - 1];
       const distance = body === undefined ? 0 : Math.hypot(body.x - cx, body.y - cy);
-      const lead = Math.min(140, (distance / reach) * 160);
+      // Capped at 110 ms, and the beat waits for the last body to *finish*. The
+      // round-1 build reflowed at a flat 400 ms from the start of the wave, so a
+      // body that fired 140 ms late only ever showed 260 ms of its 400 ms split —
+      // which is why the best mid-round outcome in the game was over in a flash.
+      const lead = Math.min(110, (distance / reach) * 160);
+      if (lead > lastLead) lastLead = lead;
       for (let child = 0; child < outcome.children; child += 1) {
         nextSlot += 1;
         children.push({ parent: outcome.slot, index: child, of: outcome.children, slot: nextSlot });
@@ -903,7 +1063,7 @@ export class Stage {
       else setTimeout(fire, lead);
     }
 
-    await this.wait(400);
+    await this.wait(400 + (this.reduced ? 0 : lastLead));
 
     // The children take the parent's split positions, then reflow to the spiral.
     const positions = new Map();
@@ -953,8 +1113,81 @@ export class Stage {
     this.relayout(false);
   }
 
-  /** The verdict beat: 380 ms in which the exposure settles to its new `E(V)`. */
-  async verdict() {
+  /**
+   * The verdict beat: 380 ms in which the exposure settles to its new `E(V)`.
+   *
+   * In the round-1 build that was all it was — a `wait(380)` with nothing in it,
+   * which is why a 3 → 1 resolve went static for the last 360 ms of its own beat
+   * and a gain at generation 11 with eighteen stakes on the table got exactly the
+   * treatment of a hold at generation 1.
+   *
+   * What fills it now is **weight**, and weight is a function of `D` — the signed
+   * change in colony value in stake multiples — and of nothing else (§6.5 R1).
+   * The exposure change of §6.4 arrives with an overshoot whose size scales with
+   * `|D|`: a gain lands above its new steady state and falls into it, a loss
+   * lands below and rises into it. A larger `D` never gets less than a smaller
+   * one (R4), and because `D` grows with the colony and the ladder, the beat
+   * escalates through the round on its own without anything keying off the
+   * population, the generation, or how the change was arrived at.
+   *
+   * The ring is the same device in the same currency: outward and bright on a
+   * gain, inward and dim on a loss, absent at `D = 0`. Above a whole stake it is
+   * MEDUSA, which is the one place violet is allowed to appear (§6.1).
+   */
+  async verdict(delta = 0) {
+    const magnitude = Math.min(2.4, Math.abs(delta));
+    /*
+     * The ring's reach is a property of the *frame*, not of the colony.
+     *
+     * Deriving it from `layoutRadius(this.units)` — which is what a first pass
+     * did — makes two generations with the same `D` but different populations
+     * get differently sized rings, and R1 says the verdict's treatment is a
+     * function of `D` and of nothing else. Nothing in this method reads the
+     * population, the generation, or how the change was arrived at.
+     */
+    const reach = Math.min(this.width, this.height) * 0.66;
+
+    // Under `prefers-reduced-motion` the ring does not run at all. It is
+    // emphasis, and §6.4 keeps only the beats that carry information — which
+    // here is the exposure change, and that still happens.
+    if (this.reduced) {
+      if (delta !== 0) {
+        const boost = delta > 0 ? 0.05 + 0.16 * Math.min(1, magnitude / 1.6) : -(0.04 + 0.1 * Math.min(1, magnitude / 1.4));
+        this.verdictBoost = boost;
+        this.tween(this, 'verdictBoost', 0, 120, ease.standard);
+      }
+      await this.wait(380);
+      return;
+    }
+
+    if (delta > 0) {
+      const peak = 0.05 + 0.16 * Math.min(1, magnitude / 1.6);
+      this.verdictBoost = 0;
+      this.tween(this, 'verdictBoost', peak, 150, ease.decel);
+      this.verdictRing = {
+        t: 0,
+        ms: 520,
+        reach,
+        tint: delta >= 1 ? 'medusa' : 'lumen',
+        strength: 0.3 + 0.5 * Math.min(1, magnitude / 1.6),
+        inward: false,
+      };
+      setTimeout(() => this.tween(this, 'verdictBoost', 0, 330, ease.standard), 160);
+    } else if (delta < 0) {
+      const depth = -(0.04 + 0.1 * Math.min(1, magnitude / 1.4));
+      this.verdictBoost = 0;
+      this.tween(this, 'verdictBoost', depth, 130, ease.standard);
+      this.verdictRing = {
+        t: 0,
+        ms: 460,
+        reach,
+        tint: 'ash',
+        strength: 0.14 + 0.2 * Math.min(1, magnitude / 1.4),
+        inward: true,
+      };
+      setTimeout(() => this.tween(this, 'verdictBoost', 0, 320, ease.decel), 140);
+    }
+    this.start();
     await this.wait(380);
   }
 
@@ -990,6 +1223,7 @@ export class Stage {
    */
   async revealEnvironment() {
     this.envRevealed = true;
+    this.floodTint = 'lumen';
     if (this.reduced) {
       // A single 400 ms cross-fade to the lit frame: no dolly, no stagger. The
       // reveal still happens, because it carries information (§6.4, §7.2).
@@ -1084,6 +1318,148 @@ export class Stage {
   }
 
   /**
+   * The balance chip, in stage-local pixels. It lives in the top bar, above this
+   * canvas, so the point is off the top edge on purpose: value leaving the stage
+   * for the chip should visibly leave the frame rather than stop at its border.
+   */
+  chipMouth() {
+    return { x: 62 * this.scale, y: -20 * this.scale };
+  }
+
+  /**
+   * S7 — the round's take going home (§7.1).
+   *
+   * At settlement the money stops being a colony and becomes a balance, and the
+   * player has to be able to watch that happen: the vessel empties and anything
+   * still alive turns AMBER, detaches and streams out of the top of the frame
+   * toward the chip the value lands in. This is the only beat that drains the
+   * vessel, and it exists because a count-up with nothing moving on the stage is
+   * a receipt rather than a ceremony.
+   *
+   * It runs on wins only. A round that returned less than it cost keeps its
+   * vessel exactly where it is — the story there is what the player kept (§5,
+   * S6), and money flowing into an amber chip is the one thing §7.1 forbids
+   * below the stake.
+   */
+  async bankOut(onArrival) {
+    const target = this.chipMouth();
+    const sources = [];
+    for (const body of this.bodies) {
+      body.tint = 'amber';
+      sources.push({ x: body.x, y: body.y, r: body.r, body });
+    }
+    if (this.vesselAlpha > 0.02) {
+      const mouth = this.vesselMouth();
+      // The vessel does not empty in one drop: the number of arrivals scales with
+      // how full it is, so a big bank reads as a longer pour.
+      const drops = Math.max(2, Math.min(8, 2 + Math.round(this.vesselLevel * 8)));
+      for (let index = 0; index < drops; index += 1)
+        sources.push({ x: mouth.x, y: mouth.y, r: 10 * this.scale, vessel: true });
+    }
+    if (sources.length === 0) return;
+    const round = this.generation;
+
+    const duration = this.reduced ? 160 : 520;
+    sources.forEach((source, order) => {
+      const delay = Math.min(420, order * (sources.length > 8 ? 34 : 64));
+      this.trails.push({
+        t: 0,
+        ms: duration,
+        delay,
+        hold: 0,
+        from: { x: source.x, y: source.y },
+        to: target,
+        bow: (slotRandom(order, 59) - 0.5) * 0.42 - 0.18,
+        r: source.r,
+        fired: false,
+        onArrival,
+      });
+      if (source.body !== undefined)
+        setTimeout(() => {
+          this.tween(source.body, 'alpha', 0, duration, ease.decel);
+          this.tween(source.body, 'r', source.body.r * 0.35, duration, ease.decel);
+        }, delay);
+    });
+    // The glass empties as the pour leaves it, and then it is dark: the value is
+    // in the balance now, and a vessel still holding it would be saying otherwise.
+    this.tween(this, 'vesselLevel', 0, duration + 380, ease.standard);
+    this.tween(this, 'vesselAlpha', 0, duration + 520, ease.standard);
+    await this.wait(duration + 440);
+    // The next round may already have been seeded: clearing its colony here
+    // would empty a stage the player is looking at.
+    if (this.generation !== round) return;
+    this.bodies = [];
+    this.units = 0;
+    this.banked = 0;
+    this.setValue(0);
+    this.announce(0);
+  }
+
+  /**
+   * §7.1's frame lift, at T2 and T3 only.
+   *
+   * The tier table says the frame lifts one exposure stop at T2 and goes to full
+   * illumination at T3 — but by the time a settlement is on screen the colony has
+   * usually just been banked away, so `E(V)` is at its floor and there is no
+   * colony light left to lift. The ceremony therefore supplies its own, in AMBER,
+   * which is the colour of banked value: what is flooding the frame is the money
+   * arriving, not a colony that no longer exists. `E(V)` is untouched, so §6.3's
+   * promise — no frame is brighter than a frame worth more money — is not being
+   * asked to describe a frame that has no money in it any more.
+   */
+  async celebrate(tier) {
+    const peak = tier === 'T3' ? 1 : 0.6;
+    const round = this.generation;
+    this.floodTint = 'amber';
+    this.flood = 0;
+    if (this.reduced) {
+      this.tween(this, 'flood', peak * 0.5, 160, ease.standard);
+      await this.wait(300);
+      if (this.generation !== round) return;
+      this.tween(this, 'flood', 0, 260, ease.standard);
+      return;
+    }
+    this.emitSparks(tier === 'T3' ? 86 : 44);
+    this.tween(this, 'flood', peak, 360, ease.decel);
+    await this.wait(360);
+    // `NEW ROUND` unlocks after 600 ms, so from here on the round may be over.
+    // A flood that resumes on the stake screen is amber light on a screen where
+    // nothing has been banked.
+    if (this.generation !== round) return;
+    this.tween(this, 'flood', peak * 0.44, 560, ease.standard);
+    await this.wait(560);
+    if (this.generation !== round) return;
+    this.tween(this, 'flood', 0, 1100, ease.standard);
+    await this.wait(1100);
+  }
+
+  /**
+   * The sparks of a loud settlement: banked light rising out of the frame.
+   *
+   * Every constant here comes from `slotRandom`, so the shower is identical on
+   * every device and derived from nothing the round knows — the same rule the
+   * colony's own art follows (§6.2). They are AMBER because they are money that
+   * has already been credited, and they exist at T2 and T3 and nowhere else.
+   */
+  emitSparks(count) {
+    const centre = this.centre;
+    for (let index = 0; index < count; index += 1) {
+      const angle = slotRandom(index, 67) * Math.PI * 2;
+      const speed = (0.16 + slotRandom(index, 71) * 0.5) * this.scale;
+      this.sparks.push({
+        x: centre.x + Math.cos(angle) * 30 * this.scale * slotRandom(index, 73),
+        y: centre.y + Math.sin(angle) * 22 * this.scale * slotRandom(index, 79),
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - (0.16 + slotRandom(index, 83) * 0.26) * this.scale,
+        size: (3 + slotRandom(index, 89) * 7) * this.scale,
+        life: 0,
+        ms: 900 + slotRandom(index, 97) * 900,
+      });
+    }
+    this.start();
+  }
+
+  /**
    * The wild-line ghost (§4.2, §6.4): the colony that never gets harvested,
    * drawn for the 400 ms of the harvest beat and never as a standing rival
    * colony (§9.8). 22% PLANKTON, no halation, no specular, no point light — it
@@ -1126,6 +1502,8 @@ export class Stage {
   }
 
   reset() {
+    // Anything still running belongs to the round that just ended.
+    this.generation += 1;
     this.skip();
     this.tweens = [];
     this.bodies = [];
@@ -1137,8 +1515,13 @@ export class Stage {
     this.envRevealed = false;
     this.camera = 1;
     this.flood = 0;
+    this.floodTint = 'lumen';
+    this.sparks = [];
     this.medusaRim = 0;
     this.contract = 0;
+    this.charge = 0;
+    this.verdictBoost = 0;
+    this.verdictRing = null;
     this.ventFlash = 0;
     this.banked = 0;
     this.vesselLevel = 0;
@@ -1163,7 +1546,14 @@ export class Stage {
     ctx.clearRect(0, 0, width, height);
     if (this.background !== null) ctx.drawImage(this.background, 0, 0, width, height);
 
-    const level = this.exposure;
+    /*
+     * The frame's working exposure: `E(V)`, held down for the 120 ms the frame
+     * spends holding its breath, and overshooting by the weight of the verdict.
+     * Both are transients of the two beats §6.4 specifies — the draw flash and
+     * the exposure change — and both settle back onto `E(V)`, which is what the
+     * whole scene is lit from and what §6.3's promise is about.
+     */
+    const level = Math.max(0.02, Math.min(1, this.exposure * (1 - 0.24 * this.charge) + this.verdictBoost));
     // The camera dolly: the one camera move in the game, and it moves the whole
     // world including the particulate, which is what gives it parallax.
     ctx.save();
@@ -1176,6 +1566,7 @@ export class Stage {
     ctx.translate(width / 2, height * 0.42);
     ctx.scale(OVERDRAW, OVERDRAW);
     ctx.translate(-width / 2, -height * 0.42);
+    this.drawWaterLight(ctx, level);
     this.drawEnvironment(ctx, level);
     this.drawParticles(ctx, level);
     this.drawVent(ctx, level);
@@ -1188,17 +1579,57 @@ export class Stage {
     ctx.restore();
 
     this.drawVessel(ctx);
+    this.drawSparks(ctx);
     this.drawFlood(ctx);
-    this.drawGrain(ctx);
 
     // Idle only when nothing is animating: a static frame must not spin the GPU.
     const idle =
       this.tweens.length === 0 &&
       this.trails.length === 0 &&
+      this.sparks.length === 0 &&
+      this.flood < 0.004 &&
       this.wave === null &&
+      this.verdictRing === null &&
+      Math.abs(this.verdictBoost) < 0.002 &&
+      this.charge < 0.002 &&
       Math.abs(this.exposureTarget - this.exposure) < 0.0005 &&
       this.vesselPulse === 0;
     if (idle && this.bodies.length === 0 && !this.environmentLit) this.running = false;
+  }
+
+  /**
+   * The water taking the colony's colour.
+   *
+   * §6.3 says nothing is lit that the colony does not light, and the round-1
+   * build read that as *nothing is lit at all*: the water was a baked near-black
+   * gradient that never changed, so the whole play surface was one cyan hue on
+   * black at every value, and measured mean frame luminance never left the
+   * 19–31-out-of-255 band. That is the abyssal direction executed as
+   * premium-minimal rather than premium-casino, and it is not what the brief
+   * asks for.
+   *
+   * This is the volumetric term §6.2 asks for, and it is *lit* rather than
+   * emitting: every alpha below is a multiple of `level`, which is `E(V)`, so the
+   * water is exactly as bright as the colony is rich and a poorer frame can never
+   * outshine a richer one. The one constant term is the `2% PLANKTON ambient`
+   * §6.3 already specifies at `V = 0` — a constant offset added to every frame
+   * alike, which is what stops "the vent idle in darkness" from being a black
+   * rectangle and cannot reorder any two frames.
+   */
+  drawWaterLight(ctx, level) {
+    if (level < 0.05) return;
+    const { width, height } = this;
+    const centre = this.centre;
+    // One pre-rendered sprite scaled to the colony's reach, rather than a radial
+    // gradient built and filled across the whole frame every frame: same picture,
+    // one blit, no per-frame gradient object. The constant ambient this used to
+    // carry now lives in the baked background, where it belongs.
+    const reach = Math.hypot(width, height) * (0.4 + 0.62 * level);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.3 * level;
+    ctx.drawImage(this.sprites.waterBody, centre.x - reach, centre.y - reach, reach * 2, reach * 2);
+    ctx.restore();
   }
 
   /** Silt, chimney and far rock, at the environment's own lit level (§7.2). */
@@ -1328,26 +1759,34 @@ export class Stage {
       const distance = Math.hypot(x - centre.x, y - centre.y);
       const falloff = 1 / (1 + Math.pow(distance / colonyReach, 2));
       // Drifting plankton is the last layer up in the reveal, at 700 ms (§7.2).
+      // The constant term is §6.3's ambient floor, raised until it is actually
+      // visible: "vent idle in darkness" is a picture of water, and water with no
+      // life in it at all is a black rectangle.
       const alpha =
-        (0.05 + 0.34 * level * falloff + 0.14 * this.environment * this.depthPhase(700, 300)) *
+        (0.085 + 0.42 * level * falloff + 0.16 * this.environment * this.depthPhase(700, 300)) *
         twinkle *
         mote.depth;
       if (alpha < 0.006) continue;
-      const size = mote.size * (3.8 + 2.4 * level);
-      ctx.globalAlpha = Math.min(0.7, alpha);
+      const size = mote.size * (3.8 + 3.2 * level);
+      ctx.globalAlpha = Math.min(0.78, alpha);
       ctx.drawImage(sprite, x - size / 2, y - size / 2, size, size);
     }
     // Marine snow: ASH, larger, slower, and what makes the water read as water
     // rather than as fog.
     ctx.globalCompositeOperation = 'source-over';
+    // One `fillStyle` for the whole field rather than one per mote: sixty state
+    // changes a frame is sixty chances to break the rasteriser's batching.
+    ctx.fillStyle = rgba(C.ash, 1);
     for (const mote of this.snow) {
       const x = (mote.x + mote.drift * seconds * 4 * this.scale + width) % width;
       const y = (mote.y + seconds * 1.4 * this.scale) % height;
       const distance = Math.hypot(x - centre.x, y - centre.y);
       const falloff = 1 / (1 + Math.pow(distance / colonyReach, 2));
-      const alpha = 0.02 + 0.16 * level * falloff + 0.05 * this.environment;
-      ctx.globalAlpha = Math.min(0.28, alpha);
-      ctx.fillStyle = rgba(C.ash, 1);
+      // Marine snow is what makes the water read as water rather than as fog, so
+      // its constant term has to be visible at `V = 0` too — that frame is a
+      // picture of water and nothing else.
+      const alpha = 0.055 + 0.19 * level * falloff + 0.06 * this.environment;
+      ctx.globalAlpha = Math.min(0.32, alpha);
       ctx.beginPath();
       ctx.ellipse(x, y, mote.size / 2, mote.size / 2, 0, 0, Math.PI * 2);
       ctx.fill();
@@ -1371,18 +1810,29 @@ export class Stage {
 
     // The wide bloom the mouth throws into the water.
     const size = (250 + 90 * flash) * scale;
-    ctx.globalAlpha = 0.26 + 0.3 * flash;
+    ctx.globalAlpha = 0.34 + 0.3 * flash;
     ctx.drawImage(this.sprites.emberGlow, width / 2 - size / 2, height - size * 0.46, size, size * 0.72);
 
-    // The plume: a column of warm shimmer rising from the mouth, built from soft
-    // sprites rather than a filled path — a path has edges, and hot water has none.
-    const puffs = 5;
+    /*
+     * The plume: a column of warm shimmer rising from the mouth, built from soft
+     * sprites rather than a filled path — a path has edges, and hot water has
+     * none.
+     *
+     * It rises through the water column rather than stopping just above the
+     * mouth. "Vent idle in darkness" (§5, S1) is a picture of *water*, and the
+     * round-1 plume topped out at 130 pt, which left the upper two thirds of the
+     * frame with nothing in it at all on the one screen a player sees before
+     * every single round.
+     */
+    const puffs = 6;
     for (let index = 0; index < puffs; index += 1) {
       const t = index / (puffs - 1);
-      const rise = 34 * scale + t * 96 * scale;
-      const sway = (noise1(seconds * 0.14 + index * 1.7, 71) - 0.5) * (10 + 18 * t) * scale;
-      const puff = (58 + t * 74) * scale;
-      ctx.globalAlpha = (0.16 - t * 0.115) * (1 + 0.9 * flash);
+      const rise = 34 * scale + t * 300 * scale;
+      const sway = (noise1(seconds * 0.14 + index * 1.7, 71) - 0.5) * (10 + 42 * t) * scale;
+      const puff = (58 + t * 116) * scale;
+      // The column cools as it rises: warm at the mouth, fading to nothing well
+      // before it could read as a second light source.
+      ctx.globalAlpha = (0.2 - t * 0.175) * (1 + 0.9 * flash);
       ctx.drawImage(
         this.sprites.emberGlow,
         width / 2 + sway - puff / 2,
@@ -1394,9 +1844,9 @@ export class Stage {
 
     // The mouth itself: hot, small, fixed.
     const core = 96 * scale;
-    ctx.globalAlpha = 0.5 + 0.36 * flash;
+    ctx.globalAlpha = 0.62 + 0.36 * flash;
     ctx.drawImage(this.sprites.emberGlow, width / 2 - core / 2, height - core * 0.48, core, core * 0.56);
-    ctx.globalAlpha = 0.6 + 0.3 * flash;
+    ctx.globalAlpha = 0.76 + 0.24 * flash;
     const mouth = 34 * scale;
     ctx.drawImage(this.sprites.emberGlow, width / 2 - mouth / 2, height - mouth * 0.55, mouth, mouth * 0.6);
     ctx.restore();
@@ -1405,8 +1855,11 @@ export class Stage {
   /** §7.2's volumetric shafts: two blurred quads, animated only by the colony. */
   drawShafts(ctx, level) {
     if (this.shaft === null) return;
-    const alpha = 0.03 + 0.04 * this.environment + 0.05 * level;
-    if (alpha < 0.008) return;
+    const alpha = 0.02 + 0.05 * this.environment + 0.07 * level;
+    // Two blits the size of the frame for something invisible below about a fifth
+    // of full exposure. The threshold is where they start to read, not where they
+    // stop being zero.
+    if (alpha < 0.032) return;
     const centre = this.centre;
     const seconds = this.time / 1000;
     ctx.save();
@@ -1482,11 +1935,14 @@ export class Stage {
       if (body.alpha < 0.01) continue;
       const radius = body.r * contract * (1 - 0.6 * body.die);
       const alive = body.alpha * (1 - body.die);
-      const size = radius * (4.6 + 4.2 * level);
-      ctx.globalAlpha = (0.2 + 0.22 * level) * alive;
+      // The gain on both terms is steeper than the round-1 build's, so the top
+      // of the range is genuinely bright rather than merely less dark. Both are
+      // still strictly increasing in `level`, which is all §6.3 requires.
+      const size = radius * (4.6 + 6.4 * level);
+      ctx.globalAlpha = (0.22 + 0.5 * level) * alive;
       ctx.drawImage(wide, body.x - size / 2, body.y - size / 2, size, size);
-      const cool = radius * 2.7;
-      ctx.globalAlpha = (0.1 + 0.07 * level) * alive;
+      const cool = radius * (2.7 + 1.1 * level);
+      ctx.globalAlpha = (0.13 + 0.17 * level) * alive;
       ctx.drawImage(halo, body.x - cool / 2, body.y - cool / 2, cool, cool);
     }
     ctx.restore();
@@ -1509,14 +1965,17 @@ export class Stage {
     for (const body of this.bodies) {
       if (body.alpha < 0.01 || body.tint === 'amber') continue;
       const radius = body.r * contract * (1 - 0.6 * body.die);
-      const size = radius * 1.7;
-      ctx.globalAlpha = (0.34 + 0.24 * level) * body.alpha * (1 - body.die);
+      const size = radius * (1.7 + 0.5 * level);
+      ctx.globalAlpha = (0.36 + 0.44 * level) * body.alpha * (1 - body.die);
       ctx.drawImage(tight, body.x - size / 2, body.y - size / 2, size, size);
     }
     ctx.restore();
 
     // The pulse wave: one ring per generation, crossing the whole colony.
     if (this.wave !== null) this.drawWave(ctx);
+    // The verdict's ring, in the currency of the money: outward on a gain,
+    // inward on a loss, and never present at all when nothing changed.
+    if (this.verdictRing !== null) this.drawVerdictRing(ctx);
 
     // MEDUSA, and only on a `D >= +1.00x` verdict.
     if (this.medusaRim > 0.01) {
@@ -1634,6 +2093,39 @@ export class Stage {
     ctx.globalCompositeOperation = 'lighter';
     ctx.globalAlpha = alpha;
     ctx.drawImage(this.sprites.pulseRing, cx - size / 2, cy - size / 2 * 0.94, size, size * 0.94);
+    ctx.restore();
+  }
+
+  /**
+   * The verdict's ring (§6.5's verdict bands, drawn).
+   *
+   * A gain sends light *out* of the colony; a loss draws the frame *in* on it.
+   * Both are the same device at the same place in the beat, differing only in
+   * direction, tint and strength — and all three of those are functions of `D`,
+   * which is R1. Nothing here knows how many organisms split or died.
+   */
+  drawVerdictRing(ctx) {
+    const ring = this.verdictRing;
+    const t = clamp01(ring.t / ring.ms);
+    const travel = ring.inward ? 1 - ease.decel(t) : ease.decel(t);
+    const radius = (ring.inward ? 0.25 + 0.75 * travel : travel) * ring.reach;
+    const alpha = Math.pow(1 - t, 1.7) * ring.strength;
+    if (alpha < 0.006 || radius < 1) return;
+    const { x: cx, y: cy } = this.centre;
+    const size = radius * 2.4;
+    const sprite =
+      ring.tint === 'medusa'
+        ? this.sprites.medusaRing
+        : ring.tint === 'ash'
+          ? this.sprites.ashRing
+          : this.sprites.pulseRing;
+    ctx.save();
+    // A loss removes light rather than adding it, so its ring is composited
+    // normally over the water instead of additively: darkness is the channel a
+    // loss gets (§6.5 R3), and an additive grey would be one more thing glowing.
+    ctx.globalCompositeOperation = ring.inward ? 'source-over' : 'lighter';
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(sprite, cx - size / 2, cy - (size / 2) * 0.94, size, size * 0.94);
     ctx.restore();
   }
 
@@ -1783,38 +2275,74 @@ export class Stage {
   }
 
   /**
-   * The screen-wide bloom of the environment reveal (§7.2): the frame filling
-   * with light because the colony is worth at least `475/48`. It is staged rather
-   * than instantaneous, and it is the clip.
+   * The celebration sparks: banked light rising out of the frame at T2 and T3.
+   * Additive AMBER sprites with a soft in-and-out, so the shower has no edges.
+   */
+  drawSparks(ctx) {
+    if (this.sparks.length === 0) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const sprite = this.sprites.amberGlow;
+    for (const spark of this.sparks) {
+      const t = clamp01(spark.life / spark.ms);
+      const alpha = Math.min(1, t / 0.12) * Math.pow(1 - t, 1.4);
+      if (alpha < 0.01) continue;
+      const size = spark.size * (1 + 1.1 * t);
+      ctx.globalAlpha = 0.5 * alpha;
+      ctx.drawImage(sprite, spark.x - size / 2, spark.y - size / 2, size, size);
+    }
+    ctx.restore();
+  }
+
+  /**
+   * The two screen-wide washes in the game, and they mean different things.
+   *
+   * The environment reveal (§7.2) is the frame filling with light because the
+   * colony is worth at least `475/48`, so it is LUMEN — the colony's own colour.
+   * The settlement flood (§7.1, T2 and T3) is banked value arriving, so it is
+   * AMBER, which is the colour of money that is already the player's. Neither is
+   * instantaneous: both are staged, because the clip is a second of light rather
+   * than a flash.
    */
   drawFlood(ctx) {
     if (this.flood < 0.004) return;
     const { width, height } = this;
     const centre = this.centre;
+    const warm = this.floodTint === 'amber';
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     const size = Math.hypot(width, height) * (1.5 + 0.6 * this.flood);
-    ctx.globalAlpha = 0.5 * this.flood;
-    ctx.drawImage(this.sprites.lumenGlow, centre.x - size / 2, centre.y - size / 2, size, size);
-    ctx.globalAlpha = 0.16 * this.flood;
+    ctx.globalAlpha = (warm ? 0.62 : 0.5) * this.flood;
+    ctx.drawImage(
+      warm ? this.sprites.amberGlow : this.sprites.lumenGlow,
+      centre.x - size / 2,
+      centre.y - size / 2,
+      size,
+      size,
+    );
+    ctx.globalAlpha = (warm ? 0.24 : 0.16) * this.flood;
     ctx.drawImage(this.sprites.foamGlow, centre.x - size / 2, centre.y - size / 2, size, size);
     ctx.restore();
   }
 
-  /** §6.2's fine grain: 2% monochrome noise, cycled at 12 fps. */
-  drawGrain(ctx) {
-    const tiles = this.sprites.grain;
-    const step = Math.floor(this.time / 83);
-    const tile = tiles[((step % tiles.length) + tiles.length) % tiles.length];
-    if (this.grainPattern === undefined || this.grainTile !== tile) {
-      this.grainTile = tile;
-      this.grainPattern = ctx.createPattern(tile, 'repeat');
-    }
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.globalAlpha = 0.022;
-    ctx.fillStyle = this.grainPattern;
-    ctx.fillRect(0, 0, this.width, this.height);
-    ctx.restore();
+  /**
+   * §6.2's fine grain: 2% monochrome noise, cycled at 12 fps — handed to the
+   * compositor instead of drawn.
+   *
+   * It used to be a full-screen pattern fill on every canvas frame, for a texture
+   * that is the same texture on every frame of the game. That is one whole
+   * screen of fill rate a frame spent on something that does not move, and with
+   * the richer water on top of it the resolve beat no longer fitted in a 16.7 ms
+   * budget in the headless harness. As a repeating background on its own element
+   * it is rasterized once, animated by `background-position` in steps, and costs
+   * the render loop nothing at all.
+   *
+   * The tile is still generated in this repository, from the same seeded noise —
+   * it is handed over as a data URL rather than fetched.
+   */
+  installGrain() {
+    const layer = this.root.querySelector('#stage-grain');
+    if (layer === null) return;
+    layer.style.backgroundImage = `url(${this.sprites.grain[0].toDataURL()})`;
   }
 }

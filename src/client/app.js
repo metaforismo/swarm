@@ -16,6 +16,7 @@
 import { ApiError, api, commandKey, generateClientSeed, isClientSeed } from './api.js';
 import { credits, elapsed, multiple, percent, shortHex, signedCredits, truncate } from './format.js';
 import { Sound } from './sound.js';
+import { shareSheet } from './sharecard.js';
 import {
   helpSheet,
   historySheet,
@@ -47,6 +48,8 @@ const dom = {
   sound: $('sound'),
   menu: $('menu'),
   legend: $('legend'),
+  strip: $('strip'),
+  stripFlash: $('strip-flash'),
   yield: $('yield'),
   colonyValue: $('colony-value'),
   delta: $('delta'),
@@ -84,12 +87,17 @@ const dom = {
   kCredit: $('k-credit'),
   kLeft: $('k-left'),
   settlement: $('settlement'),
+  payoutCard: $('payout-card'),
   settlementTerminal: $('settlement-terminal'),
   settlementHeadline: $('settlement-headline'),
+  settlementMultiple: $('settlement-multiple'),
   settlementNet: $('settlement-net'),
+  trace: $('settlement-trace'),
   settlementCopy: $('settlement-copy'),
   newRound: $('new-round'),
   openWild: $('open-wild'),
+  shareOpen: $('share-open'),
+  shareLink: $('share-link'),
   sheet: $('sheet'),
   sheetTitle: $('sheet-title'),
   sheetBody: $('sheet-body'),
@@ -148,14 +156,20 @@ const state = {
   displayedValue: null,
   /** Credited-this-round minor units, which is what the vessel holds. */
   bankedUnits: 0n,
-  /** Balance before the settlement, so the ceremony can count up into the chip. */
-  balanceBeforeSettle: null,
   /** Whether the environment reveal has already fired this round (§7.2). */
   revealed: false,
   /** Suppresses the balance chip while the ceremony is counting up into it. */
   holdBalance: false,
-  /** The pending ceremony count-up, so a new round can cancel it. */
-  ceremonyTimer: null,
+  /**
+   * Everything the ceremony has in flight — pending timers and running counts.
+   * A player who taps `NEW ROUND` mid-ceremony must not have the last round's
+   * count-up still writing into the balance chip a second later.
+   */
+  ceremony: { timers: [], cancels: [] },
+  /** The settled view the share card is composed from, or `null`. */
+  shareable: null,
+  /** This round's own frame, frozen while the colony was still standing. */
+  frozenFrame: null,
 };
 
 const stage = new Stage(dom.stage);
@@ -196,7 +210,11 @@ function rollMultiple(node, from, to, finalText, ms = 380) {
   }
   const start = performance.now();
   const tick = (now) => {
-    const t = Math.min(1, (now - start) / ms);
+    // Clamped at *both* ends. A frame's `requestAnimationFrame` timestamp can
+    // predate the `performance.now()` the roll was armed with, and `outQuint` of a
+    // negative time is less than zero — which on a count-up puts a number on
+    // screen below the one it started from.
+    const t = Math.min(1, Math.max(0, (now - start) / ms));
     if (t >= 1) {
       node.textContent = finalText;
       delete node.dataset.roll;
@@ -210,38 +228,107 @@ function rollMultiple(node, from, to, finalText, ms = 380) {
 }
 
 /**
+ * A money figure counting up, in minor units.
+ *
+ * Every intermediate frame **floors** the eased value, so the number on screen is
+ * never above the amount it is counting to, and the roll lands on the exact
+ * integer the server sent rather than on the last frame of a float. Under
+ * `prefers-reduced-motion` it is an instant set (§6.4).
+ *
+ * Returns a cancel function, because a player who taps `NEW ROUND` must not have
+ * the previous round's count still writing into the chip.
+ */
+function rollUnits(node, fromUnits, toUnits, ms, onDone) {
+  const from = BigInt(fromUnits);
+  const to = BigInt(toUnits);
+  let handle = null;
+  const land = () => {
+    node.textContent = credits(to);
+    onDone?.();
+  };
+  if (reducedMotion.matches || ms <= 0 || from === to) {
+    land();
+    return () => {};
+  }
+  const start = performance.now();
+  const tick = (now) => {
+    // Clamped at both ends: a frame whose timestamp predates `start` would give
+    // `outQuint` a negative input, and a payout that counts up from below zero is
+    // a wrong number on screen at the loudest moment in the round.
+    const t = Math.min(1, Math.max(0, (now - start) / ms));
+    if (t >= 1) {
+      land();
+      return;
+    }
+    /*
+     * The *easing* is a float; the money is not.
+     *
+     * The eased position is quantised to a millionth and the interpolation runs
+     * in `BigInt`, so no intermediate frame is the output of floating-point
+     * arithmetic on a money value. Doing it the other way — `Number(from) + ...`
+     * and flooring the result — is exact only while the balance stays under
+     * `Number.MAX_SAFE_INTEGER`, and "the balance is small enough" is not the
+     * kind of thing a money display should be relying on.
+     */
+    const eased = BigInt(Math.round(outQuint(t) * 1000000));
+    node.textContent = credits(from + ((to - from) * eased) / 1000000n);
+    handle = requestAnimationFrame(tick);
+  };
+  handle = requestAnimationFrame(tick);
+  return () => {
+    if (handle !== null) cancelAnimationFrame(handle);
+  };
+}
+
+/**
  * The balance chip counting up in AMBER (§7.1).
  *
  * Only ever called for a round that returned more than it cost. A number flowing
  * into an amber chip reads as a win in peripheral vision, so `T-nil` and
  * `T0-loss` get an instant set instead — that is one of §7.1's binding rules, not
  * a stylistic choice.
+ *
+ * The hold is released on every path out of here, including the ones that never
+ * animate: a suppressed balance chip that nothing un-suppresses is a chip frozen
+ * for the rest of the session.
  */
 function rollCredits(node, fromUnits, toUnits, ms) {
-  const from = Number(fromUnits);
-  const to = Number(toUnits);
-  const land = () => {
-    node.textContent = credits(toUnits);
-    // The hold has to be released on every path out of here, including the ones
-    // that never animate: a suppressed balance chip that nothing un-suppresses is
-    // a chip frozen for the rest of the session.
+  return rollUnits(node, fromUnits, toUnits, ms, () => {
     state.holdBalance = false;
-  };
-  if (reducedMotion.matches || ms <= 0 || from === to) {
-    land();
-    return;
-  }
-  const start = performance.now();
-  const tick = (now) => {
-    const t = Math.min(1, (now - start) / ms);
-    if (t >= 1) {
-      land();
-      return;
-    }
-    node.textContent = credits(BigInt(Math.round(from + (to - from) * outQuint(t))));
-    requestAnimationFrame(tick);
-  };
-  requestAnimationFrame(tick);
+  });
+}
+
+/**
+ * The payout figure, sized to fit the card at any stake the game allows.
+ *
+ * The two loud tiers set the headline at 66 and 72 px, which is right for the
+ * `11.52` a one-credit stake produces and wrong for the `527355.94` a
+ * thousand-credit stake at the maximum multiple produces — nine tabular glyphs
+ * at 72 px are about 400 px wide inside a card with 316 px of room, so the
+ * biggest win in the game would be the one that overflowed. The figure is
+ * measured from its *final* text, before the count-up starts, so it does not
+ * resize while it counts.
+ */
+function fitHeadline(text, tier) {
+  const base = tier === 'T3' ? 72 : tier === 'T2' ? 66 : 56;
+  const room = 316;
+  // The advance of the tabular monospace set, as a fraction of the font size.
+  const advance = 0.62;
+  return Math.max(30, Math.min(base, room / Math.max(1, text.length * advance)));
+}
+
+/**
+ * The round's credited multiple of what the ticket cost — `X` in §7.1, the
+ * figure the whole tier table is defined on.
+ *
+ * Truncated toward zero with integer arithmetic, like every other number in the
+ * client: no money value on this screen is ever the output of a float, and a
+ * displayed multiple is never above the one that was actually paid (§9.3).
+ */
+function stakeMultiple(creditedUnits, stakedUnits) {
+  if (stakedUnits <= 0n) return '—';
+  const scaled = (creditedUnits * 100n) / stakedUnits;
+  return `${scaled / 100n}.${String(scaled % 100n).padStart(2, '0')}`;
 }
 
 /**
@@ -591,6 +678,8 @@ async function seedColony() {
     state.bankedUnits = 0n;
     state.revealed = false;
     state.displayedValue = null;
+    state.frozenFrame = null;
+    state.shareable = null;
     applyView(response);
     screen('round');
     stage.reset();
@@ -617,6 +706,11 @@ async function runAdvance() {
 
 async function runHarvest(units) {
   const previous = state.frame;
+  // The share card's picture has to be this round's own frame, and a harvest is
+  // the beat that takes the colony away — so it is frozen here, while the colony
+  // is still standing, rather than at a settlement that may have nothing left to
+  // photograph (§7.1).
+  state.frozenFrame = stage.freeze();
   const response = await api.harvest(state.roundId, {
     idempotencyKey: commandKey('harvest'),
     expectedFrameRevision: previous.revision,
@@ -704,7 +798,9 @@ async function applyResolution(previous, response) {
   } else {
     sound.verdict(delta);
     if (delta >= 1) void stage.medusa();
-    await stage.verdict();
+    // The verdict's treatment is a function of `D` and of nothing else (§6.5 R1),
+    // so `D` is what it is given.
+    await stage.verdict(delta);
   }
 
   await afterBeat();
@@ -728,6 +824,9 @@ function setActionBarInert(inert) {
 
 async function terminalFlow() {
   const terminal = state.frame.terminal;
+  // A FULL BLOOM or a generation-18 finish never passed through a harvest, so the
+  // colony is still on screen and this is the frame worth keeping.
+  if (state.frozenFrame === null) state.frozenFrame = stage.freeze();
   sound.setPopulation(0);
   if (terminal === 'EXTINCT') {
     // The lights fade. The vessel stays lit if anything was harvested, because the
@@ -744,11 +843,27 @@ async function terminalFlow() {
   } else if (terminal === 'FINAL') {
     stage.setNote('Generation 18. The colony settles at its exact value.');
   }
-  state.balanceBeforeSettle = BigInt(state.session?.balanceUnits ?? 0);
-  const response = await api.settle(state.roundId, {
-    idempotencyKey: commandKey('settle'),
-    expectedFrameRevision: state.frame.revision,
-  });
+  // The chip is held from here to the ceremony. The settle response credits the
+  // wallet, and a chip that showed the final balance for one frame before the
+  // ceremony wound it back would be a flicker at the loudest beat in the round.
+  //
+  // The hold is released on the failure path too. A settlement that never
+  // answers leaves the round unsettled and the balance is whatever the server
+  // says it is — but a hold that nothing releases suppresses the balance chip
+  // for the rest of the session, which turns a transient network error into a
+  // wallet that has silently stopped updating.
+  state.holdBalance = true;
+  let response;
+  try {
+    response = await api.settle(state.roundId, {
+      idempotencyKey: commandKey('settle'),
+      expectedFrameRevision: state.frame.revision,
+    });
+  } catch (error) {
+    state.holdBalance = false;
+    if (state.session !== null) dom.balance.textContent = credits(state.session.balanceUnits);
+    throw error;
+  }
   applyView(response);
   renderSession(response.session);
   // The strip behind the ceremony now shows the settled round: the side-bet chips
@@ -839,14 +954,20 @@ function renderFrame(delta) {
   const bankable = frame.colonyValue === null ? 0n : creditForK(frame.units);
   dom.colonyValue.title = `${credits(bankable)} bankable now`;
 
-  if (delta === undefined || frame.stage === 0) dom.delta.textContent = '';
-  else {
+  if (delta === undefined || frame.stage === 0) {
+    dom.delta.textContent = '';
+    delete dom.strip.dataset.band;
+  } else {
     // The verdict band is keyed to D, the signed change in colony value measured
     // in stake multiples, and to nothing else (§6.5 R1).
     const band =
       delta <= -1 ? 'heavy-loss' : delta < 0 ? 'loss' : delta === 0 ? 'flat' : delta < 1 ? 'gain' : 'large-gain';
     dom.delta.dataset.band = band;
     dom.delta.textContent = `${delta > 0 ? '+' : delta < 0 ? '−' : ''}${truncate(Math.abs(delta).toFixed(6), 2)}x THIS GENERATION`;
+    // The strip takes the verdict too: the largest reading on the play surface
+    // gets weight in the same band the frame does, so the beat is legible on a
+    // muted phone held at arm's length and not only in the light of the stage.
+    replayBandAnimation(band);
   }
   // The stake and the current bankable value are both on screen at every
   // decision (§9.3), and neither is ever dressed as a distance to travel.
@@ -876,6 +997,52 @@ function renderFrame(delta) {
   dom.ladderChip.textContent = `GEN ${frame.stage} / ${state.config.rules.stages}`;
 
   renderActionBar();
+}
+
+/**
+ * The verdict, on the value strip.
+ *
+ * `D` decides the whole treatment and nothing else does (§6.5 R1): how far the
+ * numerals move, how hard the strip flashes, and — through the band — what
+ * colour that flash is. A larger `D` never gets less than a smaller one (R4),
+ * and `D = 0` gets a tick and no beat at all.
+ *
+ * Driven from the Web Animations API rather than from CSS keyframes, because a
+ * band that does not change between two consecutive losing generations would not
+ * restart a CSS animation, and the alternative — dropping a class and reading
+ * layout to flush it — is a forced reflow six times a round on the one surface
+ * that must not thrash. Every property animated here is composited.
+ */
+const VERDICT_BEAT = {
+  'large-gain': { scale: 1.075, flash: 0.85, ms: 500 },
+  gain: { scale: 1.032, flash: 0.4, ms: 400 },
+  flat: null,
+  loss: { scale: 0.988, flash: 0.34, ms: 360 },
+  'heavy-loss': { scale: 0.968, flash: 0.62, ms: 440 },
+};
+
+function replayBandAnimation(band) {
+  dom.strip.dataset.band = band;
+  const beat = VERDICT_BEAT[band];
+  if (beat === null || beat === undefined || reducedMotion.matches) return;
+  for (const node of [dom.colonyValue, dom.stripFlash])
+    for (const running of node.getAnimations?.() ?? []) running.cancel();
+  dom.colonyValue.animate?.(
+    [
+      { transform: 'scale(1)' },
+      { transform: `scale(${beat.scale})`, offset: 0.22 },
+      { transform: 'scale(1)' },
+    ],
+    { duration: beat.ms, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
+  );
+  dom.stripFlash.animate?.(
+    [
+      { opacity: 0, transform: 'scaleX(0.6)' },
+      { opacity: beat.flash, transform: 'scaleX(1)', offset: 0.18 },
+      { opacity: 0, transform: 'scaleX(1.08)' },
+    ],
+    { duration: beat.ms, easing: 'cubic-bezier(0.2, 0, 0, 1)' },
+  );
 }
 
 /**
@@ -983,12 +1150,74 @@ function renderActionBar() {
 // ------------------------------------------------------------------ ceremony
 
 /**
+ * The round's shape, on the payout card: one bar per generation, at the
+ * population that generation resolved to.
+ *
+ * It is the player's own resolved history — the same numbers the receipt lists —
+ * so it is a record and never a counterfactual (§9.8), and there is nothing
+ * forward-looking in it. It carries the same information on a loss as on a win,
+ * in ASH rather than LUMEN: a colony that grew to eleven and then died is a
+ * better story than a blank card, and telling it is not celebrating it.
+ */
+function renderTrace(populations, down) {
+  dom.trace.replaceChildren();
+  dom.trace.hidden = populations.length === 0;
+  if (populations.length === 0) return;
+  const peak = Math.max(1, ...populations);
+  populations.forEach((population, index) => {
+    const bar = document.createElement('span');
+    bar.className = 'trace-bar';
+    if (population === 0) bar.classList.add('gone');
+    bar.style.height = `${Math.max(6, Math.round((population / peak) * 100))}%`;
+    // The bars grow in, left to right, once the card has settled — the round
+    // replayed in a third of a second. The delay is stacked on top of the
+    // container's own reveal, because a bar that finishes growing while its
+    // container is still transparent is a bar nobody sees grow.
+    bar.style.animationDelay = `calc(var(--reveal-delay, 230ms) + ${140 + index * 26}ms)`;
+    dom.trace.append(bar);
+  });
+  dom.trace.dataset.tone = down ? 'spent' : 'won';
+}
+
+/** Clears every timer and count the ceremony has in flight. */
+function stopCeremony() {
+  for (const timer of state.ceremony.timers) clearTimeout(timer);
+  for (const cancel of state.ceremony.cancels) cancel();
+  state.ceremony = { timers: [], cancels: [] };
+}
+
+/** Schedules a ceremony beat, tracked so a new round can cancel it. */
+function beat(ms, action) {
+  if (ms <= 0) {
+    action();
+    return;
+  }
+  state.ceremony.timers.push(setTimeout(action, ms));
+}
+
+/**
  * The settlement ceremony, tiered on what the round actually paid (§7.1).
  *
  * The first thing it splits on is whether the player is up or down. A round that
  * returned less than it cost gets no count-up, no amber and no share card, and
  * its signed net result is at least as prominent as the credited amount — the
  * most common outcome class in the game does not get a win's treatment.
+ *
+ * **A win is a sequence.** The card lands with weight, the figure counts from
+ * zero, the round's take visibly leaves the vessel for the balance chip, and
+ * above ten stakes the frame lifts behind it. The round-1 build had none of
+ * that: the card cut from absent to fully opaque in a single frame and then held
+ * still, and the one specified count-up was dead on every round whose money
+ * arrived by BANK or HARVEST — which is very nearly every win a player ever
+ * sees, because `balanceBeforeSettle` was captured *after* the harvest had
+ * already credited the wallet, so the count ran from a number to itself.
+ *
+ * The count-up is therefore over the **round's whole credited total**, which is
+ * the figure §7.1's tiers are defined on. `credited` sums every CREDIT receipt
+ * in the round, harvests included, so `balance − credited` is exactly the
+ * balance at the moment the ticket was paid for and nothing had come back. The
+ * chip is set there and counts home. Nothing here is derived from a snapshot
+ * that a beat earlier in the round could invalidate.
  */
 function showCeremony() {
   const settlement = state.view.settlement;
@@ -1021,10 +1250,22 @@ function showCeremony() {
   // least as prominent as the credited amount, and a player must never have to do
   // subtraction to find out they lost.
   const down = tier === 'T-nil' || tier === 'T0-loss';
-  dom.settlementHeadline.textContent = down ? signedCredits(net) : credits(credited);
-  dom.settlementNet.textContent = down
-    ? `RETURNED ${credits(credited)} OF ${credits(staked)} STAKED`
-    : `RETURNED ${credits(credited)} · NET ${signedCredits(net)}`;
+  // Two readings, not one string: at a 1,000 stake `RETURNED 527355.94 · NET
+  // +526355.94` is far wider than the card, and a single run of text breaks
+  // wherever it runs out of room — which put `NET` at the end of one line and its
+  // own figure at the start of the next. They wrap as units or not at all.
+  dom.settlementNet.replaceChildren();
+  const reading = (text) => {
+    const node = document.createElement('span');
+    node.textContent = text;
+    return node;
+  };
+  if (down) dom.settlementNet.append(reading(`RETURNED ${credits(credited)} OF ${credits(staked)} STAKED`));
+  else
+    dom.settlementNet.append(
+      reading(`RETURNED ${credits(credited)}`),
+      reading(`NET ${signedCredits(net)}`),
+    );
   const lines = settlement.receipts.filter((receipt) => receipt.direction === 'DEBIT').length;
   dom.settlementCopy.textContent =
     tier === 'T-nil'
@@ -1033,9 +1274,25 @@ function showCeremony() {
         ? 'This round returned less than it cost.'
         : `Staked ${credits(staked)} across ${lines} ${lines === 1 ? 'line' : 'lines'}.`;
 
+  // The round's credited multiple — the tier's own basis. Wins only: below the
+  // stake the signed net *is* the headline, and a third figure beside it would
+  // dilute the one number §9.3 requires to lead.
+  dom.settlementMultiple.hidden = down;
+  if (!down) dom.settlementMultiple.textContent = `${stakeMultiple(credited, staked)}× YOUR STAKE`;
+
+  renderTrace(settlement.proof.populations ?? [], down);
+
   dom.openWild.hidden = settlement.proof.sideBetResults.every(
     (result) => result.resolved === 'NOT_SELECTED',
   );
+
+  // §7.1: the share card is available at T1, offered at T2 and T3, and does not
+  // exist at any total below the stake — not offered, not available.
+  const shareable = tier === 'T1' || tier === 'T2' || tier === 'T3';
+  const offered = tier === 'T2' || tier === 'T3';
+  state.shareable = shareable ? { tier, credited, staked, net, settlement } : null;
+  dom.shareOpen.hidden = !offered;
+  dom.shareLink.hidden = !shareable || offered;
 
   // The ceremony's own beats, per tier (§7.1). `T-nil` and `T0-loss` get the value
   // settling in place, in MIST, with no count-up into the balance chip — a number
@@ -1043,19 +1300,56 @@ function showCeremony() {
   // exactly the frame the most common outcome class in the game must not get.
   const countUp = { 'T0-win': 600, T1: 800, T2: 1000, T3: 1200 }[tier] ?? 0;
   const silence = tier === 'T2' || tier === 'T3' ? 250 : 0;
+  // The figures that confirm the headline wait for the count-up to land. A loss
+  // has no count-up, so on a loss the whole card is on screen inside 400 ms —
+  // quick, and over.
+  dom.settlement.style.setProperty(
+    '--reveal-delay',
+    `${countUp > 0 ? silence + 300 + countUp : 230}ms`,
+  );
   sound.settle(tier);
-  clearTimeout(state.ceremonyTimer);
-  if (!down && state.balanceBeforeSettle !== null && countUp > 0) {
+  stopCeremony();
+
+  const balance = BigInt(state.session?.balanceUnits ?? 0);
+  // Sized from the figure the headline will *end* on, so it does not resize
+  // under the count-up.
+  const finalHeadline = down ? signedCredits(net) : credits(credited);
+  dom.settlementHeadline.style.fontSize = `${fitHeadline(finalHeadline, tier).toFixed(1)}px`;
+  if (down || countUp <= 0) {
+    // The value settles in place. The chip is simply the truth, at once.
+    state.holdBalance = false;
+    dom.settlementHeadline.textContent = finalHeadline;
+    dom.balance.textContent = credits(balance);
+  } else {
+    // The chip goes back to the moment the ticket was paid for, and the round's
+    // whole return flows into it. The reset is simultaneous with the vessel
+    // lighting, so what the player sees is money that is visibly *in the vessel*
+    // and has not reached the balance yet — not a chip that glitched downward.
     state.holdBalance = true;
-    dom.balance.textContent = credits(state.balanceBeforeSettle);
-    const from = state.balanceBeforeSettle;
-    const to = BigInt(state.session?.balanceUnits ?? state.balanceBeforeSettle);
-    state.ceremonyTimer = setTimeout(() => {
+    dom.settlementHeadline.textContent = credits(0n);
+    const from = credited > balance ? 0n : balance - credited;
+    dom.balance.textContent = credits(from);
+    beat(silence, () => {
+      // The round's take goes home: the vessel drains and anything still alive
+      // streams out of frame toward the chip, which is where the value landed.
+      void stage.bankOut(() => {
+        dom.balanceButton.classList.add('credited');
+      });
+    });
+    beat(silence + 220, () => {
       dom.balanceButton.classList.add('credited');
-      rollCredits(dom.balance, from, to, countUp);
-      setTimeout(() => dom.balanceButton.classList.remove('credited'), countUp + 200);
-    }, silence);
+      state.ceremony.cancels.push(
+        rollUnits(dom.settlementHeadline, 0n, credited, countUp),
+        rollCredits(dom.balance, from, balance, countUp),
+      );
+      beat(countUp + 240, () => dom.balanceButton.classList.remove('credited'));
+    });
   }
+
+  // §7.1: T2 lifts the frame one exposure stop and T3 takes it to full
+  // illumination. The colony has usually just been banked away, so there is no
+  // colony light left to lift — the ceremony supplies its own.
+  if (tier === 'T2' || tier === 'T3') beat(silence, () => void stage.celebrate(tier));
 
   // The settlement hold, and the round-cycle floor: a loss cannot be skipped into
   // the next stake, and a whole round cannot be chained faster than 2.5 s (§9.7).
@@ -1079,11 +1373,14 @@ async function newRound() {
   state.displayedValue = null;
   state.bankedUnits = 0n;
   state.revealed = false;
-  state.balanceBeforeSettle = null;
-  // A ceremony count-up that has not started yet must not start after the player
-  // has already asked for the next round.
-  clearTimeout(state.ceremonyTimer);
+  state.shareable = null;
+  state.frozenFrame = null;
+  // A ceremony beat that has not fired yet must not fire after the player has
+  // already asked for the next round, and a count still running must not keep
+  // writing into the balance chip behind the new stake screen.
+  stopCeremony();
   state.holdBalance = false;
+  dom.balance.textContent = credits(state.session?.balanceUnits ?? 0);
   dom.balanceButton.classList.remove('credited');
   sound.setPopulation(0);
   stage.reset();
@@ -1145,6 +1442,26 @@ async function openVerify() {
   if (view?.settlement == null) return;
   const result = await api.verify(view.settlement.proof);
   openSheet('Verify', verifySheet(state.config, view, result, state.witness));
+}
+
+/**
+ * The share card (§7.1). It exists at T1, T2 and T3 and at no total below the
+ * stake — `state.shareable` is only ever set for those three tiers, so there is
+ * no path from a losing round to this sheet.
+ */
+function openShare() {
+  const share = state.shareable;
+  if (share === null || state.view?.settlement == null) return;
+  openSheet(
+    'Share this round',
+    shareSheet({
+      view: state.view,
+      tier: share.tier,
+      stakeMultiple: stakeMultiple(share.credited, share.staked),
+      frame: state.frozenFrame,
+      onToast: toast,
+    }),
+  );
 }
 
 // ------------------------------------------------------------------ wiring
@@ -1272,7 +1589,8 @@ function renderStepper() {
   const units = state.frame?.units ?? 0;
   dom.kValue.textContent = String(state.k);
   dom.kCredit.textContent = credits(creditForK(state.k));
-  dom.kLeft.textContent = `${units - state.k} organism(s)`;
+  const left = units - state.k;
+  dom.kLeft.textContent = `${left} organism${left === 1 ? '' : 's'}`;
   $('k-commit').textContent = `HARVEST ${state.k} → ${credits(creditForK(state.k))}`;
 }
 
@@ -1309,6 +1627,8 @@ function wireSheets() {
     openSheet('Receipt', receiptSheet(state.config, state.view)),
   );
   $('open-verify').addEventListener('click', () => void guard(openVerify));
+  dom.shareOpen.addEventListener('click', () => openShare());
+  dom.shareLink.addEventListener('click', () => openShare());
   dom.openWild.addEventListener('click', () =>
     openSheet('The wild line', wildSheet(state.config, state.view)),
   );

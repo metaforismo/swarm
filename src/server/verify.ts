@@ -136,8 +136,12 @@ export function verifyRound(proof: ProofBundle): VerificationResult {
       return stop('TRANSCRIPT_MISMATCH', 'resolved populations do not re-derive');
     if (proof.terminal !== publishedTerminal(replay.reason, settlementMode))
       return stop('TRANSCRIPT_MISMATCH', 'terminal reason does not re-derive');
+    // The `detail` of a verification step is descriptive text for the Verify
+    // sheet. It is not hashed into either commitment, is never compared, and
+    // nothing re-derives from it — so correcting the prose here cannot move a
+    // payout. Everything above it, which can, is untouched.
     pass(
-      `${populations.length} generation(s), terminal ${proof.terminal} (${settlementMode}), populations ${populations.join(' → ')}`,
+      `${populations.length} generation${populations.length === 1 ? '' : 's'}, terminal ${proof.terminal} (${settlementMode}), populations ${populations.join(' → ')}`,
     );
 
     // 4 and 5. Recompute the whole per-line ledger, including the side bets,

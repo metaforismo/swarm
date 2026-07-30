@@ -376,7 +376,8 @@ export function historySheet(session, handlers = {}) {
     fragment.append(safer);
   }
 
-  const rounds = panel(`Last ${session.history.length} round(s)`);
+  const played = session.history.length;
+  const rounds = panel(`Last ${played} round${played === 1 ? '' : 's'}`);
   if (session.history.length === 0) rounds.append(el('p', 'small muted', 'No rounds yet.'));
   else
     rounds.append(
