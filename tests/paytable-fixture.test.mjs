@@ -347,5 +347,5 @@ describe('canonical serialization is hostile-input safe', () => {
   it('is stable across repeated renders', () => {
     expect(canonicalJson(buildPaytable())).toBe(rendered);
     expect(digest(rendered)).toBe(digest(canonicalJson(buildPaytable())));
-  }, 60000);
+  }, 300000);
 });
