@@ -10,7 +10,10 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['tests/**/*.test.{mjs,ts}'],
-    testTimeout: 60_000,
+    // Exact BigInt enumeration and seeded Monte Carlo checks are proof work,
+    // not latency assertions. Keep their workload intact and allow completion
+    // when this checkout shares a host with other CPU-bound verification jobs.
+    testTimeout: 300_000,
     hookTimeout: 60_000,
     // Exact-enumeration files saturate the host. Serial file execution keeps
     // wall-clock pacing tests meaningful without changing a single assertion,
