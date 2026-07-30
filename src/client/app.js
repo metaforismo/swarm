@@ -15,6 +15,7 @@
  */
 import { ApiError, api, commandKey, generateClientSeed, isClientSeed } from './api.js';
 import { credits, elapsed, multiple, percent, shortHex, signedCredits, truncate } from './format.js';
+import { Sound } from './sound.js';
 import {
   helpSheet,
   historySheet,
@@ -23,7 +24,7 @@ import {
   verifySheet,
   wildSheet,
 } from './sheets.js';
-import { Stage } from './stage.js';
+import { ENVIRONMENT_THRESHOLD, Stage } from './stage.js';
 
 const UNIT = 1000000n;
 const STAKE_STEPS = [
@@ -40,8 +41,10 @@ const $ = (id) => document.getElementById(id);
 const dom = {
   frame: $('frame'),
   stage: $('stage'),
+  balanceButton: $('balance'),
   balance: $('balance-value'),
   sessionNet: $('session-net'),
+  sound: $('sound'),
   menu: $('menu'),
   legend: $('legend'),
   yield: $('yield'),
@@ -137,9 +140,27 @@ const state = {
   clockSkewMs: 0,
   /** Interval handle for whichever session clock is currently on screen. */
   ticker: null,
+  /**
+   * The colony value currently *on screen*, so the verdict count can roll from it
+   * (§6.4). The number it lands on is always the server's exact decimal,
+   * truncated — the roll is presentation and never arithmetic.
+   */
+  displayedValue: null,
+  /** Credited-this-round minor units, which is what the vessel holds. */
+  bankedUnits: 0n,
+  /** Balance before the settlement, so the ceremony can count up into the chip. */
+  balanceBeforeSettle: null,
+  /** Whether the environment reveal has already fired this round (§7.2). */
+  revealed: false,
+  /** Suppresses the balance chip while the ceremony is counting up into it. */
+  holdBalance: false,
+  /** The pending ceremony count-up, so a new round can cancel it. */
+  ceremonyTimer: null,
 };
 
 const stage = new Stage(dom.stage);
+const sound = new Sound();
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
 // ------------------------------------------------------------------ helpers
 
@@ -153,6 +174,120 @@ function toast(message) {
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** `cubic-bezier(0.22, 1, 0.36, 1)` — §6.4's verdict-count easing. */
+const outQuint = (t) => 1 - Math.pow(1 - t, 5);
+
+/**
+ * §6.4's verdict count: tabular digits roll to the new value over 380 ms, and
+ * they **never round up** — every intermediate frame truncates, so the number on
+ * screen is never above the value it is counting to. `finalText` is the server's
+ * own exact decimal, truncated, and it is what the roll lands on: no money value
+ * on this screen is ever the output of a float.
+ *
+ * Under `prefers-reduced-motion` this is an instant set (§6.4).
+ */
+function rollMultiple(node, from, to, finalText, ms = 380) {
+  if (node.dataset.roll !== undefined) cancelAnimationFrame(Number(node.dataset.roll));
+  if (from === null || from === undefined || reducedMotion.matches || ms <= 0) {
+    node.textContent = finalText;
+    delete node.dataset.roll;
+    return;
+  }
+  const start = performance.now();
+  const tick = (now) => {
+    const t = Math.min(1, (now - start) / ms);
+    if (t >= 1) {
+      node.textContent = finalText;
+      delete node.dataset.roll;
+      return;
+    }
+    const value = from + (to - from) * outQuint(t);
+    node.textContent = `${truncate(Math.max(0, value).toFixed(6), 2)}x`;
+    node.dataset.roll = String(requestAnimationFrame(tick));
+  };
+  node.dataset.roll = String(requestAnimationFrame(tick));
+}
+
+/**
+ * The balance chip counting up in AMBER (§7.1).
+ *
+ * Only ever called for a round that returned more than it cost. A number flowing
+ * into an amber chip reads as a win in peripheral vision, so `T-nil` and
+ * `T0-loss` get an instant set instead — that is one of §7.1's binding rules, not
+ * a stylistic choice.
+ */
+function rollCredits(node, fromUnits, toUnits, ms) {
+  const from = Number(fromUnits);
+  const to = Number(toUnits);
+  const land = () => {
+    node.textContent = credits(toUnits);
+    // The hold has to be released on every path out of here, including the ones
+    // that never animate: a suppressed balance chip that nothing un-suppresses is
+    // a chip frozen for the rest of the session.
+    state.holdBalance = false;
+  };
+  if (reducedMotion.matches || ms <= 0 || from === to) {
+    land();
+    return;
+  }
+  const start = performance.now();
+  const tick = (now) => {
+    const t = Math.min(1, (now - start) / ms);
+    if (t >= 1) {
+      land();
+      return;
+    }
+    node.textContent = credits(BigInt(Math.round(from + (to - from) * outQuint(t))));
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+/**
+ * Instant feedback on every tap.
+ *
+ * A control has to move on the frame the finger lands, not when the network
+ * answers, and `:active` alone does not fire reliably on touch. This is the same
+ * treatment for every control in the game, so it can never become emphasis: it
+ * does not vary with what the control does or with the sign of the position
+ * (§9.2).
+ */
+function wirePressFeedback() {
+  const pressable = 'button';
+  document.addEventListener(
+    'pointerdown',
+    (event) => {
+      // The first gesture is what an AudioContext is allowed to be born on (§8).
+      sound.unlock();
+      const target = event.target.closest?.(pressable);
+      if (target === null || target === undefined) return;
+      if (target.disabled === true) return;
+      target.classList.add('pressed');
+      sound.tap();
+    },
+    { passive: true },
+  );
+  for (const event of ['pointerup', 'pointercancel', 'pointerleave']) {
+    document.addEventListener(
+      event,
+      (nativeEvent) => {
+        const target = nativeEvent.target.closest?.(pressable);
+        target?.classList.remove('pressed');
+      },
+      { passive: true },
+    );
+  }
+  // A keyboard path has to feel the same, and §9.6 requires one everywhere.
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') sound.unlock();
+  });
+}
+
+function renderSoundToggle() {
+  dom.sound.setAttribute('aria-pressed', String(sound.muted));
+  dom.sound.setAttribute('aria-label', sound.muted ? 'Sound off' : 'Sound on');
+}
 
 function valueOf(frame) {
   return frame?.colonyValue === null || frame?.colonyValue === undefined
@@ -203,7 +338,7 @@ async function guard(action) {
 function renderSession(session) {
   if (session === undefined || session === null) return;
   state.session = session;
-  dom.balance.textContent = credits(session.balanceUnits);
+  if (!state.holdBalance) dom.balance.textContent = credits(session.balanceUnits);
   const net = BigInt(session.netUnits);
   dom.sessionNet.textContent = signedCredits(net);
   dom.sessionNet.dataset.sign = net > 0n ? 'up' : 'flat';
@@ -378,6 +513,17 @@ function screen(name) {
   dom.reality.hidden = name !== 'reality';
   if (name !== 'sheet') dom.sheet.hidden = true;
   if (name !== 'reality') stopTicking();
+  /*
+   * The pre-round screens own the whole frame.
+   *
+   * Their scrims are translucent so the vent shows through them, and a translucent
+   * scrim over a value strip carrying the *last* round's numbers is a ghost of a
+   * position the player no longer holds. So while S0, S1 or the reality check is
+   * up, the play surface below is not drawn at all. The harvest stepper and the
+   * settlement keep theirs, because in both cases the numbers behind are the ones
+   * the screen is about.
+   */
+  dom.frame.dataset.screen = name;
 }
 
 /**
@@ -442,12 +588,19 @@ async function seedColony() {
     localStorage.setItem(STORAGE_ROUND, state.roundId);
     state.witness = [];
     state.seededAt = Date.now();
+    state.bankedUnits = 0n;
+    state.revealed = false;
+    state.displayedValue = null;
     applyView(response);
     screen('round');
     stage.reset();
     state.previousValue = ENTRY_VALUE;
     renderFrame();
-    await stage.seed(state.config.rules.seedUnits);
+    // S2 — three organisms fade up from the vent over 700 ms, each with its own
+    // breath, voice-limited so a colony reads as a chord and not as a crowd (§8).
+    await stage.seed(state.config.rules.seedUnits, (index, pan) => {
+      sound.breath(pan);
+    });
     // Generation 1 is mandatory and carries no decision: it resolves on its own.
     await runAdvance();
   });
@@ -473,9 +626,18 @@ async function runHarvest(units) {
   renderSession(response.session);
   // A transfer, not a gain: no swell, no shower, no count-up (§6.5 R6).
   setActionBarInert(true);
-  await stage.harvest(units, state.frame.units, previous.wildUnits);
-  renderFrame();
   const credited = response.receipts?.[0]?.amountUnits ?? '0';
+  state.bankedUnits += BigInt(credited);
+  // The trails stream into the vessel; each arrival is one soft informational
+  // mark and one tick of the balance chip — the chip is where the value actually
+  // landed (§5, S5), and the vessel is that value made physical on the stage.
+  stage.setBanked(Number(state.bankedUnits) / Number(state.stakeUnits));
+  await stage.harvest(units, state.frame.units, previous.wildUnits, () => {
+    sound.banked();
+    dom.balanceButton.classList.add('credited');
+    setTimeout(() => dom.balanceButton.classList.remove('credited'), 320);
+  });
+  renderFrame();
   // The divergence is taught once, at the moment it happens, and only to a player
   // who actually holds a side bet (§4.2). It is a caption on their own decision,
   // never a standing comparison.
@@ -493,20 +655,58 @@ async function runHarvest(units) {
   if (state.frame.state !== 'STAGED') await terminalFlow();
 }
 
-/** The resolution beat, then the verdict, then the decision — never the reverse. */
+/**
+ * The resolution beat, then the verdict, then the decision — never the reverse.
+ *
+ * `draw flash (120 ms) → all organisms resolve simultaneously (400 ms) → verdict
+ * (380 ms)` (§2), and the verdict's treatment is a function of `D` — the signed
+ * change in colony value in stake multiples — and of nothing else (§6.5 R1).
+ *
+ * Two beats can replace the verdict. A generation that carries the colony across
+ * `475/48` fires the environment reveal instead, which is 1,000 ms and after
+ * which the round continues (§7.2); a generation that ends the round goes to its
+ * terminal screen (§6.5). Both are handled here, in that order, because a bloom
+ * is both.
+ */
 async function applyResolution(previous, response) {
   applyView(response);
   renderSession(response.session);
   setActionBarInert(true);
   const resolution = state.frame.lastResolution;
   stage.setNote('');
-  if (resolution !== null) await stage.resolve(resolution, state.frame.units);
-  else stage.render(state.frame.units);
 
   const before = previous.stage === 0 ? ENTRY_VALUE : valueOf(previous);
   const after = valueOf(state.frame);
-  renderFrame(after - before);
-  if (after - before >= 1) await stage.medusa();
+  const delta = after - before;
+  const crossing = !state.revealed && before < ENVIRONMENT_THRESHOLD && after >= ENVIRONMENT_THRESHOLD;
+
+  if (resolution !== null) {
+    sound.drawFlash();
+    // The outcome marks fire with their own bodies, at one level for all three:
+    // DIE and SPLIT are both −18 dB and HOLD is −22 dB, so no per-organism event
+    // carries emphasis above the neutral baseline (§6.5 R2, R3).
+    await stage.resolveOutcomes(resolution, state.frame.units, (id, pan) => {
+      if (id === 'SPLIT') sound.split(pan);
+      else if (id === 'HOLD') sound.hold(pan);
+      else sound.die(pan);
+    });
+  } else {
+    stage.render(state.frame.units);
+  }
+
+  sound.setPopulation(state.frame.units);
+  renderFrame(delta);
+
+  if (crossing) {
+    state.revealed = true;
+    sound.reveal();
+    await stage.revealEnvironment();
+  } else {
+    sound.verdict(delta);
+    if (delta >= 1) void stage.medusa();
+    await stage.verdict();
+  }
+
   await afterBeat();
   if (state.frame.state !== 'STAGED') await terminalFlow();
 }
@@ -528,14 +728,23 @@ function setActionBarInert(inert) {
 
 async function terminalFlow() {
   const terminal = state.frame.terminal;
+  sound.setPopulation(0);
   if (terminal === 'EXTINCT') {
+    // The lights fade. The vessel stays lit if anything was harvested, because the
+    // story is what the player kept, not what they lost (§5, S6).
+    sound.extinction();
     await stage.extinguish();
-    stage.setNote('Colony extinct.');
+    stage.setNote(
+      state.bankedUnits > 0n
+        ? `Colony extinct. Banked this round: <strong>${credits(state.bankedUnits)}</strong>.`
+        : 'Colony extinct.',
+    );
   } else if (terminal === 'THRESHOLD') {
     stage.setNote('<strong>FULL BLOOM.</strong> The colony settles at its exact value.');
   } else if (terminal === 'FINAL') {
     stage.setNote('Generation 18. The colony settles at its exact value.');
   }
+  state.balanceBeforeSettle = BigInt(state.session?.balanceUnits ?? 0);
   const response = await api.settle(state.roundId, {
     idempotencyKey: commandKey('settle'),
     expectedFrameRevision: state.frame.revision,
@@ -612,7 +821,20 @@ function renderFrame(delta) {
     frame.unitValue === null
       ? 'YIELD — · GENERATION 1 IS MANDATORY'
       : `YIELD ${multiple(frame.unitValue)} / ORGANISM · ${frame.units} ALIVE`;
-  dom.colonyValue.textContent = frame.colonyValue === null ? '—' : multiple(frame.colonyValue);
+
+  // The verdict count: the digits roll to the new value across the verdict beat,
+  // and land on the server's exact decimal (§6.4). Any other render is a set.
+  const valueText = frame.colonyValue === null ? '—' : multiple(frame.colonyValue);
+  if (delta !== undefined && frame.colonyValue !== null)
+    rollMultiple(dom.colonyValue, state.displayedValue, value, valueText);
+  else {
+    if (dom.colonyValue.dataset.roll !== undefined) {
+      cancelAnimationFrame(Number(dom.colonyValue.dataset.roll));
+      delete dom.colonyValue.dataset.roll;
+    }
+    dom.colonyValue.textContent = valueText;
+  }
+  state.displayedValue = frame.colonyValue === null ? null : value;
 
   const bankable = frame.colonyValue === null ? 0n : creditForK(frame.units);
   dom.colonyValue.title = `${credits(bankable)} bankable now`;
@@ -639,14 +861,19 @@ function renderFrame(delta) {
     0.04 + 0.96 * (Math.log2(1 + Math.max(0, multipleValue)) / Math.log2(1 + 527.355936));
   dom.fill.style.width = `${(exposureOf(value) * 100).toFixed(2)}%`;
   dom.tick.style.left = `${(exposureOf(1) * 100).toFixed(2)}%`;
+  // The strip is lit by the stage above it, on the same monotone curve, so the UI
+  // never disagrees with the frame about which position is richer (§6.3).
+  dom.frame.style.setProperty('--strip-exposure', exposureOf(value).toFixed(4));
 
   renderChips();
   renderDots();
 
-  dom.ladderChip.textContent =
-    frame.nextUnitValue === null
-      ? `GENERATION ${frame.stage} OF ${state.config.rules.stages}`
-      : `NEXT GENERATION: ${multiple(frame.nextUnitValue)} PER ORGANISM`;
+  // Where the round is, and nothing more. The one forward-looking number §9.2
+  // permits — the next generation's per-organism ladder constant — lives on the
+  // `NEXT` control, beside the decision it is the price of. Printing it twice put
+  // it somewhere no decision was being made, which is a target rather than a
+  // price, and it wrapped the footer onto two lines.
+  dom.ladderChip.textContent = `GEN ${frame.stage} / ${state.config.rules.stages}`;
 
   renderActionBar();
 }
@@ -798,16 +1025,37 @@ function showCeremony() {
   dom.settlementNet.textContent = down
     ? `RETURNED ${credits(credited)} OF ${credits(staked)} STAKED`
     : `RETURNED ${credits(credited)} · NET ${signedCredits(net)}`;
+  const lines = settlement.receipts.filter((receipt) => receipt.direction === 'DEBIT').length;
   dom.settlementCopy.textContent =
     tier === 'T-nil'
       ? 'Colony extinct. Whatever was not harvested is gone.'
       : tier === 'T0-loss'
         ? 'This round returned less than it cost.'
-        : `Staked ${credits(staked)} across ${settlement.receipts.filter((receipt) => receipt.direction === 'DEBIT').length} line(s).`;
+        : `Staked ${credits(staked)} across ${lines} ${lines === 1 ? 'line' : 'lines'}.`;
 
   dom.openWild.hidden = settlement.proof.sideBetResults.every(
     (result) => result.resolved === 'NOT_SELECTED',
   );
+
+  // The ceremony's own beats, per tier (§7.1). `T-nil` and `T0-loss` get the value
+  // settling in place, in MIST, with no count-up into the balance chip — a number
+  // flowing into an amber chip reads as a win in peripheral vision, which is
+  // exactly the frame the most common outcome class in the game must not get.
+  const countUp = { 'T0-win': 600, T1: 800, T2: 1000, T3: 1200 }[tier] ?? 0;
+  const silence = tier === 'T2' || tier === 'T3' ? 250 : 0;
+  sound.settle(tier);
+  clearTimeout(state.ceremonyTimer);
+  if (!down && state.balanceBeforeSettle !== null && countUp > 0) {
+    state.holdBalance = true;
+    dom.balance.textContent = credits(state.balanceBeforeSettle);
+    const from = state.balanceBeforeSettle;
+    const to = BigInt(state.session?.balanceUnits ?? state.balanceBeforeSettle);
+    state.ceremonyTimer = setTimeout(() => {
+      dom.balanceButton.classList.add('credited');
+      rollCredits(dom.balance, from, to, countUp);
+      setTimeout(() => dom.balanceButton.classList.remove('credited'), countUp + 200);
+    }, silence);
+  }
 
   // The settlement hold, and the round-cycle floor: a loss cannot be skipped into
   // the next stake, and a whole round cannot be chained faster than 2.5 s (§9.7).
@@ -828,6 +1076,16 @@ async function newRound() {
   state.view = null;
   state.frame = null;
   state.previousValue = null;
+  state.displayedValue = null;
+  state.bankedUnits = 0n;
+  state.revealed = false;
+  state.balanceBeforeSettle = null;
+  // A ceremony count-up that has not started yet must not start after the player
+  // has already asked for the next round.
+  clearTimeout(state.ceremonyTimer);
+  state.holdBalance = false;
+  dom.balanceButton.classList.remove('credited');
+  sound.setPopulation(0);
   stage.reset();
   dom.delta.textContent = '';
   dom.colonyValue.textContent = '—';
@@ -1020,6 +1278,20 @@ function renderStepper() {
 
 function wireSheets() {
   dom.menu.addEventListener('click', () => void guard(openSession));
+  /*
+   * The mute toggle (§8's mix rules).
+   *
+   * The game is fully playable muted: every audio event has a visual counterpart
+   * and every visual event that carries money information has an audio one, so a
+   * muted phone loses nothing but pleasure. That is why this is a plain toggle
+   * with nothing attached to it — no "turn sound on for the full experience", no
+   * warning, no re-prompt.
+   */
+  dom.sound.addEventListener('click', () => {
+    sound.unlock();
+    sound.setMuted(!sound.muted);
+    renderSoundToggle();
+  });
   // The free-play marker is the visible link to help resources §9.9 asks for, on
   // every screen and one tap from every screen.
   dom.freeplay.addEventListener('click', () => void guard(openSaferPlay));
@@ -1060,6 +1332,8 @@ async function boot() {
   wireStake();
   wireActions();
   wireSheets();
+  wirePressFeedback();
+  renderSoundToggle();
   renderSideBetRows();
 
   // Reconnect: dropping mid-round returns to the exact decision state, including
@@ -1080,8 +1354,16 @@ async function boot() {
         state.seededAt = Date.now() - state.config.pacing.roundCycleMs;
         state.witness = loadWitness(stored);
         applyView(view);
-        stage.render(state.frame.units);
+        // A restored round has no beat to play: the colony is drawn where it
+        // already is, and the environment is lit if the position it is being
+        // restored to is worth it — the reveal is a value, not an event (§7.2).
+        stage.render(state.frame.units, { immediate: true });
         stage.setValue(valueOf(state.frame));
+        state.revealed = valueOf(state.frame) >= ENVIRONMENT_THRESHOLD;
+        state.bankedUnits = BigInt(state.frame.creditedUnits ?? '0');
+        if (state.bankedUnits > 0n)
+          stage.setBanked(Number(state.bankedUnits) / Number(state.stakeUnits));
+        sound.setPopulation(state.frame.units);
         renderFrame();
         setActionBarInert(false);
         screen('round');

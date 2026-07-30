@@ -4,41 +4,49 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#02040a" />
     <title>SWARM — Axiom Games</title>
     <link rel="stylesheet" href="/styles.css" />
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='9' fill='%2339F5C8'/%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3CradialGradient id='g'%3E%3Cstop offset='0' stop-color='%237CFFE3'/%3E%3Cstop offset='.55' stop-color='%2339F5C8'/%3E%3Cstop offset='1' stop-color='%230FB894'/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect width='32' height='32' fill='%2302040A'/%3E%3Ccircle cx='16' cy='16' r='11' fill='%2339F5C8' opacity='.22'/%3E%3Ccircle cx='16' cy='16' r='7' fill='url(%23g)'/%3E%3C/svg%3E"
     />
   </head>
   <body>
     <div class="device">
       <main class="frame" id="frame">
-        <!-- top bar: balance · session · menu ------------------------------ -->
+        <!-- top bar: balance · session · sound · menu ----------------------- -->
         <header class="topbar">
           <button class="balance" id="balance" type="button" aria-label="Free-play balance and session">
             <span class="label">Balance</span>
             <strong id="balance-value">—</strong>
           </button>
-          <div>
-            <div class="label" style="text-align: right">Session</div>
+          <div class="session">
+            <div class="label">Session</div>
             <div class="session-net" id="session-net">—</div>
           </div>
-          <button class="menu-button" id="menu" type="button">Menu</button>
+          <!-- The mute toggle. No AudioContext exists until the first gesture, so
+               this is a toggle and never a permission prompt (docs/DESIGN.md §8). -->
+          <button class="icon-button" id="sound" type="button" aria-pressed="false" aria-label="Sound on">
+            <span class="sound-glyph" aria-hidden="true">
+              <span class="wave"></span><span class="wave"></span><span class="wave"></span>
+            </span>
+          </button>
+          <button class="icon-button menu-button" id="menu" type="button" aria-label="Session, history and safer play">
+            <span class="burger" aria-hidden="true"></span>
+          </button>
         </header>
 
-        <!-- the vent stage: the colony is the only light source ------------ -->
+        <!-- the vent stage: the colony is the only light source -------------- -->
         <section class="stage" id="stage" aria-label="Vent stage">
-          <div class="environment" id="environment" aria-hidden="true">
-            <div class="rock"></div>
-            <div class="chimney"></div>
-            <div class="silt"></div>
-            <div class="plankton"></div>
-          </div>
-          <div class="vent" aria-hidden="true"></div>
-          <div class="flash" id="flash" aria-hidden="true"></div>
-          <div class="ghosts" id="ghosts" aria-hidden="true"></div>
-          <div class="colony" id="colony" role="img" aria-live="polite" aria-label="Colony"></div>
+          <canvas id="stage-canvas" aria-hidden="true"></canvas>
+          <!--
+            The stage draws itself on the canvas. This element carries nothing
+            visual: it is the screen-reader group for the colony, kept separate
+            from the wild-line ghost's so a player who cannot see the ghost loses
+            nothing the bet depends on (§9.6).
+          -->
+          <div class="colony-aria" id="colony" role="img" aria-live="polite" aria-label="Colony"></div>
           <div class="legend" id="legend">DIE 40% · HOLD 40% · SPLIT 20%</div>
           <div class="stage-note" id="stage-note"></div>
         </section>
@@ -88,35 +96,40 @@
 
         <!-- S0 — first-round explainer ------------------------------------- -->
         <section class="overlay vent-idle" id="s0" hidden aria-label="How SWARM works">
-          <h1>SWARM</h1>
-          <div class="panel">
-            <h2 style="margin-top: 0">1 · Every generation</h2>
-            <p>Each organism independently <strong>dies</strong>, <strong>holds</strong> or <strong>splits</strong>.</p>
-            <p class="mono">DIE 40% · HOLD 40% · SPLIT 20%</p>
+          <div class="wordmark">
+            <h1>SWARM</h1>
+            <p class="kicker">A colony that is your money</p>
           </div>
-          <div class="panel">
-            <h2 style="margin-top: 0">2 · Your colony is money</h2>
+          <div class="spacer"></div>
+          <div class="panel numbered" data-step="1">
+            <h2>Every generation</h2>
+            <p>Each organism independently <strong>dies</strong>, <strong>holds</strong> or <strong>splits</strong>.</p>
+            <p class="mono legend-inline">DIE 40% · HOLD 40% · SPLIT 20%</p>
+          </div>
+          <div class="panel numbered" data-step="2">
+            <h2>Your colony is money</h2>
             <p>
               It is worth its size times a yield that climbs 25% a generation.
               <strong>It can go down.</strong>
             </p>
           </div>
-          <div class="panel">
-            <h2 style="margin-top: 0">3 · Bank whenever you like</h2>
+          <div class="panel numbered" data-step="3">
+            <h2>Bank whenever you like</h2>
             <p>
               Or harvest part and let the rest run. Every way of playing returns the same
               <strong>95%</strong> on average, before rounding.
             </p>
           </div>
+          <div class="spacer"></div>
           <button class="cta" id="s0-done" type="button">START</button>
         </section>
 
         <!-- S1 — stake &amp; seed ------------------------------------------- -->
         <section class="overlay vent-idle" id="s1" hidden aria-label="Stake and seed">
-          <h1>SEED A COLONY</h1>
-          <p class="small">
-            Three organisms at a vent in the dark. Generation 1 resolves without a decision.
-          </p>
+          <div class="wordmark">
+            <h1>SEED A COLONY</h1>
+            <p class="kicker">Three organisms at a vent in the dark · generation 1 resolves without a decision</p>
+          </div>
 
           <!-- A session limit the player set is a state, not an error (§9.9). -->
           <div class="panel locked" id="limit-lock" hidden>
@@ -127,9 +140,13 @@
             </button>
           </div>
 
-          <div class="panel">
+          <!-- §5, S1: "vent idle in darkness, stake stepper centred". The spacers
+               either side are what centre it; when the drawers below are open the
+               content wins and they collapse. -->
+          <div class="spacer"></div>
+          <div class="panel stake-panel">
             <div class="label">Colony stake</div>
-            <div class="stepper-control" style="margin-top: 8px">
+            <div class="stepper-control hero" style="margin-top: 6px">
               <button id="stake-down" type="button" aria-label="Lower stake">−</button>
               <div class="value" id="stake-value">1.00</div>
               <button id="stake-up" type="button" aria-label="Raise stake">+</button>
@@ -139,7 +156,9 @@
             </div>
           </div>
 
-          <button class="cta ghost" id="sidebets-toggle" type="button">+ SIDE BETS</button>
+          <button class="cta ghost disclosure" id="sidebets-toggle" type="button">
+            <span>+ SIDE BETS</span><span class="hint">optional · off by default</span>
+          </button>
           <div class="panel" id="sidebets" hidden>
             <p class="small">
               Side bets are optional and off by default. Each carries its own stake, its own
@@ -147,13 +166,15 @@
               harvested — harvesting cannot lose you one.
             </p>
             <div id="sidebet-rows"></div>
-            <div class="row">
+            <div class="row total">
               <span class="k">Total at risk</span><span class="v" id="total-at-risk">1.00</span>
             </div>
             <div id="profit-rates" class="small muted"></div>
           </div>
 
-          <button class="cta ghost" id="fairness-toggle" type="button">FAIRNESS</button>
+          <button class="cta ghost disclosure" id="fairness-toggle" type="button">
+            <span>FAIRNESS</span><span class="hint">both halves of the handshake</span>
+          </button>
           <div class="panel" id="fairness" hidden>
             <div class="label">Server commitment</div>
             <div class="mono" id="server-commitment">—</div>
@@ -172,7 +193,7 @@
             </p>
           </div>
 
-          <div class="spacer" style="flex: 1"></div>
+          <div class="spacer"></div>
           <button class="cta" id="seed" type="button">SEED COLONY</button>
           <div class="linkrow">
             <button id="s1-help" type="button">Help &amp; paytable</button>
@@ -181,14 +202,17 @@
         </section>
 
         <!-- harvest stepper: every legal k, one tap away -------------------- -->
-        <section class="overlay" id="stepper" hidden aria-label="Harvest amount">
-          <h1>HARVEST</h1>
+        <section class="overlay live-scrim" id="stepper" hidden aria-label="Harvest amount">
+          <div class="wordmark">
+            <h1>HARVEST</h1>
+            <p class="kicker">Bank part of the colony and let the rest run</p>
+          </div>
           <p class="small">
             Choosing <span class="mono">k</span> changes the shape of the round, not its expected
             return. Every credit is rounded down to the nearest 0.000001.
           </p>
           <div class="panel">
-            <div class="stepper-control">
+            <div class="stepper-control hero">
               <button id="k-down" type="button" aria-label="Harvest fewer">−</button>
               <div class="value" id="k-value">1</div>
               <button id="k-up" type="button" aria-label="Harvest more">+</button>
@@ -200,16 +224,16 @@
               max="2"
               value="1"
               step="1"
-              style="width: 100%; margin-top: 12px"
               aria-label="Organisms to harvest"
             />
             <div class="row">
-              <span class="k">Credits now</span><span class="v" id="k-credit">—</span>
+              <span class="k">Credits now</span><span class="v amber" id="k-credit">—</span>
             </div>
             <div class="row">
               <span class="k">Colony left</span><span class="v" id="k-left">—</span>
             </div>
           </div>
+          <div class="spacer"></div>
           <button class="cta" id="k-commit" type="button">HARVEST</button>
           <button class="cta ghost" id="k-cancel" type="button">Cancel</button>
         </section>
@@ -217,10 +241,19 @@
         <!-- S7 — settlement ceremony --------------------------------------- -->
         <section class="overlay ceremony" id="settlement" hidden aria-label="Settlement">
           <div class="spacer"></div>
-          <div class="terminal" id="settlement-terminal">—</div>
-          <div class="headline" id="settlement-headline">—</div>
-          <div class="net" id="settlement-net">—</div>
-          <p class="small" id="settlement-copy"></p>
+          <!--
+            The payout card. The ceremony's scrim is deliberately translucent so
+            the settled colony is still there behind it — for a rich round that is
+            the frame lifting (§7.1, T2 and T3), and for an extinction there is
+            nothing behind it but the vent, which is the point. The card is what
+            keeps the numerals at their contrast floor over a lit stage (§9.6).
+          -->
+          <div class="payout-card">
+            <div class="terminal" id="settlement-terminal">—</div>
+            <div class="headline" id="settlement-headline">—</div>
+            <div class="net" id="settlement-net">—</div>
+            <p class="small" id="settlement-copy"></p>
+          </div>
           <div class="spacer"></div>
           <button class="cta" id="new-round" type="button">NEW ROUND</button>
           <div class="linkrow">
@@ -232,8 +265,8 @@
 
         <!-- Reality check — every 30 minutes, between rounds, never at a decision -->
         <section class="overlay vent-idle" id="reality" hidden aria-label="Reality check">
-          <div class="spacer" style="flex: 1"></div>
-          <h1>YOU HAVE BEEN PLAYING FOR</h1>
+          <div class="spacer"></div>
+          <h1 class="reality-title">YOU HAVE BEEN PLAYING FOR</h1>
           <div class="reality-clock" id="reality-elapsed">0:00</div>
           <div class="panel">
             <div class="row"><span class="k">Total staked</span><span class="v" id="reality-staked">—</span></div>
@@ -244,13 +277,13 @@
             These are free-play credits with no cash value. This check appears every
             <span id="reality-interval">30</span> minutes and cannot be turned off.
           </p>
-          <div class="spacer" style="flex: 1"></div>
+          <div class="spacer"></div>
           <button class="cta" id="reality-continue" type="button">CONTINUE PLAYING</button>
           <button class="cta ghost" id="reality-limits" type="button">Limits &amp; safer play</button>
         </section>
 
         <!-- sheets: receipt · verify · wild line · history · help ----------- -->
-        <section class="overlay" id="sheet" hidden aria-label="Sheet">
+        <section class="overlay sheet" id="sheet" hidden aria-label="Sheet">
           <h1 id="sheet-title">—</h1>
           <div id="sheet-body"></div>
           <button class="cta ghost" id="sheet-close" type="button">Close</button>

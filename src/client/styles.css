@@ -1,14 +1,24 @@
 /*
- * SWARM — graybox styling.
+ * SWARM — the premium presentation layer.
  *
- * The palette, the type direction and the layout are `docs/DESIGN.md` §5, §6.1 and
- * §6.6, at placeholder fidelity: real information architecture, real hierarchy,
- * real colours, flat shapes where the gel bodies, the volumetrics and the
- * halation passes will go.
+ * The palette, the type direction and the layout are `docs/DESIGN.md` §5, §6.1,
+ * §6.2 and §6.6. Everything here is generated: gradients, strokes, blurs and
+ * procedural textures. No image, font file or asset is fetched from anywhere.
  *
- * Two rules from §6.1 are enforced here rather than left to a component:
- * red is not in the palette — loss is darkness, a signed number and the removal
- * of light — and AMBER means "yours, banked, safe" and appears nowhere else.
+ * Three rules from §6 are enforced here rather than left to a component:
+ *
+ * - **Red is not in the palette.** Loss is darkness, a signed number and the
+ *   removal of light — never an alarm colour. There is no red value in this file.
+ * - **AMBER means "yours, banked, safe" and appears nowhere else.** The balance
+ *   chip, the vessel, harvested value and credited amounts. Nothing else.
+ * - **MEDUSA appears only on a verdict beat worth at least one whole stake**, so
+ *   violet on screen always means the position just grew by more than the player
+ *   paid to enter.
+ *
+ * And one from §9.2, which is the most important constraint in the file: the
+ * action bar's layout, order, sizing, colour and emphasis are identical whether
+ * the position is above or below the stake. There is no selector anywhere below
+ * that keys a control's appearance to the sign of the position.
  */
 
 :root {
@@ -31,9 +41,18 @@
   --numerals: ui-monospace, 'SF Mono', 'Space Grotesk', 'Basis Grotesque Mono', Menlo, monospace;
   --ui: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 
-  --panel: color-mix(in srgb, var(--foam) 8%, transparent);
+  /* §6.2's pressure glass: 8% FOAM fill, background blur, a 1 px inner stroke at
+     20% LUMEN and a 2 px outer shadow at 60% ABYSS. Corner radius 16. */
+  --panel: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--foam) 10%, transparent) 0%,
+    color-mix(in srgb, var(--foam) 5%, transparent) 40%,
+    color-mix(in srgb, var(--silt) 34%, transparent) 100%
+  );
   --panel-stroke: color-mix(in srgb, var(--lumen) 20%, transparent);
+  --panel-shadow: 0 2px 18px rgba(2, 4, 10, 0.6), inset 0 1px 0 color-mix(in srgb, var(--foam) 12%, transparent);
   --radius: 16px;
+  --hairline: color-mix(in srgb, var(--crust) 42%, transparent);
 }
 
 * {
@@ -49,6 +68,7 @@ body {
   font-family: var(--ui);
   -webkit-font-smoothing: antialiased;
   overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 button {
@@ -57,6 +77,8 @@ button {
   background: none;
   border: none;
   cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /* ---------------------------------------------------------------- device */
@@ -67,7 +89,8 @@ button {
   justify-content: center;
   min-height: 100dvh;
   background:
-    radial-gradient(120% 80% at 50% 120%, #071019 0%, var(--abyss) 60%),
+    radial-gradient(120% 70% at 50% 118%, #0a1a22 0%, transparent 62%),
+    radial-gradient(90% 60% at 50% -10%, #060e16 0%, transparent 70%),
     var(--abyss);
   padding: 0;
 }
@@ -83,7 +106,9 @@ button {
   grid-template-rows: 56px minmax(0, 1fr) auto 96px minmax(34px, auto) auto;
   overflow: hidden;
   background: var(--abyss);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--crust) 40%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--crust) 45%, transparent),
+    0 30px 90px rgba(0, 0, 0, 0.65);
 }
 
 /* ---------------------------------------------------------------- top bar */
@@ -102,16 +127,30 @@ button {
   z-index: 6;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  padding: 0 14px;
-  background: var(--abyss);
-  border-bottom: 1px solid color-mix(in srgb, var(--crust) 35%, transparent);
+  padding: 0 12px;
+  background: linear-gradient(180deg, #04080e 0%, var(--abyss) 100%);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.topbar::after {
+  /* One thin cyan telltale under the bar: §6.7's submersible instrument panel. */
+  content: '';
+  position: absolute;
+  inset: auto 0 -1px 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--lumen) 32%, transparent) 22%,
+    color-mix(in srgb, var(--lumen) 10%, transparent) 60%,
+    transparent
+  );
 }
 
 .label {
-  font-size: 11px;
-  letter-spacing: 0.08em;
+  font-size: 10px;
+  letter-spacing: 0.11em;
   text-transform: uppercase;
   color: var(--mist);
 }
@@ -124,21 +163,42 @@ button {
   justify-content: center;
   gap: 1px;
   min-height: 44px;
-  padding: 0 6px 0 0;
+  padding: 0 4px 0 0;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .balance strong {
   font-family: var(--numerals);
   font-variant-numeric: tabular-nums;
-  font-size: 17px;
+  font-size: 18px;
+  line-height: 20px;
   color: var(--amber);
   letter-spacing: 0.01em;
+  transition: text-shadow 240ms ease;
+}
+
+/* A harvest arrival: the value lands in the chip and the chip says so, once, at
+   the informational level. A transfer is not a gain (§6.5 R6) — no count-up
+   flourish, no colour change, one soft pulse of the amber it already is. */
+.balance.credited strong {
+  text-shadow: 0 0 14px color-mix(in srgb, var(--amber) 70%, transparent);
+}
+
+.session {
+  text-align: right;
+  flex: 0 0 auto;
+}
+
+.session .label {
+  text-align: right;
 }
 
 .session-net {
   font-family: var(--numerals);
   font-variant-numeric: tabular-nums;
   font-size: 13px;
+  line-height: 16px;
   color: var(--mist);
   text-align: right;
 }
@@ -147,16 +207,84 @@ button {
   color: var(--foam);
 }
 
-.menu-button {
-  border: 1px solid var(--panel-stroke);
-  border-radius: 10px;
-  padding: 7px 11px;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+.icon-button {
+  position: relative;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 44px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--crust) 60%, transparent);
+  background: color-mix(in srgb, var(--foam) 4%, transparent);
   color: var(--mist);
-  min-height: 44px;
-  min-width: 60px;
+  transition: border-color 160ms ease, background 160ms ease, transform 90ms ease;
+}
+
+.icon-button:active,
+.icon-button.pressed {
+  transform: scale(0.94);
+  border-color: color-mix(in srgb, var(--lumen) 45%, transparent);
+}
+
+/* The mute glyph: three bars, drawn rather than an icon font. */
+.sound-glyph {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 14px;
+}
+
+.sound-glyph .wave {
+  width: 2px;
+  border-radius: 1px;
+  background: var(--lumen);
+  transition: height 200ms ease, background 200ms ease, opacity 200ms ease;
+}
+
+.sound-glyph .wave:nth-child(1) {
+  height: 6px;
+}
+.sound-glyph .wave:nth-child(2) {
+  height: 13px;
+}
+.sound-glyph .wave:nth-child(3) {
+  height: 9px;
+}
+
+#sound[aria-pressed='true'] .sound-glyph .wave {
+  height: 3px;
+  background: var(--ash);
+  opacity: 0.7;
+}
+
+.burger,
+.burger::before,
+.burger::after {
+  display: block;
+  width: 15px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: var(--mist);
+}
+
+.burger {
+  position: relative;
+}
+
+.burger::before,
+.burger::after {
+  content: '';
+  position: absolute;
+  left: 0;
+}
+
+.burger::before {
+  top: -5px;
+}
+
+.burger::after {
+  top: 5px;
 }
 
 /* ---------------------------------------------------------------- stage */
@@ -164,176 +292,58 @@ button {
 .stage {
   position: relative;
   overflow: hidden;
-  background:
-    radial-gradient(80% 50% at 50% 108%, color-mix(in srgb, var(--ember) 22%, transparent) 0%, transparent 60%),
-    linear-gradient(180deg, var(--abyss) 0%, var(--trench) 78%, #040a11 100%);
+  background: var(--abyss);
   touch-action: manipulation;
   --exposure: 0.146;
   --environment: 0;
 }
 
-/* The environment: silt, chimney and plankton, always there and always unlit
-   until the colony is worth 9.895833x (docs/DESIGN.md §7.2). */
-.environment {
+#stage-canvas {
   position: absolute;
   inset: 0;
-  opacity: var(--environment);
-  transition: opacity 700ms cubic-bezier(0.2, 0, 0, 1);
-  pointer-events: none;
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
-.environment .silt {
+.colony-aria {
   position: absolute;
-  inset: auto 0 0 0;
-  height: 18%;
-  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--basalt) 70%, transparent));
-}
-
-.environment .chimney {
-  position: absolute;
-  left: 50%;
-  bottom: 0;
-  width: 120px;
-  height: 34%;
-  transform: translateX(-50%);
-  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--basalt) 85%, transparent));
-  clip-path: polygon(38% 0, 62% 0, 78% 100%, 22% 100%);
-}
-
-.environment .rock {
-  position: absolute;
-  inset: 40% 0 18% 0;
-  background:
-    radial-gradient(40% 60% at 18% 60%, color-mix(in srgb, var(--crust) 40%, transparent), transparent 70%),
-    radial-gradient(45% 55% at 82% 45%, color-mix(in srgb, var(--crust) 26%, transparent), transparent 70%);
-  filter: blur(4px);
-}
-
-.environment .plankton {
-  position: absolute;
-  inset: 0;
-  background-image: radial-gradient(circle, var(--plankton) 40%, transparent 45%);
-  background-size: 44px 44px;
-  opacity: 0.16;
-}
-
-.vent {
-  position: absolute;
-  left: 50%;
-  bottom: -6px;
-  width: 96px;
-  height: 24px;
-  transform: translateX(-50%);
-  border-radius: 50%;
-  background: radial-gradient(circle, color-mix(in srgb, var(--ember) 60%, transparent), transparent 70%);
-  filter: blur(3px);
-}
-
-.colony,
-.ghosts {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-/* An organism: a placeholder disc where the gel bell will go. Its light is its
-   value — halation scales with the frame's exposure (§6.3). */
-.organism {
-  position: absolute;
-  border-radius: 50%;
-  translate: -50% -50%;
-  background: radial-gradient(circle at 36% 30%, var(--lumen-high) 0%, var(--lumen) 46%, var(--lumen-deep) 100%);
-  box-shadow:
-    0 0 calc(10px + 42px * var(--exposure)) color-mix(in srgb, var(--lumen) 45%, transparent),
-    0 0 6px color-mix(in srgb, var(--lumen-high) 60%, transparent);
-  transition:
-    left 400ms cubic-bezier(0.2, 0, 0, 1),
-    top 400ms cubic-bezier(0.2, 0, 0, 1),
-    width 400ms cubic-bezier(0.2, 0, 0, 1),
-    height 400ms cubic-bezier(0.2, 0, 0, 1),
-    opacity 400ms ease,
-    filter 250ms ease;
-  animation: breathe 1.25s ease-in-out infinite alternate;
-}
-
-.organism::after {
-  content: '';
-  position: absolute;
-  inset: 34%;
-  border-radius: 50%;
-  background: var(--lumen-high);
-  opacity: 0.85;
-}
-
-@keyframes breathe {
-  from {
-    filter: brightness(0.92);
-  }
-  to {
-    filter: brightness(1.06);
-  }
-}
-
-.organism[data-outcome='DIE'] {
-  opacity: 0;
-  filter: brightness(0.2) saturate(0.2);
-  translate: -50% 20%;
-}
-
-.organism[data-outcome='HOLD'] {
-  filter: brightness(1.15);
-}
-
-.organism[data-outcome='SPLIT'] {
-  filter: brightness(1.05);
-}
-
-.organism.harvested {
-  background: radial-gradient(circle at 36% 30%, #ffe6bb 0%, var(--amber) 55%, #d99f4d 100%);
-  box-shadow: 0 0 18px color-mix(in srgb, var(--amber) 45%, transparent);
-  opacity: 0;
-  transition: all 400ms cubic-bezier(0.2, 0, 0, 1);
-}
-
-/* The wild line, drawn for 400 ms at a harvest and never as a standing rival
-   colony (§9.8). No halation, no light, no money. */
-.wild-ghost {
-  position: absolute;
-  border-radius: 50%;
-  translate: -50% -50%;
-  border: 1px solid color-mix(in srgb, var(--plankton) 60%, transparent);
-  background: color-mix(in srgb, var(--plankton) 22%, transparent);
-  opacity: 0;
-  transition: opacity 200ms ease;
-}
-
-.ghosts.showing .wild-ghost {
-  opacity: 1;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
 }
 
 .legend {
   position: absolute;
-  top: 12px;
-  left: 0;
-  right: 0;
-  text-align: center;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--crust) 45%, transparent);
+  background: rgba(3, 8, 14, 0.5);
+  backdrop-filter: blur(8px);
   font-family: var(--numerals);
-  font-size: 11px;
-  letter-spacing: 0.08em;
+  font-size: 10.5px;
+  letter-spacing: 0.09em;
   color: var(--mist);
   pointer-events: none;
+  white-space: nowrap;
 }
 
 .stage-note {
   position: absolute;
   left: 16px;
-  right: 16px;
-  bottom: 14px;
-  text-align: center;
-  font-size: 13px;
-  line-height: 18px;
+  /* Clears the vessel, which sits in the bottom-right of the stage. */
+  right: 88px;
+  bottom: 12px;
+  text-align: left;
+  font-size: 12.5px;
+  line-height: 17px;
   color: var(--mist);
   pointer-events: none;
+  text-shadow: 0 1px 8px rgba(2, 4, 10, 0.9);
 }
 
 .stage-note strong {
@@ -341,45 +351,36 @@ button {
   font-weight: 600;
 }
 
-.flash {
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(60% 40% at 50% 100%, color-mix(in srgb, var(--ember) 40%, transparent), transparent 70%);
-  opacity: 0;
-  pointer-events: none;
-}
-
-.flash.on {
-  animation: flash 120ms ease-out;
-}
-
-@keyframes flash {
-  from {
-    opacity: 0.9;
-  }
-  to {
-    opacity: 0;
-  }
-}
-
-.medusa-rim .organism {
-  box-shadow:
-    0 0 26px color-mix(in srgb, var(--medusa) 60%, transparent),
-    0 0 8px var(--lumen-high);
-}
-
 /* ---------------------------------------------------------------- value strip */
 
 .strip {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   grid-template-rows: auto auto auto;
   align-items: start;
   gap: 2px 10px;
-  padding: 8px 14px 8px;
-  border-top: 1px solid color-mix(in srgb, var(--crust) 35%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--crust) 35%, transparent);
-  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--silt) 55%, transparent));
+  padding: 9px 14px 9px;
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  background:
+    linear-gradient(180deg, rgba(6, 16, 25, 0.2) 0%, color-mix(in srgb, var(--silt) 62%, transparent) 100%);
+}
+
+/* The strip is lit by the stage above it: the hairline brightens with the frame's
+   own exposure, which is a function of the colony's value and of nothing else. */
+.strip::before {
+  content: '';
+  position: absolute;
+  inset: -1px 0 auto 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--lumen) 55%, transparent),
+    transparent
+  );
+  opacity: calc(0.25 + 0.6 * var(--strip-exposure, 0.146));
 }
 
 .strip .strip-main {
@@ -393,20 +394,26 @@ button {
   grid-column: 1 / -1;
   font-family: var(--numerals);
   font-variant-numeric: tabular-nums;
-  font-size: 13px;
-  line-height: 16px;
+  font-size: 11.5px;
+  line-height: 15px;
+  letter-spacing: 0.05em;
   color: var(--mist);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* §6.6's numeral floor: tabular lining figures, high contrast, never jittering.
+   The colony value is the largest reading on the play surface. */
 .strip .colony-value {
   font-family: var(--numerals);
   font-variant-numeric: tabular-nums;
-  font-size: 32px;
-  line-height: 34px;
-  letter-spacing: -0.01em;
+  font-size: 40px;
+  line-height: 42px;
+  letter-spacing: -0.02em;
+  color: var(--foam);
+  text-shadow: 0 0 calc(6px + 22px * var(--strip-exposure, 0.146))
+    color-mix(in srgb, var(--lumen) 30%, transparent);
 }
 
 .strip .position {
@@ -414,7 +421,7 @@ button {
   font-variant-numeric: tabular-nums;
   font-size: 10px;
   line-height: 14px;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.03em;
   color: var(--mist);
   white-space: nowrap;
   overflow: hidden;
@@ -430,6 +437,7 @@ button {
   font-variant-numeric: tabular-nums;
   font-size: 12px;
   line-height: 16px;
+  letter-spacing: 0.03em;
   color: var(--mist);
   min-height: 16px;
   white-space: nowrap;
@@ -440,17 +448,19 @@ button {
   color: var(--foam);
 }
 
+/* MEDUSA, and only here: a verdict worth at least one whole stake (§6.1, §6.5). */
 .strip .delta[data-band='large-gain'] {
   color: var(--medusa);
+  text-shadow: 0 0 12px color-mix(in srgb, var(--medusa) 45%, transparent);
 }
 
 /* The 1.00x stake line: a static reference, never an animated target (§9.2). */
 .stakeline {
   position: relative;
-  height: 4px;
-  margin-top: 4px;
-  background: color-mix(in srgb, var(--crust) 45%, transparent);
-  border-radius: 2px;
+  height: 5px;
+  margin-top: 5px;
+  background: color-mix(in srgb, var(--crust) 38%, transparent);
+  border-radius: 3px;
   overflow: hidden;
 }
 
@@ -458,16 +468,19 @@ button {
   position: absolute;
   inset: 0 auto 0 0;
   width: 0;
-  background: var(--lumen-deep);
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--lumen-deep), var(--lumen));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--lumen) 45%, transparent);
   transition: width 380ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .stakeline .tick {
   position: absolute;
-  top: -3px;
-  bottom: -3px;
+  top: -4px;
+  bottom: -4px;
   width: 1px;
   background: var(--mist);
+  opacity: 0.9;
 }
 
 .chips {
@@ -481,11 +494,13 @@ button {
 
 .chip {
   font-family: var(--numerals);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  padding: 3px 7px;
+  font-variant-numeric: tabular-nums;
+  font-size: 10.5px;
+  letter-spacing: 0.07em;
+  padding: 4px 9px;
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--crust) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--crust) 75%, transparent);
+  background: rgba(6, 16, 25, 0.55);
   color: var(--mist);
   white-space: nowrap;
 }
@@ -495,17 +510,19 @@ button {
    amber only once the settlement has actually credited it. */
 .chip[data-state='WON'] {
   color: var(--lumen);
-  border-color: color-mix(in srgb, var(--lumen) 45%, transparent);
+  border-color: color-mix(in srgb, var(--lumen) 50%, transparent);
+  box-shadow: inset 0 0 10px color-mix(in srgb, var(--lumen) 12%, transparent);
 }
 
 .chip[data-state='WON'][data-settled='true'] {
   color: var(--amber);
-  border-color: color-mix(in srgb, var(--amber) 50%, transparent);
+  border-color: color-mix(in srgb, var(--amber) 55%, transparent);
+  box-shadow: inset 0 0 10px color-mix(in srgb, var(--amber) 14%, transparent);
 }
 
 .chip[data-state='LOST'] {
   color: var(--ash);
-  opacity: 0.7;
+  opacity: 0.65;
 }
 
 /* ---------------------------------------------------------------- action bar */
@@ -520,38 +537,70 @@ button {
 
 /* Hierarchy never changes with the sign of the position (§9.2). */
 .act {
-  min-height: 54px;
-  border-radius: 14px;
+  position: relative;
+  min-height: 56px;
+  border-radius: 15px;
   font-family: var(--numerals);
   font-size: 14px;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.07em;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 2px;
-  transition: opacity 150ms ease;
+  overflow: hidden;
+  transition: opacity 150ms ease, transform 90ms cubic-bezier(0.2, 0, 0, 1), box-shadow 160ms ease;
 }
 
 .act small {
-  font-size: 11px;
-  opacity: 0.75;
+  font-size: 10.5px;
+  opacity: 0.8;
   letter-spacing: 0.02em;
+  line-height: 13px;
+  text-align: center;
+}
+
+/* Instant feedback on every tap: the control moves under the thumb on the frame
+   the finger lands, not when the network answers. */
+.act:active,
+.act.pressed {
+  transform: scale(0.965);
 }
 
 .act.primary {
-  background: var(--lumen);
-  color: #04231d;
+  background: linear-gradient(180deg, var(--lumen-high) 0%, var(--lumen) 46%, var(--lumen-deep) 100%);
+  color: #032019;
   font-weight: 700;
+  box-shadow:
+    0 0 22px color-mix(in srgb, var(--lumen) 32%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -1px 0 rgba(0, 40, 32, 0.3);
+}
+
+.act.primary::after {
+  /* One specular sweep across the primary control, static, so the button reads as
+     a lit surface rather than a flat fill. */
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, transparent 38%);
+  pointer-events: none;
 }
 
 .act.secondary {
-  border: 1px solid var(--lumen);
+  border: 1px solid color-mix(in srgb, var(--lumen) 70%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--lumen) 12%, transparent),
+    color-mix(in srgb, var(--lumen) 4%, transparent)
+  );
   color: var(--lumen);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--lumen-high) 22%, transparent);
 }
 
 .act.tertiary {
-  border: 1px solid color-mix(in srgb, var(--crust) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--crust) 85%, transparent);
+  background: color-mix(in srgb, var(--foam) 3%, transparent);
   color: var(--mist);
 }
 
@@ -591,6 +640,7 @@ button {
   height: 6px;
   border-radius: 50%;
   background: color-mix(in srgb, var(--crust) 80%, transparent);
+  transition: background 240ms ease, box-shadow 240ms ease, transform 240ms ease;
 }
 
 .dot.done {
@@ -599,20 +649,23 @@ button {
 
 .dot.current {
   background: var(--lumen);
-  box-shadow: 0 0 8px var(--lumen);
+  transform: scale(1.35);
+  box-shadow: 0 0 9px var(--lumen);
 }
 
 .ladder-chip {
   font-family: var(--numerals);
-  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
   color: var(--mist);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
+  text-align: right;
 }
 
 /* ---------------------------------------------------------------- free play */
 
 /*
- * The free-play marker (§9.9, and the BLACK SIGNAL V7 floor).
+ * The free-play marker (§9.9).
  *
  * It sits above every overlay rather than under them, because a player who never
  * opens help must still be told that an amber balance of 1,000.00 is not money.
@@ -633,11 +686,11 @@ button {
      as it does on everything else. */
   min-height: 44px;
   padding: 6px 14px calc(6px + env(safe-area-inset-bottom));
-  border-top: 1px solid color-mix(in srgb, var(--crust) 35%, transparent);
-  background: var(--abyss);
+  border-top: 1px solid var(--hairline);
+  background: linear-gradient(180deg, var(--abyss), #010308);
   font-family: var(--numerals);
-  font-size: 10px;
-  letter-spacing: 0.1em;
+  font-size: 9.5px;
+  letter-spacing: 0.11em;
   text-transform: uppercase;
   color: var(--ash);
   text-align: center;
@@ -657,11 +710,13 @@ button {
   z-index: 5;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(180deg, rgba(2, 4, 10, 0.94), rgba(2, 4, 10, 0.99));
-  backdrop-filter: blur(10px);
+  background:
+    radial-gradient(120% 60% at 50% -8%, rgba(9, 26, 34, 0.5) 0%, transparent 60%),
+    linear-gradient(180deg, rgba(2, 4, 10, 0.95), rgba(2, 4, 10, 0.985));
+  backdrop-filter: blur(14px) saturate(120%);
   /* The padding clears the two persistent surfaces that paint above overlays:
      the top bar and the free-play marker. */
-  padding: 72px 16px calc(44px + env(safe-area-inset-bottom));
+  padding: 70px 16px calc(46px + env(safe-area-inset-bottom));
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -669,17 +724,45 @@ button {
 /*
  * "Vent idle in darkness" (§5, S1).
  *
- * The stage's own ember is behind this overlay and invisible under it, so the
- * screen that establishes the setting paints its own: one EMBER glow at the
- * bottom of an otherwise empty ABYSS. Without it S1 is flat #02040A and
- * establishes nothing.
+ * The scrim is translucent and blurred, so the screen that establishes the
+ * setting shows the real thing behind it: the live stage, its vent plume and its
+ * drifting particulate, softened as if seen through the water column. The round-1
+ * graybox painted a second ember in CSS because the overlay was opaque, which
+ * meant the screen that establishes the setting was the one screen not showing it.
+ *
+ * One EMBER wash is kept on top, because the vent sits below the fold on the
+ * taller sheets and the frame's warm anchor should not disappear with it.
  */
 .overlay.vent-idle {
   background:
-    radial-gradient(42% 11% at 50% 100%, color-mix(in srgb, var(--ember) 55%, transparent) 0%, transparent 70%),
-    radial-gradient(72% 26% at 50% 103%, color-mix(in srgb, var(--ember) 26%, transparent) 0%, transparent 72%),
-    radial-gradient(130% 52% at 50% 108%, color-mix(in srgb, var(--ember) 11%, transparent) 0%, transparent 78%),
-    linear-gradient(180deg, rgba(2, 4, 10, 0.97) 0%, rgba(3, 7, 13, 0.96) 55%, rgba(6, 13, 20, 0.94) 100%);
+    radial-gradient(38% 9% at 50% 100%, color-mix(in srgb, var(--ember) 30%, transparent) 0%, transparent 70%),
+    radial-gradient(80% 28% at 50% 104%, color-mix(in srgb, var(--ember) 13%, transparent) 0%, transparent 74%),
+    linear-gradient(180deg, rgba(2, 4, 10, 0.9) 0%, rgba(3, 8, 14, 0.82) 46%, rgba(4, 11, 17, 0.76) 100%);
+  backdrop-filter: blur(9px) saturate(120%);
+}
+
+/*
+ * A scrim over a live round: the harvest stepper.
+ *
+ * The player is choosing how many of the organisms in front of them to bank, so
+ * the organisms stay in front of them. The panel carries its own glass, which is
+ * what holds the numerals at their contrast floor over a lit stage (§9.6).
+ */
+.overlay.live-scrim {
+  background: linear-gradient(180deg, rgba(2, 4, 10, 0.66) 0%, rgba(2, 4, 10, 0.9) 100%);
+  backdrop-filter: blur(6px) saturate(115%);
+}
+
+.frame[data-screen='s0'] .strip,
+.frame[data-screen='s0'] .actionbar,
+.frame[data-screen='s0'] .footer,
+.frame[data-screen='s1'] .strip,
+.frame[data-screen='s1'] .actionbar,
+.frame[data-screen='s1'] .footer,
+.frame[data-screen='reality'] .strip,
+.frame[data-screen='reality'] .actionbar,
+.frame[data-screen='reality'] .footer {
+  opacity: 0;
 }
 
 .overlay[hidden],
@@ -688,17 +771,37 @@ button {
 }
 
 .overlay h1 {
-  font-size: 22px;
-  margin: 0 0 4px;
+  font-size: 24px;
+  margin: 0;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  color: var(--foam);
+}
+
+.wordmark {
+  margin-bottom: 14px;
+}
+
+.wordmark h1 {
+  text-shadow: 0 0 26px color-mix(in srgb, var(--lumen) 22%, transparent);
+}
+
+.wordmark .kicker {
+  margin: 5px 0 0;
+  font-size: 11.5px;
+  line-height: 16px;
   letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mist);
 }
 
 .overlay h2 {
-  font-size: 13px;
-  letter-spacing: 0.08em;
+  font-size: 12px;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--mist);
-  margin: 18px 0 8px;
+  color: var(--lumen);
+  margin: 0 0 8px;
+  font-weight: 600;
 }
 
 .overlay p {
@@ -708,37 +811,88 @@ button {
   margin: 0 0 10px;
 }
 
+.overlay p:last-child {
+  margin-bottom: 0;
+}
+
 .overlay p strong {
   color: var(--foam);
+  font-weight: 600;
 }
 
 .panel {
+  position: relative;
   border: 1px solid var(--panel-stroke);
   background: var(--panel);
+  box-shadow: var(--panel-shadow);
   border-radius: var(--radius);
-  padding: 12px 14px;
-  margin-bottom: 12px;
+  padding: 13px 15px;
+  margin-bottom: 11px;
+  backdrop-filter: blur(18px) saturate(130%);
 }
 
-/* A limit the player set has reached its bound. MIST and a border, never a red
+/* The three explainer panels carry their step as a drawn numeral, so S0 reads as
+   a sequence without a heading having to say "1 ·". */
+.panel.numbered {
+  padding-left: 15px;
+}
+
+.panel.numbered::before {
+  content: attr(data-step);
+  position: absolute;
+  top: -9px;
+  left: 14px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--lumen) 45%, transparent);
+  background: #04121a;
+  font-family: var(--numerals);
+  font-size: 10px;
+  color: var(--lumen);
+}
+
+.legend-inline {
+  margin-top: 8px !important;
+  color: var(--mist);
+  letter-spacing: 0.09em;
+  font-size: 11px;
+}
+
+/* A limit the player set has reached its bound. AMBER and a border, never a red
    alarm: red is not in the palette and a limit working is not a failure (§6.1). */
 .panel.locked {
   border-color: color-mix(in srgb, var(--amber) 45%, transparent);
   background: color-mix(in srgb, var(--amber) 7%, transparent);
 }
 
+.stake-panel .row {
+  border-top: 1px solid color-mix(in srgb, var(--crust) 30%, transparent);
+  margin-top: 6px;
+}
+
+.reality-title {
+  font-size: 13px !important;
+  letter-spacing: 0.14em !important;
+  color: var(--mist) !important;
+  font-weight: 500 !important;
+}
+
 .reality-clock {
   font-family: var(--numerals);
   font-variant-numeric: tabular-nums;
-  font-size: 48px;
-  line-height: 52px;
-  margin: 2px 0 14px;
+  font-size: 52px;
+  line-height: 56px;
+  margin: 4px 0 16px;
   color: var(--foam);
+  letter-spacing: -0.02em;
 }
 
 .resource {
   display: block;
-  padding: 10px 0;
+  padding: 11px 0;
   border-top: 1px solid color-mix(in srgb, var(--crust) 30%, transparent);
   color: var(--foam);
   font-size: 13px;
@@ -768,16 +922,16 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 6px 0;
+  padding: 7px 0;
 }
 
 .row + .row {
-  border-top: 1px solid color-mix(in srgb, var(--crust) 30%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--crust) 28%, transparent);
 }
 
 .row .k {
-  font-size: 12px;
-  letter-spacing: 0.06em;
+  font-size: 11.5px;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--mist);
 }
@@ -787,6 +941,15 @@ button {
   font-variant-numeric: tabular-nums;
   font-size: 14px;
   text-align: right;
+  color: var(--foam);
+}
+
+.row .v.amber {
+  color: var(--amber);
+}
+
+.row.total .v {
+  font-size: 16px;
 }
 
 .stepper-control {
@@ -797,43 +960,147 @@ button {
 }
 
 .stepper-control button {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
   border: 1px solid var(--panel-stroke);
-  font-size: 20px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--foam) 8%, transparent), transparent);
+  font-size: 22px;
+  line-height: 1;
   color: var(--foam);
+  transition: transform 90ms cubic-bezier(0.2, 0, 0, 1), border-color 160ms ease, background 160ms ease;
+}
+
+.stepper-control button:active,
+.stepper-control button.pressed {
+  transform: scale(0.92);
+  border-color: color-mix(in srgb, var(--lumen) 55%, transparent);
+  background: color-mix(in srgb, var(--lumen) 12%, transparent);
 }
 
 .stepper-control .value {
   font-family: var(--numerals);
   font-variant-numeric: tabular-nums;
   font-size: 30px;
+  color: var(--foam);
+}
+
+.stepper-control.hero .value {
+  font-size: 42px;
+  line-height: 46px;
+  letter-spacing: -0.02em;
+  text-shadow: 0 0 22px color-mix(in srgb, var(--lumen) 20%, transparent);
+}
+
+/* The harvest stepper's slider — every legal k, one drag away (§4.3). */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  margin: 16px 0 4px;
+  height: 24px;
+  background: transparent;
+}
+
+input[type='range']::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--lumen-deep), color-mix(in srgb, var(--crust) 70%, transparent));
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  margin-top: -10px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--lumen) 70%, transparent);
+  background: radial-gradient(circle at 36% 30%, var(--lumen-high), var(--lumen) 55%, var(--lumen-deep));
+  box-shadow: 0 0 14px color-mix(in srgb, var(--lumen) 45%, transparent);
+}
+
+input[type='range']::-moz-range-track {
+  height: 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--crust) 70%, transparent);
+}
+
+input[type='range']::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--lumen) 70%, transparent);
+  background: var(--lumen);
 }
 
 .cta {
+  position: relative;
   width: 100%;
   min-height: 56px;
-  border-radius: 14px;
-  background: var(--lumen);
-  color: #04231d;
+  border-radius: 15px;
+  background: linear-gradient(180deg, var(--lumen-high) 0%, var(--lumen) 46%, var(--lumen-deep) 100%);
+  color: #032019;
   font-family: var(--numerals);
   font-size: 15px;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  margin-top: 6px;
+  letter-spacing: 0.09em;
+  margin-top: 8px;
+  overflow: hidden;
+  box-shadow:
+    0 0 24px color-mix(in srgb, var(--lumen) 26%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  transition: transform 90ms cubic-bezier(0.2, 0, 0, 1), box-shadow 160ms ease, opacity 150ms ease;
+}
+
+.cta::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.2) 0%, transparent 40%);
+  pointer-events: none;
+}
+
+.cta:active,
+.cta.pressed {
+  transform: scale(0.98);
 }
 
 .cta.ghost {
-  background: none;
+  background: color-mix(in srgb, var(--foam) 4%, transparent);
   border: 1px solid var(--panel-stroke);
   color: var(--foam);
   font-weight: 500;
+  box-shadow: none;
+  letter-spacing: 0.07em;
+}
+
+.cta.ghost::after {
+  display: none;
+}
+
+.cta.disclosure {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  min-height: 50px;
+  text-align: left;
+}
+
+.cta.disclosure .hint {
+  font-family: var(--ui);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  font-weight: 400;
+  color: var(--mist);
+  text-transform: none;
 }
 
 .cta[disabled] {
-  opacity: 0.4;
+  opacity: 0.35;
   cursor: default;
+  box-shadow: none;
 }
 
 .linkrow {
@@ -844,18 +1111,28 @@ button {
 }
 
 .linkrow button {
+  flex: 1 1 auto;
   border: 1px solid var(--panel-stroke);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 9px 12px;
-  font-size: 12px;
-  letter-spacing: 0.06em;
+  font-size: 11px;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--mist);
   min-height: 44px;
+  background: color-mix(in srgb, var(--foam) 3%, transparent);
+  transition: transform 90ms cubic-bezier(0.2, 0, 0, 1), border-color 160ms ease;
+}
+
+.linkrow button:active,
+.linkrow button.pressed {
+  transform: scale(0.97);
+  border-color: color-mix(in srgb, var(--lumen) 45%, transparent);
 }
 
 .mono {
   font-family: var(--numerals);
+  font-variant-numeric: tabular-nums;
   font-size: 12px;
   word-break: break-all;
   color: var(--foam);
@@ -866,8 +1143,13 @@ button {
 }
 
 .small {
-  font-size: 12px;
-  line-height: 17px;
+  font-size: 12.5px;
+  line-height: 18px;
+}
+
+.spacer {
+  flex: 1 1 auto;
+  min-height: 8px;
 }
 
 table.data {
@@ -875,24 +1157,37 @@ table.data {
   border-collapse: collapse;
   font-family: var(--numerals);
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
+  font-size: 11.5px;
 }
 
 table.data th {
   text-align: left;
   font-family: var(--ui);
-  font-size: 11px;
-  letter-spacing: 0.06em;
+  font-size: 10px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--mist);
   font-weight: 500;
-  padding: 4px 6px 4px 0;
+  padding: 5px 8px 5px 0;
 }
 
 table.data td {
-  padding: 4px 6px 4px 0;
+  padding: 5px 8px 5px 0;
   border-top: 1px solid color-mix(in srgb, var(--crust) 25%, transparent);
   white-space: nowrap;
+  color: var(--foam);
+}
+
+/* The label column carries prose — a play-pattern name, a bet name — and a
+   clipped play pattern is a paytable a player cannot read. Numbers stay tabular
+   and stay on one line; only the label wraps. */
+table.data td:first-child,
+table.data th:first-child {
+  white-space: normal;
+  min-width: 84px;
+  font-family: var(--ui);
+  font-size: 11.5px;
+  line-height: 15px;
 }
 
 table.data td.num {
@@ -906,11 +1201,35 @@ table.data td.num {
 
 /* ---------------------------------------------------------------- settlement */
 
+/*
+ * The settlement ceremony, tiered on what the round actually paid (§7.1).
+ *
+ * The first thing it splits on is whether the player is up or down. A round that
+ * returned less than it cost gets no count-up, no amber and no share card, and
+ * its signed net result is at least as prominent as the credited amount.
+ */
 .ceremony {
   align-items: stretch;
   justify-content: center;
   text-align: center;
-  gap: 8px;
+  gap: 6px;
+  /* Translucent, so the settled colony is still on screen behind the payout. */
+  background: linear-gradient(180deg, rgba(2, 4, 10, 0.62) 0%, rgba(2, 4, 10, 0.86) 100%);
+  backdrop-filter: blur(3px) saturate(115%);
+}
+
+.payout-card {
+  position: relative;
+  border-radius: 22px;
+  border: 1px solid var(--panel-stroke);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--foam) 9%, transparent) 0%,
+    color-mix(in srgb, var(--silt) 60%, transparent) 100%
+  );
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.62), inset 0 1px 0 color-mix(in srgb, var(--foam) 14%, transparent);
+  backdrop-filter: blur(22px) saturate(130%);
+  padding: 20px 18px 18px;
 }
 
 .ceremony .headline {
@@ -918,7 +1237,8 @@ table.data td.num {
   font-variant-numeric: tabular-nums;
   font-size: 56px;
   line-height: 60px;
-  margin: 4px 0;
+  margin: 6px 0;
+  letter-spacing: -0.03em;
 }
 
 /* Below the stake the headline is the signed net result, and it is the largest
@@ -940,23 +1260,43 @@ table.data td.num {
 .ceremony[data-tier='T2'] .headline,
 .ceremony[data-tier='T3'] .headline {
   color: var(--amber);
+  text-shadow: 0 0 30px color-mix(in srgb, var(--amber) 34%, transparent);
+}
+
+/* §7.1: T2 lifts the frame one exposure stop and T3 takes it to full
+   illumination. The lift is on the ceremony's own scrim, so a round that paid
+   nothing keeps the dark it earned. */
+.ceremony[data-tier='T2'] {
+  background:
+    radial-gradient(70% 40% at 50% 44%, color-mix(in srgb, var(--lumen) 9%, transparent) 0%, transparent 70%),
+    linear-gradient(180deg, rgba(3, 10, 15, 0.3) 0%, rgba(3, 9, 14, 0.62) 42%, rgba(2, 6, 11, 0.86) 100%);
+}
+
+.ceremony[data-tier='T3'] {
+  background:
+    radial-gradient(80% 46% at 50% 42%, color-mix(in srgb, var(--lumen) 18%, transparent) 0%, transparent 72%),
+    radial-gradient(60% 30% at 50% 46%, color-mix(in srgb, var(--amber) 9%, transparent) 0%, transparent 70%),
+    linear-gradient(180deg, rgba(5, 16, 22, 0.2) 0%, rgba(4, 12, 18, 0.55) 40%, rgba(3, 9, 14, 0.84) 100%);
+}
+
+.ceremony[data-tier='T-nil'],
+.ceremony[data-tier='T0-loss'] {
+  background: linear-gradient(180deg, rgba(2, 4, 10, 0.88) 0%, rgba(2, 4, 10, 0.96) 100%);
 }
 
 .ceremony .net {
   font-family: var(--numerals);
   font-variant-numeric: tabular-nums;
-  font-size: 22px;
+  font-size: 20px;
+  color: var(--foam);
+  letter-spacing: 0.02em;
 }
 
 .ceremony .terminal {
-  font-size: 12px;
-  letter-spacing: 0.12em;
+  font-size: 11px;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--mist);
-}
-
-.ceremony .spacer {
-  flex: 1;
 }
 
 /* ---------------------------------------------------------------- misc */
@@ -965,20 +1305,23 @@ table.data td.num {
   position: absolute;
   left: 14px;
   right: 14px;
-  bottom: 120px;
+  bottom: 118px;
   z-index: 9;
-  border-radius: 12px;
+  border-radius: 13px;
   border: 1px solid var(--panel-stroke);
-  background: rgba(6, 16, 25, 0.95);
-  padding: 10px 12px;
+  background: rgba(6, 16, 25, 0.96);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.6);
+  padding: 11px 13px;
   font-size: 13px;
+  line-height: 18px;
   color: var(--foam);
 }
 
 .verify-step {
   display: flex;
-  gap: 8px;
-  padding: 7px 0;
+  gap: 9px;
+  padding: 8px 0;
   border-top: 1px solid color-mix(in srgb, var(--crust) 25%, transparent);
   font-size: 12px;
   line-height: 16px;
@@ -1003,27 +1346,37 @@ table.data td.num {
   display: flex;
   gap: 4px;
   align-items: flex-end;
-  height: 84px;
+  height: 88px;
   padding-top: 6px;
 }
 
 .wildline .bar {
   flex: 1;
-  background: color-mix(in srgb, var(--plankton) 45%, transparent);
-  border-radius: 2px 2px 0 0;
+  background: color-mix(in srgb, var(--plankton) 42%, transparent);
+  border-radius: 3px 3px 0 0;
   min-height: 2px;
 }
 
 .wildline .bar.player {
-  background: color-mix(in srgb, var(--lumen) 55%, transparent);
+  background: linear-gradient(180deg, var(--lumen), color-mix(in srgb, var(--lumen) 40%, transparent));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--lumen) 30%, transparent);
 }
 
+/*
+ * `prefers-reduced-motion` (§6.4, §9.6).
+ *
+ * Splits and the settlement ceremony become cross-fades, drift and the elastic
+ * overshoot are gone, and the verdict count is an instant set — all of that is
+ * handled in `stage.js` and `app.js`, which read the same query. What is left
+ * here is every CSS transition and every keyframe. The exposure change still
+ * happens, because it carries information.
+ */
 @media (prefers-reduced-motion: reduce) {
-  .organism,
-  .wild-ghost,
-  .stakeline .fill,
-  .environment {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 1ms !important;
-    animation: none !important;
   }
 }
