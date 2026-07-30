@@ -799,7 +799,7 @@ describe('Monte Carlo cross-check', () => {
     expect(math).toContain(generations);
     // Generation-1 extinction converges on the exact 8/125 = 0.064.
     expect(Number(toDecimal(result.generationOneExtinctionRate, 4))).toBeCloseTo(0.064, 2);
-  }, 300000);
+  }, 120000);
 
   it('agrees with the enumerated ticket profit rate for a flagged pairing', () => {
     // The ticket enumeration in `model.mjs` walks a *joint* law over the player's
