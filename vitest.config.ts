@@ -12,5 +12,9 @@ export default defineConfig({
     include: ['tests/**/*.test.{mjs,ts}'],
     testTimeout: 60_000,
     hookTimeout: 60_000,
+    // Exact-enumeration files saturate the host. Serial file execution keeps
+    // wall-clock pacing tests meaningful without changing a single assertion,
+    // timeout, seed, simulation round count or enumerated state.
+    fileParallelism: false,
   },
 });
