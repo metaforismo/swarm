@@ -61,9 +61,8 @@
           <!--
             The brand lockup, on the game frame.
 
-            Every reference in the calibration set carries one *in game* — Plinko
-            hangs its logo off the left edge of the board, Balloon Mania keeps its
-            wordmark banded across the top — and round 1 shipped flat white
+            Every reference in the calibration set carries one *in game* — a logo
+            hung off the left edge of the board, a wordmark banded across the top — and round 1 shipped flat white
             system-weight text on the how-it-works screen and nothing at all
             thereafter, which the rubric names as reading like placeholder. This
             one is built rather than styled: a gradient face, a cut inner bevel, a
@@ -212,8 +211,8 @@
             gradient with one orange smudge, 12.3% lit surface, 924 distinct
             colours, and a first-time viewer who could not tell what game they
             were about to play. No reference in the set has an empty betting
-            screen — Plinko shows the board and its chips, Space XY shows the
-            rocket on the pad, Balloon Mania shows the field.
+            screen — the peg-drop titles show the board and its chips, the crash
+            titles show the vehicle on the pad, the balloon title shows the field.
 
             This element is nothing but a hole: it reserves the top third of the
             screen so the live stage below shows through it, with the three
@@ -307,13 +306,26 @@
 
         <!-- harvest stepper: every legal k, one tap away -------------------- -->
         <section class="overlay live-scrim" id="stepper" hidden aria-label="Harvest amount">
+          <!--
+            THE COLONY STAYS ON THE DECISION SURFACE.
+
+            The player is choosing how many of the organisms in front of them to
+            bank, and round 2 asked them to do it over a blurred scrim with a
+            35%-of-frame band of empty dark under the panel: 10.0% lit surface
+            against a 20% floor, 1,095 distinct colours against 2,500, and the
+            only thing in that band a ghosted multiplier nobody could read. This
+            window reserves the band the colony actually occupies so it shows
+            through unblurred, values and all — the same device the stake screen
+            uses, on the other screen in the game where a number is chosen.
+          -->
+          <div class="stage-window" aria-hidden="true"></div>
           <div class="wordmark">
             <h1>HARVEST</h1>
             <p class="kicker">Bank part of the colony and let the rest run</p>
           </div>
           <p class="small">
             Choosing <span class="mono">k</span> changes the shape of the round, not its expected
-            return. Every credit is rounded down to the nearest 0.000001.
+            return. Credits round down to 0.000001.
           </p>
           <div class="panel">
             <div class="stepper-control hero">
@@ -337,7 +349,6 @@
               <span class="k">Colony left</span><span class="v" id="k-left">—</span>
             </div>
           </div>
-          <div class="spacer"></div>
           <button class="cta" id="k-commit" type="button">HARVEST</button>
           <button class="cta ghost" id="k-cancel" type="button">Cancel</button>
         </section>
@@ -401,7 +412,35 @@
                 honest version of the same rule, and the reason the vessel can
                 never appear on a round that returned less than it cost.
               -->
-              <div class="vessel">
+              <div class="vessel" id="settlement-vessel">
+                <!--
+                  THE GLASS, AND WHAT IS IN IT.
+
+                  Round 2's payout surface was a gold rounded rectangle — well
+                  made, and the strongest single element in the build, but a
+                  rectangle: no ellipse at the mouth, so nothing about it said
+                  "vessel", and identical at 1.85x and at 11.32x, so nothing about
+                  it said how much. Separately, the stage carried a 1 px beaker
+                  that was *empty* by the time the frame settled, which measured
+                  as a second bright saturated region containing nothing at the
+                  one moment the frame is allowed exactly one focal object.
+
+                  Both are now one object. This is a glass with a real volume —
+                  an elliptical rim, wall thickness, a lit left wall and a shaded
+                  right one, a specular down the front, a contact shadow under
+                  the base — and the round's money is the amber standing in it.
+                  `--vessel-fill` is the credited multiple on a log scale, and it
+                  drives the level, the height of the glass, the caustics and the
+                  bloom together, so a 1.2x barely wets it and a 20x floods it to
+                  the rim. The figures sit *inside* the amber, dark on light,
+                  which is the inversion every reference payoff uses to announce
+                  itself before a digit has been read.
+                -->
+                <div class="vessel-fill" aria-hidden="true">
+                  <div class="vessel-caustics"></div>
+                  <div class="vessel-meniscus"></div>
+                </div>
+                <div class="vessel-rim" aria-hidden="true"></div>
                 <div class="vessel-light" aria-hidden="true"></div>
                 <div class="terminal" id="settlement-terminal">—</div>
                 <div class="vessel-rule" aria-hidden="true"></div>

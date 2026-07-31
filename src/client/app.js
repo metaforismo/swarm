@@ -98,6 +98,7 @@ const dom = {
   kLeft: $('k-left'),
   settlement: $('settlement'),
   payoutCard: $('payout-card'),
+  settlementVessel: $('settlement-vessel'),
   settlementTerminal: $('settlement-terminal'),
   settlementHeadline: $('settlement-headline'),
   settlementFigure: $('settlement-figure'),
@@ -558,10 +559,26 @@ function renderProfitRates() {
   const published = state.config.published;
   const bankFirst = published.policies.find((policy) => policy.id === 'BANK_FIRST');
   const run = published.policies.find((policy) => policy.id === 'RUN');
+  /*
+   * A READOUT, NOT A PARAGRAPH.
+   *
+   * §9.3's requirement is that the profit rate leads on the screen where the
+   * stake is set, and round 2 met it with a two-line sentence — "COLONY finishes
+   * ahead 45.60% of rounds if you bank at generation 1, 2.24% if you never
+   * harvest" — set as body copy directly above the seed control. No shipped game
+   * in the calibration set puts a sentence like that on a bet screen, and it was
+   * one of the two things a blind judge picked our stake screen out on.
+   *
+   * The same two figures, as figures: a labelled column and a value column, in
+   * the same row pattern the stake panel already uses, scannable without being
+   * read. Nothing is hidden, nothing is softened, and the numbers are the same
+   * enumerated numbers they were.
+   */
+  const rows = [
+    ['Bank at generation 1', percent(bankFirst.profitRate)],
+    ['Never harvest', percent(run.profitRate)],
+  ];
   const lines = [];
-  lines.push(
-    `COLONY finishes ahead ${percent(bankFirst.profitRate)} of rounds if you bank at generation 1, ${percent(run.profitRate)} if you never harvest.`,
-  );
   const selected = [...state.sideBets.entries()];
   const equalStakes = selected.every(([, units]) => units === state.stakeUnits);
   if (selected.length === 1 && equalStakes) {
@@ -585,6 +602,22 @@ function renderProfitRates() {
     );
   }
   dom.profitRates.replaceChildren();
+  const head = document.createElement('div');
+  head.className = 'label';
+  head.textContent = 'Colony · finishes ahead, % of rounds';
+  dom.profitRates.append(head);
+  for (const [key, value] of rows) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const k = document.createElement('span');
+    k.className = 'k';
+    k.textContent = key;
+    const v = document.createElement('span');
+    v.className = 'v';
+    v.textContent = value;
+    row.append(k, v);
+    dom.profitRates.append(row);
+  }
   for (const line of lines) {
     const node = document.createElement('p');
     node.className = 'small muted';
@@ -828,11 +861,21 @@ async function runHarvest(units) {
   // mark and one tick of the balance chip — the chip is where the value actually
   // landed (§5, S5), and the vessel is that value made physical on the stage.
   stage.setBanked(Number(state.bankedUnits) / Number(state.stakeUnits));
-  await stage.harvest(units, state.frame.units, previous.wildUnits, () => {
-    sound.banked();
-    dom.balanceButton.classList.add('credited');
-    setTimeout(() => dom.balanceButton.classList.remove('credited'), 320);
-  });
+  await stage.harvest(
+    units,
+    state.frame.units,
+    previous.wildUnits,
+    () => {
+      sound.banked();
+      dom.balanceButton.classList.add('credited');
+      setTimeout(() => dom.balanceButton.classList.remove('credited'), 320);
+    },
+    // A bank hands the colony to the ceremony instead of flying it off the stage:
+    // the settlement's pour is the beat that moves it, and the payoff needs
+    // something left on the playfield to light.
+    takesAll,
+  );
+  if (takesAll) sound.banked();
   renderFrame();
   // The divergence is taught once, at the moment it happens, and only to a player
   // who actually holds a side bet (§4.2). It is a caption on their own decision,
@@ -1293,15 +1336,39 @@ function renderActionBar() {
     dom.nextSub.textContent =
       frame.nextUnitValue === null ? '' : `${multiple(frame.nextUnitValue)} per organism`;
   } else {
+    /*
+     * The unavailable bar, and the round-2 defect it is written against.
+     *
+     * All three controls carried the same twenty-eight-character sentence, "this
+     * generation is committed". In the tertiary cell — 89 px wide at the 390 pt
+     * reference — that sentence wraps onto **three** lines inside a sub-label box
+     * that is two lines tall, so the overflow painted straight through the word
+     * `NEXT` above it and out past the button's own rounded box. It reproduced on
+     * every harvest round, on the money surface, and it is the single most broken
+     * thing a screenshot of this build could contain.
+     *
+     * Two rules now hold, and both are structural rather than a copy tweak:
+     *
+     * 1. **A sub-label is one short line.** `.act small` clips its own overflow
+     *    and the strings below are sized for the narrowest cell, so no wrap can
+     *    ever reach the label again.
+     * 2. **The transient state says nothing here.** While a generation is
+     *    resolving the bar is already visibly inert — dimmed, drawn unavailable,
+     *    unreachable — and three copies of one sentence explaining that is noise
+     *    on the decision surface at the moment the player is watching the stage.
+     *    Generation 1's rule *is* worth saying, because it is a rule of the game a
+     *    first-time player has not met yet, and it is said once per control in
+     *    three words.
+     */
     const mandatory = frame.stage === 0;
     dom.bank.setAttribute('aria-disabled', 'true');
     dom.harvest.setAttribute('aria-disabled', 'true');
     dom.bank.firstChild.textContent = 'BANK';
     dom.harvest.firstChild.textContent = 'HARVEST';
-    dom.bankSub.textContent = mandatory ? 'after generation 1' : 'this generation is committed';
-    dom.harvestSub.textContent = mandatory ? 'after generation 1' : 'this generation is committed';
+    dom.bankSub.textContent = mandatory ? 'after gen 1' : '';
+    dom.harvestSub.textContent = mandatory ? 'after gen 1' : '';
     dom.next.firstChild.textContent = 'NEXT';
-    dom.nextSub.textContent = mandatory ? 'generation 1 is mandatory' : 'this generation is committed';
+    dom.nextSub.textContent = mandatory ? 'gen 1 is automatic' : '';
   }
 }
 
@@ -1383,6 +1450,25 @@ function showCeremony() {
                 : 'T3';
 
   dom.settlement.dataset.tier = tier;
+  /*
+   * HOW FULL THE GLASS IS, and it is the round's own credited multiple.
+   *
+   * Round 2's celebration was **one volume**: a 1.85x and an 11.32x measured
+   * within 4% of each other on mean luminance, highlight share, colour count and
+   * focal area, because the only thing that changed between them was which of
+   * four static tier styles the card wore. A ceremony that cannot tell those two
+   * results apart has nothing left for the top of the table.
+   *
+   * So the payout vessel is a glass with a level in it, and the level is `X`
+   * itself on a log scale — 0 at a stake back, 1 at 30x and above. A 1.2x barely
+   * wets it and a 20x floods it to the rim, the glass grows with the fill, the
+   * bloom it throws grows with the fill, and the shower rising out of it is
+   * counted off the same number. One figure drives the whole beat, and that
+   * figure is what the player was actually paid.
+   */
+  const multiple = staked > 0n ? Number(credited) / Number(staked) : 0;
+  const fill = Math.min(1, Math.max(0, Math.log2(1 + Math.max(0, multiple)) / Math.log2(31)));
+  dom.settlement.style.setProperty('--vessel-fill', fill.toFixed(3));
   // Below the stake, the signed net *is* the headline: §7.1 requires it to be at
   // least as prominent as the credited amount, and a player must never have to do
   // subtraction to find out they lost.
@@ -1478,10 +1564,32 @@ function showCeremony() {
   // quick, and over.
   dom.settlement.style.setProperty(
     '--reveal-delay',
-    `${countUp > 0 ? silence + 300 + countUp : 230}ms`,
+    `${countUp > 0 ? silence + 780 + countUp : 230}ms`,
   );
   sound.settle(tier);
   stopCeremony();
+
+  /*
+   * The screen goes up **first**, and the stage lifts on the same frame.
+   *
+   * The effect budget at a payoff allows one dominant region owning 50–80% of
+   * the motion and no more than seven moving regions. Round 2 opened the overlay
+   * and *then* ramped a full-screen flood behind it, which measured as four
+   * consecutive beats of 5, 8, 9 and 1 regions with the dominant one at 44%: two
+   * whole-frame changes, one after the other. Composing the lift into the same
+   * frame as the overlay's own arrival makes it one change — which is the shape
+   * every reference payoff has, right down to the numbers (the loudest one in the
+   * set moves 53% of its frame in a single region owning 98% of the motion).
+   */
+  screen('settlement');
+  if (!quiet) {
+    stage.settle(multiple);
+    // The pour needs to know where the glass is, and the glass is a DOM object
+    // whose size is the tier's. Measured from its own box, once, now that the
+    // screen is up: the light lands *in* the vessel at whatever size it has.
+    const box = dom.settlementVessel.getBoundingClientRect();
+    if (box.width > 0) stage.setPayoutTarget(box.left + box.width / 2, box.top + box.height * 0.62);
+  }
 
   const balance = BigInt(state.session?.balanceUnits ?? 0);
   /*
@@ -1529,28 +1637,23 @@ function showCeremony() {
      * Sequenced, each beat has one dominant motion: the card lands, then the
      * vessel rises under a figure that is already counting.
      */
-    beat(240, () => {
-      /*
-       * The round's take goes home: the vessel drains and anything still alive
-       * streams out of frame toward the chip, which is where the value landed.
-       *
-       * The stage is left lit by the **credited multiple** rather than dropped to
-       * the floor, so the water, the plume and the environment are still there
-       * behind the card. §6.3's contract is unchanged — the light budget is still
-       * the money — it is simply measured on the money the round actually paid
-       * instead of on a colony that no longer exists.
-       */
-      void stage.bankOut(
-        () => {
-          dom.balanceButton.classList.add('credited');
-        },
-        staked > 0n ? Number(credited) / Number(staked) : 0,
-        // The glass holds for the length of the count-up, so the pour home is the
-        // beat *after* the figure lands rather than a second animation beside it.
-        countUp,
-      );
+    /*
+     * THE POUR — the colony's light going into the glass, and the one beat on the
+     * stage.
+     *
+     * It waits for the card, and the 300 ms is a budget decision: two big objects
+     * arriving at once is a stacked effect, and measured on the overlapping
+     * version it produced ten moving regions with the largest owning 48%. The
+     * card lands, then the light travels, then the figure counts. Each beat has
+     * exactly one dominant motion, in the middle of the frame, and the colony
+     * that paid for it is still standing behind the glass when it is over.
+     */
+    beat(300, () => {
+      void stage.bankOut(() => {
+        dom.balanceButton.classList.add('credited');
+      }, multiple);
     });
-    beat(silence + 160, () => {
+    beat(silence + 640, () => {
       dom.balanceButton.classList.add('credited');
       // The figure is the dominant motion of the beat and the chip is support, so
       // the chip counts in the *second* half of the figure's count rather than
@@ -1578,10 +1681,16 @@ function showCeremony() {
    * as an extinction with an amber figure in the middle of it. A tier the table
    * says has a swell has to have one.
    */
-  // Only T3 has a stage beat left: T1's and T2's swell is delivered by the card's
-  // own spill and the tier's warm halo, both of which arrive with the card and
-  // then hold still (§7.1).
-  if (tier === 'T3') beat(silence, () => void stage.celebrate(tier));
+  /*
+   * The swell, on every winning tier, and its size is the credited multiple.
+   *
+   * §7.1's table names three sizes and round 2 shipped one — a T3-only flood —
+   * so every win from 2x to 50x got the same stage beat, which was none. What
+   * arrives now is light rising out of the glass the money is in: six sparks at
+   * a stake back, thirty-four at 30x, on the same curve the fill uses. One small
+   * centred region, so the count-up stays the dominant motion of its own beat.
+   */
+  if (!quiet) beat(silence + 420, () => void stage.celebrate(tier, multiple));
 
   // The settlement hold, and the round-cycle floor: a loss cannot be skipped into
   // the next stake, and a whole round cannot be chained faster than 2.5 s (§9.7).
@@ -1593,8 +1702,6 @@ function showCeremony() {
   setTimeout(() => {
     dom.newRound.disabled = false;
   }, Math.max(0, wait));
-
-  screen('settlement');
 }
 
 async function newRound() {

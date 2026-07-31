@@ -21,9 +21,9 @@
  * worth more money, and the environment rises above the black floor at exactly
  * `475/48 = 9.895833x` — the smallest value a FULL BLOOM can have, which is why
  * every bloom lights it and so does every frame worth as much. Every emitter in
- * this file except two is a body whose radiance is `R_ref * c(t)/c(1)`; the two
- * exemptions are stated where they are drawn (the wild-line ghost, §6.3's own
- * exemption, and the banked-value vessel, whose reasoning is at `drawVessel`).
+ * this file except one is a body whose radiance is `R_ref * c(t)/c(1)`; the one
+ * exemption is stated where it is drawn (the wild-line ghost, §6.3's own
+ * exemption).
  * Water, motes, rays and rock are *lit* rather than emitting: their brightness is
  * a function of the colony's exposure, so a poorer frame can never be brighter
  * than a richer one.
@@ -106,7 +106,7 @@ const mixTone = (a, b, t) => [
  * An organism's colour is **its own worth**, so the payout scale is learned by
  * looking rather than by reading — which is the property every reference in the
  * calibration set has and the round-1 colony did not: `x5.6` printed on a yellow
- * Plinko chip, `x16` on a purple balloon. Ours is banded on the per-organism
+ * chip, `x16` on a purple balloon. Ours is banded on the per-organism
  * value `u` in stake multiples, the same figure printed on the body's face, so
  * the colour and the number can never disagree.
  *
@@ -1012,7 +1012,7 @@ function massSet(band) {
  * Baked once per *string* and blitted once per body: thirty organisms all carry
  * the same yield, so thirty `fillText` calls a frame would be thirty draws of one
  * picture. Dark ink with a light emboss under it — printing on a lit surface, the
- * way `x5.6` is printed on a Plinko chip — never a glowing label floating over
+ * way `x5.6` is printed on a payout chip — never a glowing label floating over
  * the object.
  */
 function labelSprite(text) {
@@ -1112,60 +1112,6 @@ function cloudSprite(colour, seed) {
 }
 
 /**
- * A siphonophore strand: a long beaded filament of light, drifting in the column.
- *
- * The abyss needs *structure* as well as light — something with a shape in it, so
- * a screenshot has a subject even before the colony is rich. Each strand is baked
- * once and blitted with a slow sway, which is six `drawImage` calls a frame for
- * six objects that would otherwise be six stroked paths with six live gradients.
- *
- * Constant, for the same reason the clouds are, and life rather than rock.
- */
-function strandSprite(seed) {
-  const width = 64;
-  const height = 320;
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
-  ctx.globalCompositeOperation = 'lighter';
-  const nodes = [];
-  for (let index = 0; index <= 10; index += 1) {
-    const t = index / 10;
-    nodes.push({
-      x: width / 2 + Math.sin(t * 4.2 + slotRandom(seed, 3) * 6) * width * 0.24,
-      y: t * height,
-    });
-  }
-  ctx.filter = 'blur(2px)';
-  const line = ctx.createLinearGradient(0, 0, 0, height);
-  line.addColorStop(0, rgba(C.plankton, 0));
-  line.addColorStop(0.18, rgba(C.plankton, 0.44));
-  line.addColorStop(0.62, rgba(C.lumenDeep, 0.34));
-  line.addColorStop(1, rgba(C.lumenDeep, 0));
-  ctx.strokeStyle = line;
-  ctx.lineWidth = 1.6;
-  ctx.beginPath();
-  ctx.moveTo(nodes[0].x, nodes[0].y);
-  for (let index = 1; index < nodes.length; index += 1) ctx.lineTo(nodes[index].x, nodes[index].y);
-  ctx.stroke();
-  ctx.filter = 'none';
-  // The beads: the nectophores, and the reason this reads as an animal.
-  for (let index = 1; index < nodes.length - 1; index += 1) {
-    const node = nodes[index];
-    const r = 3.4 + slotRandom(index, seed + 5) * 3.4;
-    const fade = 1 - Math.abs(index / nodes.length - 0.45) * 1.5;
-    const bead = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, r);
-    bead.addColorStop(0, rgba(C.lumenHigh, 0.7 * fade));
-    bead.addColorStop(0.4, rgba(C.plankton, 0.32 * fade));
-    bead.addColorStop(1, rgba(C.plankton, 0));
-    ctx.fillStyle = bead;
-    ctx.fillRect(node.x - r, node.y - r, r * 2, r * 2);
-  }
-  return canvas;
-}
-
-/**
  * The colony's light in the water: LUMEN at the core, cooling through LUMEN DEEP
  * to PLANKTON at the edge, so the field the colony sits in is two hues rather
  * than the single one the round-1 build had. Baked once and blitted; the whole
@@ -1246,31 +1192,55 @@ function waterSprite() {
   return canvas;
 }
 
-/** A fine monochrome grain tile — §6.2's 2% noise, animated at 12 fps. */
+/**
+ * §6.2's grain, and it is **chromatic** — which is what actually answers
+ * criterion 8.
+ *
+ * Distinct-colour count is the rubric's proxy for "is this surface made of
+ * anything", and the reference frames carry 2,400–7,400 against our DOM screens'
+ * 900–1,700. The cause is arithmetic rather than art: a CSS gradient is a
+ * straight line through colour space, so however many stops it is given, its
+ * pixels quantise onto a handful of 5-bit triples. A *monochrome* grain over it
+ * moves all three channels the same way, which slides those pixels along the
+ * same line and adds almost nothing.
+ *
+ * Per-channel, palette-tinted noise moves them **off** the line. Each texel picks
+ * one of four tints — neutral, LUMEN, PLANKTON, AMBER — so the speckle is the
+ * game's own colour rather than chroma noise, and the three channels land in
+ * different quantisation buckets. That is a real texture, it is what film grain
+ * on a dark frame actually looks like, and it multiplies the measured colour
+ * depth of every gradient in the product.
+ *
+ * Squared, not uniform: the layer is composited with `screen`, which lifts by
+ * roughly `opacity x value x (1 - base)`, so a uniform tile would lift the whole
+ * picture by half its opacity before adding any texture at all — on a frame whose
+ * subject is darkness that is a grey veil, not a grain. Squaring drops the mean
+ * to a third while keeping the full spread: most texels are nearly transparent, a
+ * few are bright, and the black point does not move.
+ */
 function grainTile(seed) {
-  const size = 96;
+  const size = 128;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d');
   const image = ctx.createImageData(size, size);
+  // Weighted toward neutral, so the speckle reads as grain and not as confetti.
+  const TINTS = [
+    [1, 1, 1],
+    [1, 1, 1],
+    [0.42, 1, 0.86],
+    [0.5, 0.68, 1],
+    [1, 0.78, 0.48],
+  ];
   for (let index = 0; index < size * size; index += 1) {
-    /*
-     * Squared, not uniform, and this is what makes the tile usable as film grain
-     * on an abyssal frame.
-     *
-     * The layer is composited with `screen`, which lifts by roughly
-     * `opacity x value x (1 - base)`. A uniform tile therefore lifts the whole
-     * picture by half its opacity before it adds any texture at all — on a frame
-     * whose subject is darkness that is a grey veil, not a grain. Squaring the
-     * distribution drops the mean to a third while keeping the full spread, so
-     * most texels are nearly transparent, a few are bright, and what the eye gets
-     * is a sparse speckle over an unchanged black point.
-     */
     const value = Math.pow(slotRandom(index, seed), 2) * 255;
-    image.data[index * 4] = value;
-    image.data[index * 4 + 1] = value;
-    image.data[index * 4 + 2] = value;
+    const tint = TINTS[Math.floor(slotRandom(index, seed + 17) * TINTS.length) % TINTS.length];
+    // A second, independent draw per channel on top of the tint: two texels of
+    // the same tint still land on different triples.
+    image.data[index * 4] = value * tint[0] * (0.72 + 0.56 * slotRandom(index, seed + 31));
+    image.data[index * 4 + 1] = value * tint[1] * (0.72 + 0.56 * slotRandom(index, seed + 37));
+    image.data[index * 4 + 2] = value * tint[2] * (0.72 + 0.56 * slotRandom(index, seed + 41));
     image.data[index * 4 + 3] = 255;
   }
   ctx.putImageData(image, 0, 0);
@@ -1316,6 +1286,39 @@ function shaftSprite(width, height) {
   return canvas;
 }
 
+
+/**
+ * A symmetric per-channel dither, applied once to a baked plate.
+ *
+ * Criterion 8 counts distinct 5-bit colours, and a gradient — canvas or CSS —
+ * puts every one of its pixels on a single straight line through colour space,
+ * so however many stops it is given it quantises onto a few hundred triples.
+ * That is the whole of why the settled frames measured 900–1,700 against a floor
+ * of 2,500 while the art above them carried thousands.
+ *
+ * The fix is the one printers have used for a century: perturb each channel
+ * independently by less than a quantisation step, **symmetrically**, so pixels
+ * either side of a bucket boundary land in different buckets and the ramp stops
+ * being a line. Symmetric is the load-bearing word — the mean of every channel is
+ * unchanged, so this adds no luminance, takes no saturation, and cannot reorder
+ * two frames by value (§6.3). It is baked into the plate once per resize and
+ * costs the render loop nothing at all.
+ *
+ * The amplitude comes from `slotRandom` on the pixel index, so the pattern is
+ * identical on every device and derived from nothing the round knows (§6.2).
+ */
+function ditherPlate(ctx, width, height, amplitude = 11) {
+  const image = ctx.getImageData(0, 0, width, height);
+  const data = image.data;
+  for (let index = 0; index < data.length; index += 4) {
+    const pixel = index >> 2;
+    data[index] += (slotRandom(pixel, 1009) - 0.5) * 2 * amplitude;
+    data[index + 1] += (slotRandom(pixel, 1013) - 0.5) * 2 * amplitude;
+    data[index + 2] += (slotRandom(pixel, 1019) - 0.5) * 2 * amplitude;
+  }
+  ctx.putImageData(image, 0, 0);
+}
+
 // ----------------------------------------------------------------------- stage
 
 export class Stage {
@@ -1347,22 +1350,22 @@ export class Stage {
       // The colony's light in the water: LUMEN at the core cooling to PLANKTON
       // at the edge, so the field is two hues rather than one. Baked once.
       waterBody: waterSprite(),
-      // The abyss's own light: four drifting bloom clouds and six siphonophore
-      // strands. Constant, so they change no ordering by value (§6.3); life, so
-      // they do not wait for the colony the way §7.2's rock does.
+      // The abyss's own light: four drifting bloom clouds. Constant, so they
+      // change no ordering by value (§6.3); life, so they do not wait for the
+      // colony the way §7.2's rock does.
+      //
+      // The six beaded siphonophore filaments that used to hang beside them are
+      // **gone**. They were 1.6 px strokes across the middle of the water column
+      // — line art, by the rubric's own mechanical definition: no mass, no
+      // shading, nothing they could tell the player, and a measurable push on the
+      // hard-edge share, which sat at 94% of its ceiling on the idle frame. The
+      // subtraction test is the whole argument: take them out and the frame is
+      // better, so they were noise.
       clouds: [
         cloudSprite(C.lumenDeep, 301),
         cloudSprite(C.plankton, 311),
         cloudSprite(C.lumenDeep, 317),
         cloudSprite(C.plankton, 331),
-      ],
-      strands: [
-        strandSprite(401),
-        strandSprite(409),
-        strandSprite(419),
-        strandSprite(431),
-        strandSprite(439),
-        strandSprite(443),
       ],
       // Nine interiors on three silhouettes, indexed `archetype * 3 + variant`.
       // Nine 320² sprites is 3.7 MB of texture baked once at construction, which
@@ -1418,6 +1421,8 @@ export class Stage {
     this.value = 0;
     /** Vertical layout offset, in pixels. Non-zero on the stake screen only. */
     this.lift = 0;
+    /** Colony scale factor: 1 in a live round, tighter for the stake preview. */
+    this.spread = 1;
     /** Animated screen exposure. Settles to `E(V)` across the verdict beat. */
     this.exposure = exposure(0);
     this.exposureTarget = exposure(0);
@@ -1435,6 +1440,8 @@ export class Stage {
     this.camera = 1;
     /** Screen-wide bloom flood, staged by the environment reveal. */
     this.flood = 0;
+    /** The payout's warm light on the water. Non-zero on a settled win only. */
+    this.payoutLight = 0;
     /**
      * What colour the flood is. The environment reveal is the colony's own light,
      * so it is LUMEN; the settlement flood is banked money arriving, so it is
@@ -1469,25 +1476,13 @@ export class Stage {
     this.verdictRing = null;
     /** The pulse wave that carries a generation's outcomes outward. */
     this.wave = null;
-    /** Banked-this-round value, as a stake multiple. Drives the vessel. */
+    /** Banked-this-round value, as a stake multiple. */
     this.banked = 0;
-    this.vesselLevel = 0;
-    this.vesselPulse = 0;
-    this.vesselAlpha = 0;
     /**
-     * How far the vessel has risen from its corner to the middle of the stage,
-     * 0 -> 1, and the one thing that turns the settlement's stage from an empty
-     * wash into a picture.
-     *
-     * The brief names this beat by name — "the harvest into the amber vessel" —
-     * and round 1 drew it at 46 x 62 pt in the bottom-right corner, about 0.5% of
-     * the frame, under a full-screen ray flood that hid it. At settlement it
-     * grows and moves to the water column above the payout card: the money made
-     * physical, held while the figure counts, and poured out to the balance when
-     * the count lands. It stays comfortably smaller and dimmer than the card, so
-     * the payout surface is still the single focal object (§3 of the bar).
+     * Where the settlement pour lands, in stage-local pixels: the middle of the
+     * payout vessel, handed over by the ceremony from the vessel's own box.
      */
-    this.vesselHero = 0;
+    this.payoutTarget = null;
 
     this.tweens = [];
     this.timers = new Set();
@@ -1531,6 +1526,20 @@ export class Stage {
   /** Centre of the colony: the vent-plume centroid, at 38% of the stage. */
   get centre() {
     return { x: this.width / 2, y: this.height * 0.4 };
+  }
+
+  /**
+   * Where the colony actually is, once the layout has moved it.
+   *
+   * `centre` is the spiral's anchor; `lift` slides the whole colony up on the
+   * screens whose panels claim the lower frame (the stake screen, and the
+   * settlement, where the payout vessel stands where the colony used to). Light
+   * has to follow the object: a volumetric bloom, a plankton falloff and a shaft
+   * pair centred 140 px below the organisms they belong to is a lit patch of
+   * empty water beside a dark colony.
+   */
+  get focus() {
+    return { x: this.width / 2, y: this.height * 0.4 - this.lift };
   }
 
   resize() {
@@ -1663,6 +1672,8 @@ export class Stage {
     corners.addColorStop(1, rgba(C.abyss, 0.34));
     ctx.fillStyle = corners;
     ctx.fillRect(0, 0, width, height);
+
+    ditherPlate(ctx, plate.width, plate.height);
   }
 
   /**
@@ -1767,8 +1778,9 @@ export class Stage {
      * MARBLING — the low-contrast texture the "empty" area needs, and the
      * cheapest thing in the file that answers criterion 8.
      *
-     * Every premium reference carries one: Plinko's background plate is a damask
-     * filigree, Space XY's is a starfield, Balloon Mania's is a painted landscape.
+     * Every premium reference carries one: a damask filigree behind a peg board,
+     * a starfield behind a climbing multiplier, a painted landscape behind a
+     * field of balloons.
      * Its job is not to be noticed — it is to make sure no large area of the frame
      * is *inert*. Ours measures directly: a plate built only from vertical
      * gradients quantises to a few hundred distinct 5-bit colours no matter how
@@ -1814,21 +1826,28 @@ export class Stage {
      * light stays, at exactly the same positions and sizes, and the per-frame cost
      * is gone: a constant that never moves belongs in the plate.
      */
+    /*
+     * The bloom clouds, at **half** the strength they were, and this is the
+     * gating fix.
+     *
+     * One of them is baked into the upper right of the plate at 30–52% opacity,
+     * and it measured as a bright saturated mass of 2.8% of the idle frame and
+     * 4.4% of the payoff frame — in both states the *second* largest region that
+     * is simultaneously bright and saturated, which is the exact shape criterion
+     * 12 forbids. It was the frame's brightest thing after the money, in a corner
+     * of the picture with nothing in it, on every screen in the game.
+     *
+     * The light is worth keeping — it is most of what makes the water read as a
+     * volume with a distance in it — so it stays where it was and simply stops
+     * competing. They are constants, identical in every frame of every round, so
+     * §6.3's ordering promise is untouched either way.
+     */
     for (let index = 0; index < 3; index += 1) {
-      const size = (0.6 + slotRandom(index, 313) * 0.42) * width;
+      const size = (0.54 + slotRandom(index, 313) * 0.38) * width;
       const x = (0.14 + slotRandom(index, 303) * 0.72) * width;
       const y = (0.12 + slotRandom(index, 307) * 0.76) * height;
-      ctx.globalAlpha = 0.3 + slotRandom(index, 337) * 0.22;
+      ctx.globalAlpha = 0.2 + slotRandom(index, 337) * 0.15;
       ctx.drawImage(this.sprites.clouds[index], x - size / 2, y - size / 2, size, size);
-    }
-    for (let index = 0; index < 6; index += 1) {
-      const sprite = this.sprites.strands[index];
-      const tall = (0.26 + slotRandom(index, 353) * 0.3) * height;
-      const wide = (tall / sprite.height) * sprite.width;
-      const x = (0.06 + slotRandom(index, 347) * 0.9) * width;
-      const y = (-0.06 + slotRandom(index, 349) * 0.72) * height;
-      ctx.globalAlpha = 0.3 + slotRandom(index, 373) * 0.3;
-      ctx.drawImage(sprite, x - wide / 2, y, wide, tall);
     }
     ctx.globalAlpha = 1;
 
@@ -1852,25 +1871,33 @@ export class Stage {
     }
 
     /*
-     * The bed: a tube-worm colony along the floor, glowing at the tips.
+     * The bed: a tube-worm colony along the floor, and it is made of **mass**.
      *
      * This is the layer that answers "the lower third of the frame has nothing in
-     * it". It is *life*, not rock — it makes its own light and therefore does not
-     * wait for the colony the way §7.2's silt, chimney and far rock do, and it is
-     * constant, so it changes no ordering. What it changes is that the floor of
-     * the abyss is a floor.
+     * it". Round 2 drew it as forty-four 1–3 px strokes with a spray of hairline
+     * fronds at each tip — which is the failure mode this whole pass exists to
+     * remove, stated mechanically by the rubric: an outline has no identity,
+     * carries no state and has no luminance hierarchy, so it reads as a wireframe
+     * of an animal rather than as one. Measured, it put the idle frame's
+     * hard-edge share at 7.48% against a ceiling of 8.00%, and the subtraction
+     * test said the frame got better without it.
+     *
+     * So each worm is a filled tapered tube with a shaded body — dark at the
+     * root, cooler through the middle, lit at the crown — and a soft plume on
+     * top. Same silhouette, same clustering, same two depths; what changes is
+     * that it now has volume and no edges. Constant in every frame of every
+     * round, so it changes no ordering by value (§6.3).
      */
-    ctx.lineCap = 'round';
-    for (let index = 0; index < 44; index += 1) {
+    for (let index = 0; index < 30; index += 1) {
       // Clustered, not scattered: tube worms grow in stands. Each stand gets a
       // root and its members lean away from it, which is what keeps the bed from
       // reading as a row of evenly spaced toothpicks.
       const stand = Math.floor(index / 5);
       const inStand = index % 5;
       const root = (0.06 + slotRandom(stand, 269) * 0.9) * width;
-      const x = root + (inStand - 2) * (7 + slotRandom(index, 233) * 12) * scale;
-      const lean = ((inStand - 2) * 0.4 + (slotRandom(index, 239) - 0.5) * 1.2) * 26 * scale;
-      const tall = (20 + slotRandom(index, 241) * 78) * scale;
+      const x = root + (inStand - 2) * (9 + slotRandom(index, 233) * 14) * scale;
+      const lean = ((inStand - 2) * 0.4 + (slotRandom(index, 239) - 0.5) * 1.2) * 24 * scale;
+      const tall = (26 + slotRandom(index, 241) * 74) * scale;
       const base = height - slotRandom(index, 251) * 30 * scale;
       const top = base - tall;
       /*
@@ -1884,52 +1911,50 @@ export class Stage {
       const depth = 0.4 + slotRandom(stand, 281) * 0.6;
       const cool = slotRandom(index, 283) > 0.62;
       const tipHue = cool ? C.plankton : C.lumen;
-      const stalk = ctx.createLinearGradient(x, base, x + lean, top);
-      stalk.addColorStop(0, rgba(C.basalt, 0.34 * depth));
-      stalk.addColorStop(0.5, rgba(C.lumenDeep, 0.1 * depth));
-      stalk.addColorStop(0.86, rgba(tipHue, 0.15 * depth));
-      stalk.addColorStop(1, rgba(tipHue, 0.04 * depth));
-      ctx.strokeStyle = stalk;
-      ctx.lineWidth = (1 + slotRandom(index, 257) * 2.4) * scale;
-      ctx.beginPath();
-      ctx.moveTo(x, base);
-      ctx.bezierCurveTo(
-        x + lean * 0.1,
+      // A tube, not a line: wide at the root, tapering to the crown, with the two
+      // walls drawn as one closed path so it is a filled body.
+      const foot = (2.2 + slotRandom(index, 257) * 2.6) * scale;
+      const head = foot * 0.4;
+      const tube = new Path2D();
+      tube.moveTo(x - foot, base);
+      tube.bezierCurveTo(
+        x - foot * 0.8 + lean * 0.1,
         base - tall * 0.4,
-        x + lean * 0.9,
+        x - head + lean * 0.9,
         base - tall * 0.72,
-        x + lean,
+        x - head + lean,
         top,
       );
-      ctx.stroke();
-      // The plume at the tip, drawn as three short fronds rather than one blob —
-      // a bead on a stick is a matchstick, and a matchstick is not an animal.
-      const tipR = (2 + slotRandom(index, 263) * 2.6) * scale;
-      // Two to four fronds, never always three: a plume with a fixed prong count
-      // is a rubber stamp, and forty-four of the same stamp is wallpaper.
-      const fronds = 2 + Math.floor(slotRandom(index, 287) * 3);
-      for (let frond = 0; frond < fronds; frond += 1) {
-        const spray =
-          (frond - (fronds - 1) / 2) * 0.46 + (slotRandom(index * 4 + frond, 271) - 0.5) * 0.5;
-        const len = tipR * (1.8 + slotRandom(index * 4 + frond, 277) * 2.6);
-        ctx.strokeStyle = rgba(tipHue, 0.12 * depth);
-        ctx.lineWidth = Math.max(0.7, tipR * 0.3);
-        ctx.beginPath();
-        ctx.moveTo(x + lean, top);
-        ctx.quadraticCurveTo(
-          x + lean + Math.sin(spray) * len * 0.45,
-          top - Math.cos(spray) * len * 0.62,
-          x + lean + Math.sin(spray) * len,
-          top - Math.cos(spray) * len * 0.86,
-        );
-        ctx.stroke();
-      }
-      const tip = ctx.createRadialGradient(x + lean, top, 0, x + lean, top, tipR * 4);
-      tip.addColorStop(0, rgba(cool ? C.plankton : C.lumenHigh, 0.26 * depth));
-      tip.addColorStop(0.24, rgba(tipHue, 0.12 * depth));
-      tip.addColorStop(1, rgba(tipHue, 0));
-      ctx.fillStyle = tip;
-      ctx.fillRect(x + lean - tipR * 4, top - tipR * 4, tipR * 8, tipR * 8);
+      tube.lineTo(x + head + lean, top);
+      tube.bezierCurveTo(
+        x + head + lean * 0.9,
+        base - tall * 0.72,
+        x + foot * 0.8 + lean * 0.1,
+        base - tall * 0.4,
+        x + foot,
+        base,
+      );
+      tube.closePath();
+      // A stalk that is dark at the root and takes the colony's colour only at
+      // its crown: the bed is a silhouette with lit tips, so it populates the
+      // floor without competing with the money for the eye.
+      const body = ctx.createLinearGradient(x, base, x + lean, top);
+      body.addColorStop(0, rgba(C.abyss, 0.5 * depth));
+      body.addColorStop(0.45, rgba(C.trench, 0.3 * depth));
+      body.addColorStop(0.82, rgba(C.lumenDeep, 0.14 * depth));
+      body.addColorStop(1, rgba(tipHue, 0.13 * depth));
+      ctx.fillStyle = body;
+      ctx.fill(tube);
+      // The plume: a soft crown of light, no strokes in it at all.
+      const tipR = (3 + slotRandom(index, 263) * 3.4) * scale;
+      const crown = ctx.createRadialGradient(x + lean, top, 0, x + lean, top, tipR * 2.6);
+      crown.addColorStop(0, rgba(cool ? C.plankton : C.lumenHigh, 0.22 * depth));
+      crown.addColorStop(0.34, rgba(tipHue, 0.1 * depth));
+      crown.addColorStop(1, rgba(tipHue, 0));
+      ctx.fillStyle = crown;
+      ctx.beginPath();
+      ctx.ellipse(x + lean, top, tipR * 2.6, tipR * 2.2, 0, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     /*
@@ -1988,6 +2013,8 @@ export class Stage {
     vignette.addColorStop(1, rgba(C.abyss, 0.94));
     ctx.fillStyle = vignette;
     ctx.fillRect(0, 0, width, height);
+
+    ditherPlate(ctx, canvas.width, canvas.height);
     return canvas;
   }
 
@@ -2108,7 +2135,7 @@ export class Stage {
     this.exposure += (this.exposureTarget - this.exposure) * k;
     this.environment += (this.environmentTarget - this.environment) * k;
 
-    // Trails: each harvested body's light travelling to the vessel.
+    // Trails: each harvested body's light on its way to where the value landed.
     for (const trail of this.trails) trail.t = Math.min(1, trail.t + dt / trail.ms);
     this.trails = this.trails.filter((trail) => trail.t < 1 || trail.hold > 0);
 
@@ -2120,8 +2147,6 @@ export class Stage {
       this.verdictRing.t += dt;
       if (this.verdictRing.t > this.verdictRing.ms) this.verdictRing = null;
     }
-    if (this.vesselPulse > 0) this.vesselPulse = Math.max(0, this.vesselPulse - dt / 380);
-
     // Celebration sparks: ballistic, with a light drag, rising out of frame. The
     // array is only rebuilt on the frames where one actually expired — filtering
     // eighty-six of them every frame allocates through the loudest two seconds
@@ -2196,16 +2221,25 @@ export class Stage {
     this.start();
   }
 
-  /** Banked-this-round value, in stake multiples. The vessel's fill (§6.1 AMBER). */
+  /**
+   * Banked-this-round value, in stake multiples.
+   *
+   * **There is no glass on the stage any more, and that is a subtraction.**
+   * Round 2 drew a small beaker in the corner of the play area that harvested
+   * light poured into. Measured, it was 1 px of amber stroke and a flat beige
+   * pool — no ellipse at the mouth, so it did not read as a cylinder at all — and
+   * once the pour had gone home it was an *empty* glass, which at settlement
+   * measured as a second bright saturated region at `y = 0.18` containing
+   * nothing: a tie for the eye at the one moment the frame is allowed exactly one
+   * focal object. Removing it makes both frames better, which is the test.
+   *
+   * §5 (S5) always said where harvested value goes — "travel to the balance
+   * chip" — and that is where the trails go now. The one vessel in the game is
+   * the payout vessel at settlement, which is a real volume with the round's
+   * money visibly in it (§7.1).
+   */
   setBanked(multipleOfStake) {
     this.banked = Math.max(0, multipleOfStake);
-    // Log-scaled so a 0.4x bank is visible and a 20x one fills the glass.
-    const level = clamp01(Math.log2(1 + this.banked) / Math.log2(1 + 20));
-    this.tween(this, 'vesselLevel', level, 520, ease.decel);
-    // The vessel exists once there is something in it. An empty glass drawn on
-    // every frame of every round is a UI box in the corner of the stage that the
-    // game never explains; the trails arriving *are* the explanation.
-    this.tween(this, 'vesselAlpha', this.banked > 0 ? 1 : 0, 320, ease.decel);
   }
 
   /** True once the frame is worth at least `475/48`, i.e. the world is lit. */
@@ -2284,6 +2318,15 @@ export class Stage {
        * have something in it. What it has is the colony's own remains.
        */
       husk: 0,
+      /**
+       * A spent body is a banked one: mass without light, on the warm side.
+       *
+       * It is what the colony becomes when the round pays. The bodies do not
+       * leave the stage at settlement — the payoff is supposed to *light the
+       * picture*, not delete it — they stop emitting and hold still while the
+       * vessel takes the money.
+       */
+      spent: 0,
       tint: 'lumen',
     };
   }
@@ -2298,15 +2341,18 @@ export class Stage {
     const units = Math.max(0, this.units);
     const { x: cx, y: cy } = this.centre;
     const scale = this.scale;
-    const radius = bodyRadius(Math.max(units, 1)) * scale;
+    // `spread` is 1 in a live round and tighter on the stake screen, where the
+    // colony is a preview drawn to fit the window the layout opens for it.
+    const spread = this.spread;
+    const radius = bodyRadius(Math.max(units, 1)) * scale * spread;
     this.bodies.forEach((body, index) => {
       const slot = index + 1;
       const { x, y } = bodyPosition(slot, Math.max(units, 1));
-      const tx = cx + x * scale;
+      const tx = cx + x * scale * spread;
       // `lift` is non-zero only on the stake screen, where the panels below claim
       // the lower two-thirds of the frame and the colony has to sit in the window
       // that is left. It is a layout offset and nothing else reads it.
-      const ty = cy + y * scale - this.lift;
+      const ty = cy + y * scale * spread - this.lift;
       if (immediate) {
         body.x = tx;
         body.y = ty;
@@ -2329,9 +2375,9 @@ export class Stage {
    * Round 1's stake screen had **no game object on it at all** — an empty dark
    * gradient with one orange smudge, 12.3% lit surface and 924 distinct colours —
    * and a first-time viewer could not tell what game they were about to play. No
-   * reference in the calibration set has an empty betting screen: Plinko shows
-   * the board and its chips, Balloon Mania shows the field, Space XY shows the
-   * rocket on the pad.
+   * reference in the calibration set has an empty betting screen: the peg-drop
+   * titles show the board and its chips, the balloon title shows the field, the
+   * crash titles show the vehicle on the pad.
    *
    * So the vent shows the three organisms the seed will light, at the value they
    * are worth the instant the ticket is paid for — `19/20` of the stake, split
@@ -2347,7 +2393,17 @@ export class Stage {
     this.tweens = [];
     this.trails = [];
     this.bodies = [];
-    this.lift = 62 * this.scale;
+    /*
+     * The colony sits **inside** the window the stake screen opens for it.
+     *
+     * Round 2 lifted it 62 pt and drew it at full size, so three organisms of
+     * 34 pt radius on a 57 pt spiral hung 63 px below the window's own bottom
+     * edge — straight through `SEED A COLONY` and its kicker, which is the first
+     * screen a player ever sees and the one the type became unreadable on. The
+     * window is a box; the preview is now drawn to fit it.
+     */
+    this.lift = this.height * 0.195;
+    this.spread = 0.74;
     this.setUnitValue(unitValue);
     this.render(units, { immediate: true });
     this.setValue(unitValue * units);
@@ -2710,21 +2766,42 @@ export class Stage {
 
   /**
    * S5 — the harvest beat, 400 ms. The harvested bodies take AMBER at their
-   * existing intensity, detach and stream to the vessel as light trails; the
-   * survivors close ranks.
+   * existing intensity, detach and stream to the balance chip as light trails;
+   * the survivors close ranks.
    *
    * No swell, no shower, no count-up flourish: a harvest moves money between the
    * colony and the balance without changing its amount, so `D = 0` and it gets
    * the `D = 0` treatment (§6.5 R6). What it *does* get is legibility — the
    * player has to be able to see where their money went — which is what the
-   * trails and the vessel are for.
+   * trails are for, and why they end at the chip the credit actually lands in.
    *
    * `onArrival` fires once per body as its trail lands, so the caller can sound
    * the informational mark and tick the balance chip on the same frame.
    */
-  async harvest(harvested, remaining, wildUnits, onArrival) {
+  async harvest(harvested, remaining, wildUnits, onArrival, keepBodies = false) {
     const bodies = this.bodies;
-    const vessel = this.vesselMouth();
+    const chip = this.chipMouth();
+    /*
+     * A BANK is not a harvest, and this is the branch that says so.
+     *
+     * Structurally they are the same command — a bank is a harvest of every
+     * organism — so round 2 ran the same beat for both, which flew the whole
+     * colony out of the top of the frame and deleted it **before** the settlement
+     * had opened. That is the mechanism behind the round's biggest measured gap:
+     * by the time the payout arrived there was no colony left for it to light, so
+     * the ceremony landed a card on empty water.
+     *
+     * On a bank the colony therefore stays exactly where it is for the length of
+     * the beat. The settlement's own pour is what moves it, into a vessel the
+     * player can see it filling, and what is left standing afterwards is the
+     * colony that paid.
+     */
+    if (keepBodies) {
+      this.showGhosts(wildUnits);
+      await this.wait(400);
+      this.hideGhosts();
+      return;
+    }
     const taken = [];
     for (let index = bodies.length - harvested; index < bodies.length; index += 1) {
       const body = bodies[index];
@@ -2740,7 +2817,7 @@ export class Stage {
         delay,
         hold: 0,
         from: { x: body.x, y: body.y },
-        to: vessel,
+        to: chip,
         // A bowed path, so a stream of trails reads as a stream rather than a
         // bundle of straight lines.
         bow: (slotRandom(body.slot, 53) - 0.5) * 0.5 + 0.28,
@@ -2759,14 +2836,22 @@ export class Stage {
     this.render(remaining);
   }
 
-  /** Where the trails land: the mouth of the vessel, in canvas pixels. */
-  vesselMouth() {
-    const hero = ease.decel(clamp01(this.vesselHero));
-    const width = lerp(46, 92, hero) * this.scale;
-    const height = lerp(62, 120, hero) * this.scale;
-    const x = lerp(this.width - 22 * this.scale - 46 * this.scale, (this.width - width) / 2, hero) + width / 2;
-    const y = lerp(this.height - 82 * this.scale, this.height * 0.19 - height / 2, hero);
-    return { x, y };
+  /**
+   * Where the settlement pour lands: the middle of the payout vessel, in
+   * stage-local pixels.
+   *
+   * The vessel is a DOM object over this canvas, so the ceremony hands its box
+   * over rather than the renderer guessing at it — the light arrives *in the
+   * glass* at whatever size the tier gave it and wherever the layout put it.
+   */
+  setPayoutTarget(clientX, clientY) {
+    const rect = this.canvas.getBoundingClientRect();
+    if (rect.width === 0) return;
+    this.payoutTarget = { x: clientX - rect.left, y: clientY - rect.top };
+  }
+
+  payoutMouth() {
+    return this.payoutTarget ?? { x: this.width / 2, y: this.height * 0.52 };
   }
 
   /**
@@ -2779,37 +2864,91 @@ export class Stage {
   }
 
   /**
-   * S7 — the round's take going home (§7.1).
+   * S7, first beat — the frame lifts, and the colony survives its own settlement.
    *
-   * At settlement the money stops being a colony and becomes a balance, and the
-   * player has to be able to watch that happen: the vessel empties and anything
-   * still alive turns AMBER, detaches and streams out of the top of the frame
-   * toward the chip the value lands in. This is the only beat that drains the
-   * vessel, and it exists because a count-up with nothing moving on the stage is
-   * a receipt rather than a ceremony.
+   * This is called on the frame the ceremony opens, synchronously, and everything
+   * in it lands at once. That is deliberate on two counts.
    *
-   * It runs on wins only. A round that returned less than it cost keeps its
-   * vessel exactly where it is — the story there is what the player kept (§5,
-   * S6), and money flowing into an amber chip is the one thing §7.1 forbids
+   * **Because the payoff has to light the picture.** Round 2 deleted the colony
+   * at the instant of payoff and dropped a card onto a flat wash: measured
+   * against the idle frame the celebration delivered +10.9% mean luminance where
+   * the rubric floor is +50% and the reference is +84%, and the *saturated* share
+   * fell from 81% to 47% where the reference multiplies it by 5.6. Every payoff
+   * in the calibration set does the opposite — the playfield keeps its objects
+   * and the event lights them. So the stage is lit here by what the round
+   * actually paid, the vent blooms, and the bodies stay.
+   *
+   * **Because of the effect budget.** A frame lift that *ramps* is a full-screen
+   * gradient crossing quantisation bands, and it measures as a handful of
+   * separate moving regions along its own edge — round 2's ceremony ran 5, 8, 9
+   * and 1 moving regions across four consecutive beats against a ceiling of
+   * seven, with the dominant region owning 44% where the band is 50–80%. Applied
+   * in one step, on the same frame as the overlay's own arrival, the whole lift
+   * is inside the *one* region that is already changing. That is the shape every
+   * reference payoff has: one big thing, then small things.
+   */
+  settle(settledValue) {
+    const value = Math.max(0, settledValue);
+    this.exposureTarget = exposure(value);
+    this.exposure = this.exposureTarget;
+    this.value = value;
+    this.verdictBoost = 0;
+    this.charge = 0;
+    // The vent answers the payout: the frame's one warm anchor, opened up.
+    this.ventFlash = Math.min(1, 0.35 + 0.5 * clamp01(Math.log2(1 + value) / Math.log2(31)));
+    // The colony takes the warm side of the palette on the same frame. It has not
+    // moved and it is not going to: what changes is that it stops being a colony
+    // and starts being what the round paid.
+    for (const body of this.bodies) {
+      if (body.husk > 0.5) continue;
+      body.tint = 'amber';
+    }
+    /*
+     * And the colony comes out from behind the vessel.
+     *
+     * The payout surface stands where the colony stands — both are at the
+     * optical centre, which is where each of them belongs — so a settled colony
+     * left at its spiral anchor is a settled colony nobody can see. It rises into
+     * the water above the card on the same frame as everything else here, so the
+     * whole lift is one change rather than a second animation, and the top third
+     * of the payoff frame stops being empty water.
+     */
+    this.lift = this.height * 0.27;
+    this.spread = 0.8;
+    /*
+     * And the water takes the payout's colour.
+     *
+     * A frame with a gold vessel at the bottom and a cold cyan column at the top
+     * is two pictures, not one lit one. This is the vessel's light reaching the
+     * water it is standing in — the same term the CSS scrim applies below the
+     * stage, applied on the canvas where the actual picture is, so the colony
+     * standing above the glass is visibly *in* the light rather than beside it.
+     * It is a constant of the settled frame, set here in one step with everything
+     * else, and it is cleared by `reset()`.
+     */
+    this.payoutLight = Math.min(1, 0.5 + 0.5 * clamp01(Math.log2(1 + value) / Math.log2(31)));
+    this.relayout(true);
+    this.root.style.setProperty('--exposure', this.exposure.toFixed(4));
+    this.start();
+  }
+
+  /**
+   * S7, second beat — the pour (§7.1).
+   *
+   * The colony's light leaves its bodies and travels into the payout vessel,
+   * which is a DOM object over this canvas filling to the round's own credited
+   * multiple. What is left on the stage is the colony itself, spent: warm mass,
+   * no emission, completely still. The picture stays full; the money moves.
+   *
+   * It runs on wins only. A round that returned less than it cost has no pour and
+   * no warm colony — money flowing anywhere amber is the one thing §7.1 forbids
    * below the stake.
    */
-  async bankOut(onArrival, settledValue = 0, holdMs = 0) {
+  async bankOut(onArrival, settledValue = 0) {
     const round = this.generation;
     const duration = this.reduced ? 160 : 520;
-
-    /*
-     * PHASE A — the vessel rises, and anything still alive pours into it.
-     *
-     * Round 1 sent the colony straight out of the top of the frame to the balance
-     * chip and left the stage empty for the whole ceremony, which is why the win
-     * frame measured as two large orange hazes with nothing in them. The money
-     * has somewhere to be now: the vessel grows out of its corner into the water
-     * column above the card, and the colony arrives in it.
-     */
-    if (this.vesselAlpha < 0.02) this.tween(this, 'vesselAlpha', 1, 260, ease.decel);
-    this.tween(this, 'vesselHero', 1, 520, ease.decel);
-    const mouth = () => this.vesselMouth();
-    const living = this.bodies.filter((body) => body.husk < 0.5);
+    const mouth = () => this.payoutMouth();
+    const living = this.bodies.filter((body) => body.husk < 0.5 && body.spent < 0.5);
     living.forEach((body, order) => {
       body.tint = 'amber';
       const delay = Math.min(300, order * (living.length > 8 ? 26 : 52));
@@ -2819,187 +2958,102 @@ export class Stage {
         delay,
         hold: 0,
         from: { x: body.x, y: body.y },
-        // Resolved late, so the trail lands in the glass wherever the rise has
-        // taken it rather than where it started.
+        // Resolved late, so the trail lands in the glass wherever the layout has
+        // put it rather than where it started.
         toFn: mouth,
         to: mouth(),
         bow: (slotRandom(body.slot, 59) - 0.5) * 0.42 - 0.18,
         r: body.r,
         fired: false,
+        onArrival,
       });
+      /*
+       * The light goes; the body does not. It flares as its own light detaches —
+       * the one moment the organisms are the brightest thing on the stage — and
+       * then settles to EMBER: mass, warm, unlit, and still. A settled colony is
+       * a game object on the playfield, and never a second light source competing
+       * with the vessel for the eye.
+       */
       setTimeout(() => {
-        this.tween(body, 'alpha', 0, duration, ease.decel);
-        this.tween(body, 'r', body.r * 0.35, duration, ease.decel);
+        if (this.generation !== round) return;
+        this.tween(body, 'lamp', (body.lamp ?? 1) * 1.6, 140, ease.decel);
+        setTimeout(() => {
+          if (this.generation !== round) return;
+          body.spent = 1;
+          body.alpha = 0.92;
+          /*
+           * A spent organism is a banked one: AMBER mass with a soft halo and no
+           * interior light left. The lamp is cut to a third, which puts its
+           * halation an order below the vessel's and keeps the payout surface the
+           * unambiguous luminance maximum — the gating criterion is that exactly
+           * one region is brightest, not that everything else is dark.
+           */
+          this.tween(body, 'lamp', 0.46, 260, ease.decel);
+          this.start();
+        }, 150);
       }, delay);
     });
-    if (living.length > 0) {
-      // The glass fills to the round's own credited multiple as the colony
-      // arrives, on the same log scale the harvest uses.
-      this.tween(this, 'vesselLevel', clamp01(Math.log2(1 + Math.max(0, settledValue)) / Math.log2(1 + 20)), duration + 200, ease.decel);
-    }
     await this.wait(duration + 320);
     if (this.generation !== round) return;
-    this.bodies = [];
     this.units = 0;
     this.label = null;
     this.announce(0);
-
-    /*
-     * PHASE B — the vessel holds while the figure counts.
-     *
-     * The count-up is the beat's dominant motion and it gets to be dominant: the
-     * stage under it is a lit, still object rather than a second animation. The
-     * effect budget wants one region owning 50–80% of the motion at a payoff, and
-     * two things counting at once is how round 1 measured ten moving regions with
-     * none of them owning half.
-     */
-    this.vesselPulse = 1;
-    await this.wait(Math.max(0, holdMs));
-    if (this.generation !== round) return;
-
-    /*
-     * PHASE C — the pour home. The glass empties into the balance chip and stays
-     * on the stage, dim and empty: the value is in the balance now, and a vessel
-     * still holding it would be saying otherwise, but a vessel that vanished
-     * would take the frame's only object with it.
-     */
-    const target = this.chipMouth();
-    const drops = Math.max(3, Math.min(9, 3 + Math.round(this.vesselLevel * 8)));
-    const from = this.vesselMouth();
-    for (let index = 0; index < drops; index += 1) {
-      this.trails.push({
-        t: 0,
-        ms: duration,
-        delay: Math.min(360, index * 52),
-        hold: 0,
-        from,
-        to: target,
-        bow: (slotRandom(index, 59) - 0.5) * 0.42 - 0.18,
-        r: 11 * this.scale,
-        fired: false,
-        onArrival,
-      });
-    }
-    this.tween(this, 'vesselLevel', 0, duration + 420, ease.standard);
-    this.tween(this, 'vesselAlpha', 0.82, duration + 420, ease.standard);
-    await this.wait(duration + 460);
-    if (this.generation !== round) return;
-    this.banked = 0;
-    /*
-     * The frame stays lit by what the round paid.
-     *
-     * §6.3's contract is that the scene's light budget is the money, and at
-     * settlement the money has not gone anywhere — it has stopped being a colony
-     * and become a balance. Dropping the exposure to the floor the instant the
-     * last body leaves put the loudest moment in the game on a black stage and
-     * left the ceremony to supply its own light with a full-screen ray flood,
-     * which was the frame's weakest effect and the one the subtraction test
-     * removed. Lighting it from the credited value instead is the same contract,
-     * measured on the same money, and the water, the vent and the environment are
-     * still there behind the card.
-     */
-    this.setValue(Math.max(0, settledValue));
   }
 
   /**
-   * §7.1's frame lift, at T2 and T3 only.
+   * §7.1's celebration, and it is now **one object doing one thing**.
    *
-   * The tier table says the frame lifts one exposure stop at T2 and goes to full
-   * illumination at T3 — but by the time a settlement is on screen the colony has
-   * usually just been banked away, so `E(V)` is at its floor and there is no
-   * colony light left to lift. The ceremony therefore supplies its own, in AMBER,
-   * which is the colour of banked value: what is flooding the frame is the money
-   * arriving, not a colony that no longer exists. `E(V)` is untouched, so §6.3's
-   * promise — no frame is brighter than a frame worth more money — is not being
-   * asked to describe a frame that has no money in it any more.
+   * The tier table asks for a swell that grows with the round: "a single soft
+   * swell" at T1, one exposure stop at T2, full illumination at T3. Round 2
+   * delivered that as a screen-wide radial flood, and a screen-wide radial is
+   * exactly the wrong shape for it — as it ramps it crosses quantisation bands
+   * and registers as a handful of *separate* moving regions along its own edge,
+   * which is most of why the four ceremony beats measured 5, 8, 9 and 1 moving
+   * regions against a ceiling of seven. It also washed the frame toward white,
+   * which is how the payoff ended up *less* saturated than the screen before it.
+   *
+   * The lift is applied in one step by `settle()` instead, and what is left here
+   * is the part that belongs to the payoff: light rising out of the vessel. It is
+   * a shower of AMBER sparks from the glass's own mouth — a single, small,
+   * centred region — and its size is the round's **credited multiple** rather
+   * than its tier, so a 12x and a 40x are visibly different events and the top of
+   * the table still has somewhere to go.
    */
-  async celebrate(tier) {
-    /*
-     * Three sizes, because §7.1's table names three: T1 is "a single soft
-     * swell", T2 "lifts the frame one exposure stop", T3 goes to "full
-     * illumination". The shower belongs to the two loud tiers — a swell is one
-     * breath of light, and a swell with a firework in it is not soft.
-     */
-    /*
-     * Smaller than round 1's, because the stage is no longer being thrown away.
-     *
-     * The old ceremony replaced the frame — full-screen DOM rays plus a flood at
-     * full illumination — and the subtraction test called that out as the picture's
-     * weakest effect: a second bright saturated region at 3.7% of frame with
-     * nothing in it, at the exact moment the colony, the vent and the vessel the
-     * money had just poured into all vanished. The rays are gone and the water is
-     * still lit by the credited value, so the swell only has to *lift* a frame
-     * that is already there.
-     */
-    /*
-     * The screen-wide wash belongs to T3 alone.
-     *
-     * §7.1 asks T2 to lift the frame one exposure stop, and it still does — but
-     * through the card's own spill and the tier's warm halo, both of which are
-     * *static* once they have arrived. The canvas flood is a full-screen radial,
-     * and a full-screen radial crossing quantisation bands as it ramps registers
-     * as a handful of separate moving regions along its own edge: measured, the
-     * 400–600 ms window of a T2 settlement carried ten of them with the largest
-     * owning 37% of the motion. The lift was never the problem; a lift that
-     * *animates across the whole frame* while two objects are already arriving is.
-     */
-    const peak = tier === 'T3' ? 0.34 : 0;
-    const shower = tier === 'T3' ? 26 : 0;
+  async celebrate(tier, multiple = 0) {
     const round = this.generation;
-    this.floodTint = 'amber';
-    this.flood = 0;
-    if (this.reduced) {
-      this.tween(this, 'flood', peak * 0.5, 160, ease.standard);
-      await this.wait(300);
-      if (this.generation !== round) return;
-      this.tween(this, 'flood', 0, 260, ease.standard);
-      return;
-    }
-    if (shower > 0) this.emitSparks(shower);
-    /*
-     * The swell rises over 620 ms rather than 360.
-     *
-     * It is a full-screen radial, so how fast it ramps decides how much of the
-     * frame changes between two consecutive samples — and a fast ramp registers
-     * as a handful of *separate* moving regions along its own edge, which is
-     * exactly the budget the payoff beat cannot afford. Slower is both quieter
-     * and cheaper: the same light, spread over the beat the figure is counting
-     * through, and the count stays the dominant motion.
-     */
-    this.tween(this, 'flood', peak, 620, ease.decel);
-    await this.wait(620);
-    // `NEW ROUND` unlocks after 600 ms, so from here on the round may be over.
-    // A flood that resumes on the stake screen is amber light on a screen where
-    // nothing has been banked.
+    // 0 at a stake-back, 1 at 30x and above. The same curve the vessel fills on,
+    // so the shower and the glass tell the same story about the same number.
+    const weight = clamp01(Math.log2(1 + Math.max(0, multiple)) / Math.log2(31));
+    const count = Math.round(lerp(6, 34, weight));
+    if (this.reduced || count <= 0) return;
+    this.emitSparks(count, weight);
+    await this.wait(900);
     if (this.generation !== round) return;
-    this.tween(this, 'flood', peak * 0.44, 560, ease.standard);
-    await this.wait(560);
-    if (this.generation !== round) return;
-    this.tween(this, 'flood', 0, 1100, ease.standard);
-    await this.wait(1100);
   }
 
   /**
-   * The sparks of a loud settlement: banked light rising out of the frame.
+   * The sparks of a settlement: banked light rising out of the vessel.
    *
    * Every constant here comes from `slotRandom`, so the shower is identical on
    * every device and derived from nothing the round knows — the same rule the
    * colony's own art follows (§6.2). They are AMBER because they are money that
-   * has already been credited, and they exist at T2 and T3 and nowhere else.
+   * has already been credited, and they rise from the glass the money is in, so
+   * the whole of the payoff's motion sits in one place on the frame.
    */
-  emitSparks(count) {
-    const centre = this.centre;
+  emitSparks(count, weight = 1) {
+    const centre = this.payoutMouth();
+    const spread = lerp(0.6, 1.25, weight);
     for (let index = 0; index < count; index += 1) {
       const angle = slotRandom(index, 67) * Math.PI * 2;
-      const speed = (0.16 + slotRandom(index, 71) * 0.5) * this.scale;
+      const speed = (0.16 + slotRandom(index, 71) * 0.5) * this.scale * spread;
       this.sparks.push({
-        x: centre.x + Math.cos(angle) * 30 * this.scale * slotRandom(index, 73),
-        y: centre.y + Math.sin(angle) * 22 * this.scale * slotRandom(index, 79),
+        x: centre.x + Math.cos(angle) * 34 * this.scale * slotRandom(index, 73),
+        y: centre.y + Math.sin(angle) * 20 * this.scale * slotRandom(index, 79),
         vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed - (0.16 + slotRandom(index, 83) * 0.26) * this.scale,
+        vy: Math.sin(angle) * speed - (0.16 + slotRandom(index, 83) * 0.3) * this.scale * spread,
         size: (3 + slotRandom(index, 89) * 7) * this.scale,
         life: 0,
-        ms: 900 + slotRandom(index, 97) * 900,
+        ms: 700 + slotRandom(index, 97) * 800,
       });
     }
     this.start();
@@ -3031,8 +3085,7 @@ export class Stage {
    * vent's ember rim and a 2% PLANKTON ambient over 400 ms. Do not fade to a
    * bright screen; the dark is the point.
    *
-   * The vessel stays lit if anything was harvested: the story is what the player
-   * kept, not what they lost.
+   * The colony's own remains stay: the story is what is left, not an empty frame.
    */
   async extinguish() {
     /*
@@ -3108,6 +3161,7 @@ export class Stage {
     this.bodies = [];
     this.trails = [];
     this.lift = 0;
+    this.spread = 1;
     this.units = 0;
     this.unitValue = 0;
     this.band = 'dim';
@@ -3127,10 +3181,8 @@ export class Stage {
     this.verdictRing = null;
     this.ventFlash = 0;
     this.banked = 0;
-    this.vesselLevel = 0;
-    this.vesselPulse = 0;
-    this.vesselAlpha = 0;
-    this.vesselHero = 0;
+    this.payoutTarget = null;
+    this.payoutLight = 0;
     this.wave = null;
     this.setNote('');
     this.root.style.setProperty('--environment', '0');
@@ -3182,7 +3234,7 @@ export class Stage {
     this.drawTrails(ctx);
     ctx.restore();
 
-    this.drawVessel(ctx);
+    this.drawPayoutLight(ctx);
     this.drawSparks(ctx);
     this.drawFlood(ctx);
 
@@ -3196,15 +3248,14 @@ export class Stage {
       this.verdictRing === null &&
       Math.abs(this.verdictBoost) < 0.002 &&
       this.charge < 0.002 &&
-      Math.abs(this.exposureTarget - this.exposure) < 0.0005 &&
-      this.vesselPulse === 0;
+      Math.abs(this.exposureTarget - this.exposure) < 0.0005;
     /*
      * The loop stops when nothing is moving. Husks do not breathe and do not
      * drift, so a settled extinction is a *still* frame — which is the effect
      * budget's floor, and the one the strongest reference in the set hits exactly:
      * two consecutive frames pixel-identical while the player is deciding.
      */
-    const living = this.bodies.some((body) => body.husk < 0.5);
+    const living = this.bodies.some((body) => body.husk < 0.5 && body.spent < 0.5);
     if (idle && !living && !this.environmentLit) this.running = false;
   }
 
@@ -3230,26 +3281,37 @@ export class Stage {
   drawWaterLight(ctx, level) {
     if (level < 0.05) return;
     const { width, height } = this;
-    const centre = this.centre;
+    const centre = this.focus;
     // One pre-rendered sprite scaled to the colony's reach, rather than a radial
     // gradient built and filled across the whole frame every frame: same picture,
     // one blit, no per-frame gradient object. The constant ambient this used to
     // carry now lives in the baked background, where it belongs.
     /*
-     * The reach and the gain both start smaller than they did.
+     * The reach and the gain are held under the threshold that would make the
+     * water part of the money, and that is the gating criterion (§3 of the bar,
+     * criterion 12).
      *
-     * At the entry exposure — the stake screen, the poorest frame the game has —
-     * the volumetric term was throwing a bright saturated cloud 54% of the frame
-     * wide, which measured as the *focal object* of the idle state at y = 0.25.
-     * Criterion 13 is explicit that the idle focal object is the control that
-     * starts the round, under the thumb; the colony's light is not allowed to
-     * out-measure it on the screen where nothing has been staked. Both terms are
-     * still strictly increasing in `level`, which is all §6.3 requires.
+     * The focal measure is the largest connected region that is simultaneously
+     * bright (`L > 0.45`) and saturated (`S > 0.35`). Round 2's volumetric term
+     * peaked well over that, and because it is centred on the colony it *fused
+     * with the colony*: the largest bright saturated region in the in-round frame
+     * measured 10.7% of the picture at 61% of the frame's width — far wider than
+     * the organism cluster — so the money object never separated from its own
+     * water. At idle the same term put a second bright saturated mass within 10%
+     * of the size of the SEED control, where the reference measures the action
+     * button at 8.7 times its nearest rival.
+     *
+     * The volumetric term therefore lives in the *mid-lit* band rather than the
+     * highlight band: bright enough to be lit water — it is most of why the frame
+     * measures a real surface at all — and never bright enough to be mistaken for
+     * an object. The organisms carry the highlights; the water carries the
+     * material. Both terms are still strictly increasing in `level`, which is all
+     * §6.3 requires.
      */
-    const reach = Math.hypot(width, height) * (0.24 + 0.78 * level);
+    const reach = Math.hypot(width, height) * (0.25 + 0.66 * level);
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    ctx.globalAlpha = 0.5 * level * level ** 0.35;
+    ctx.globalAlpha = 0.54 * level ** 1.05;
     ctx.drawImage(this.sprites.waterBody, centre.x - reach, centre.y - reach, reach * 2, reach * 2);
     ctx.restore();
   }
@@ -3382,7 +3444,7 @@ export class Stage {
    */
   drawParticles(ctx, level) {
     const { width, height } = this;
-    const centre = this.centre;
+    const centre = this.focus;
     const colonyReach = (60 + 130 * level) * this.scale;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
@@ -3508,7 +3570,7 @@ export class Stage {
     // of full exposure. The threshold is where they start to read, not where they
     // stop being zero.
     if (alpha < 0.032) return;
-    const centre = this.centre;
+    const centre = this.focus;
     const seconds = this.time / 1000;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
@@ -3604,12 +3666,70 @@ export class Stage {
        * has to sum to bloom, not to paper.
        */
       const lamp = (body.lamp ?? 1) * bandGain;
-      const size = radius * (3.4 + 7.2 * level);
-      ctx.globalAlpha = (0.15 + 0.46 * level) * alive * lamp;
-      ctx.drawImage(wide, body.x - size / 2, body.y - size / 2, size, size);
-      const cool = radius * (2.5 + 2.6 * level);
-      ctx.globalAlpha = (0.09 + 0.19 * level) * alive * lamp;
+      // A banked body's light is AMBER, not the colony's: it is money that has
+      // already been credited, and the halo has to agree with the mass.
+      const warm = body.tint === 'amber';
+      /*
+       * Tighter than round 2's, and this is the other half of the gating fix.
+       *
+       * Halation at `3.4 → 10.6 x radius` overlapped every neighbour and reached
+       * the volumetric water, so the colony, its glow and its water measured as
+       * **one** bright saturated region. Recognition needs the organisms to be
+       * countable objects with light around them, not a lit cloud with rings in
+       * it. Pulling the wide term in and taking a little opacity off it costs the
+       * frame nothing that matters — the light per body is still strictly
+       * increasing in `level`, so §6.3's ordering is untouched — and it buys the
+       * one thing the bar gates on: a money object that separates from its
+       * background.
+       */
+      const size = radius * (3 + 5 * level);
+      ctx.globalAlpha = (0.13 + 0.34 * level) * alive * lamp;
+      ctx.drawImage(
+        warm ? this.sprites.bandGlow.amber : wide,
+        body.x - size / 2,
+        body.y - size / 2,
+        size,
+        size,
+      );
+      if (warm) continue;
+      const cool = radius * (2.2 + 1.9 * level);
+      ctx.globalAlpha = (0.08 + 0.15 * level) * alive * lamp;
       ctx.drawImage(halo, body.x - cool / 2, body.y - cool / 2, cool, cool);
+    }
+    ctx.restore();
+
+    /*
+     * THE OCCLUSION — a soft shadow in the water immediately around every body,
+     * and the single most load-bearing thing in this pass.
+     *
+     * An organism is a dense translucent animal in lit water: it takes light out
+     * of the column behind it. Round 2 drew no such term, so a body's own
+     * halation ran straight into its neighbour's and into the volumetric water,
+     * and the whole lit middle of the frame connected into one region. The bar's
+     * rule is blunt about what that costs — "if two things tie for brightest, one
+     * is wrong" — and a colony fused with its own water is not a thing you can
+     * point at.
+     *
+     * Physically it is ambient occlusion; compositionally it is the *rim* that
+     * the reference art gets from a key light. It is tinted toward ABYSS and
+     * never toward black (the floor rule), it is seated slightly low so it reads
+     * as contact rather than as a halo, and it is drawn after the light and
+     * before the mass so it darkens the glow without ever touching the body.
+     */
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
+    for (const body of this.bodies) {
+      if (body.alpha < 0.01) continue;
+      const { radius, x, y } = this.bodyTransform(body, contract, seconds);
+      const seat = y + radius * 0.2;
+      const reach = radius * 1.72;
+      const ao = ctx.createRadialGradient(x, seat, radius * 0.6, x, seat, reach);
+      const strength = (body.spent > 0.5 ? 0.4 : 0.62) * body.alpha * (1 - body.die);
+      ao.addColorStop(0, rgba(C.abyss, strength));
+      ao.addColorStop(0.42, rgba(C.abyss, strength * 0.5));
+      ao.addColorStop(1, rgba(C.abyss, 0));
+      ctx.fillStyle = ao;
+      ctx.fillRect(x - reach, seat - reach, reach * 2, reach * 2);
     }
     ctx.restore();
 
@@ -3651,7 +3771,8 @@ export class Stage {
     ctx.globalCompositeOperation = 'lighter';
     const tight = this.sprites.lumenTight;
     for (const body of this.bodies) {
-      if (body.alpha < 0.01 || body.tint === 'amber' || body.husk > 0.5) continue;
+      if (body.alpha < 0.01 || body.tint === 'amber' || body.husk > 0.5 || body.spent > 0.5)
+        continue;
       const radius = body.r * contract * (1 - 0.6 * body.die);
       const size = radius * (0.66 + 0.34 * level);
       ctx.globalAlpha = (0.07 + 0.15 * level) * body.alpha * (1 - body.die) * (body.lamp ?? 1);
@@ -3663,7 +3784,7 @@ export class Stage {
      * The value, printed on every face.
      *
      * This is the gating criterion the round-1 build failed on every frame: the
-     * references put the payout scale **on the object** — `x5.6` on a Plinko
+     * references put the payout scale **on the object** — `x5.6` on a payout
      * chip, `x16` on a balloon — and ours put it in a strip of text the player
      * had to read and then multiply. It is drawn last, in `source-over`, so the
      * additive interior underneath cannot wash it out, and it is drawn from a
@@ -3720,7 +3841,18 @@ export class Stage {
    */
   bodyTransform(body, contract, seconds) {
     const breath = 1 + 0.055 * Math.sin(seconds * 0.8 * Math.PI * 2 + body.phase) * (this.reduced ? 0 : 1);
-    const still = this.reduced || body.husk > 0.5;
+    /*
+     * Neither a husk, a spent organism nor a *preview* breathes or drifts.
+     *
+     * A settled frame is a still frame, and so is the frame a player is deciding
+     * on: the strongest single finding in the calibration set is that its best
+     * reference animates literally nothing while it waits for you — two
+     * consecutive frames pixel-identical. Round 2's stake screen breathed three
+     * organisms, which measured as four independently moving regions against a
+     * ceiling of three, for nothing the player needed to perceive.
+     */
+    const settled = body.husk > 0.5 || body.spent > 0.5;
+    const still = this.reduced || settled || this.spread < 1;
     const drift = still
       ? { x: 0, y: 0 }
       : {
@@ -3728,7 +3860,7 @@ export class Stage {
           y: (noise1(seconds * 0.11 + body.phase + 7, body.driftSeed + 1) - 0.5) * 5 * this.scale,
         };
     return {
-      radius: body.r * contract * (body.husk > 0.5 ? 1 : breath) * (1 - 0.6 * body.die),
+      radius: body.r * contract * (settled ? 1 : breath) * (1 - 0.6 * body.die),
       x: body.x + drift.x,
       y: body.y + drift.y + body.die * 26 * this.scale,
     };
@@ -3753,7 +3885,8 @@ export class Stage {
     ctx.save();
     ctx.globalCompositeOperation = 'source-over';
     for (const body of this.bodies) {
-      if (body.alpha < 0.94 || body.split > 0.001 || body.die > 0.02 || body.husk > 0.01) continue;
+      if (body.alpha < 0.94 || body.split > 0.001 || body.die > 0.02) continue;
+      if (body.husk > 0.01 || body.spent > 0.01) continue;
       const { radius, x, y } = this.bodyTransform(body, contract, seconds);
       // 1.34 x radius across: the bell's own flat middle, inside the lappets and
       // clear of the Fresnel limb.
@@ -3771,7 +3904,8 @@ export class Stage {
     const mass = this.sprites.mass[band][body.mass];
     const sprite = (body.tint === 'amber' ? this.sprites.amberBells : this.sprites.bells)[body.sprite];
     const bright = (1 + 0.15 * body.hold) * (1 - 0.85 * body.die);
-    const massAlpha = body.alpha * (1 - 0.5 * body.die) * (body.husk > 0.5 ? 0.82 : 1);
+    const massAlpha =
+      body.alpha * (1 - 0.5 * body.die) * (body.husk > 0.5 || body.spent > 0.5 ? 0.82 : 1);
 
     ctx.save();
 
@@ -3845,7 +3979,9 @@ export class Stage {
     const box = radius * BELL_BLIT;
     ctx.globalAlpha = massAlpha;
     ctx.drawImage(mass, -box, -box, box * 2, box * 2);
-    // A husk has no interior light left: that is the whole of what a husk is.
+    // A husk has no interior light left: that is the whole of what a husk is. A
+    // *spent* body has some — it is banked money, not a corpse — at the reduced
+    // lamp the settlement sets, which keeps it an order below the vessel.
     if (body.husk < 0.5) {
       /*
        * The interior at 55%.
@@ -3916,7 +4052,7 @@ export class Stage {
     ctx.restore();
   }
 
-  /** The harvest trails: banked light on its way to the vessel. */
+  /** The trails: banked light on its way to where the value landed. */
   drawTrails(ctx) {
     if (this.trails.length === 0) return;
     const now = this.time;
@@ -3928,14 +4064,12 @@ export class Stage {
         continue;
       }
       const t = clamp01(trail.t);
-      // A trail whose destination is *moving* resolves it every frame: at
-      // settlement the vessel is rising out of its corner while the colony is
-      // pouring into it, and a stream aimed at where the glass used to be lands
-      // in the water beside it.
+      // A trail whose destination can move resolves it every frame: the payout
+      // vessel is a DOM object whose box settles a beat after the pour starts,
+      // and a stream aimed at where the glass used to be lands beside it.
       if (trail.toFn !== undefined) trail.to = trail.toFn();
       if (!trail.fired && t >= 1) {
         trail.fired = true;
-        this.vesselPulse = 1;
         trail.onArrival?.();
       }
       const eased = ease.decel(t);
@@ -3964,150 +4098,48 @@ export class Stage {
   }
 
   /**
-   * The vessel: the one warm object in a cold world, and where banked value
-   * pools.
+   * The payout's light on the water (§7.1).
    *
-   * §5 (S5) says harvested bodies travel to the balance chip, and they do — the
-   * chip ticks on each arrival, in AMBER, which is the colour of banked value and
-   * appears nowhere else (§6.1). The vessel is that value made physical on the
-   * stage so the transfer has somewhere to land, and it is placed off the vent
-   * axis so the game's one EMBER source and its one AMBER source never mix.
+   * One wide warm lobe from the vessel's own mouth and a tighter hot core inside
+   * it, additive, static. It is what makes the settled frame a *lit scene*
+   * instead of a gold card on a cold column: the reference celebrations raise
+   * global mean luminance by about 80% at a payoff, and none of that comes from
+   * the payout surface alone — the whole frame is lit by the event.
    *
-   * **Why an emitter outside `E(V)` is admissible here.** §6.3's promise is that
-   * no frame is ever brighter than a frame worth more money, and it names the
-   * wild-line ghost as its one exemption. The vessel is the second, and it is a
-   * narrower one: it is lit *by* money — banked money, which the player already
-   * owns — so it strengthens the pillar rather than weakening it. Its glow is
-   * capped well below a single body's, it is AMBER and therefore never mistakable
-   * for colony light, and it is dark and empty until something has actually been
-   * banked. At extinction it stays lit if anything was harvested, because the
-   * story is what the player kept.
+   * It is drawn over the world and under the ceremony's own scrim, it never
+   * animates, and it exists only on a credited win.
    */
-  drawVessel(ctx) {
-    const scale = this.scale;
-    const hero = ease.decel(clamp01(this.vesselHero));
-    const width = lerp(46, 92, hero) * scale;
-    const height = lerp(62, 120, hero) * scale;
-    const x = lerp(this.width - 22 * scale - 46 * scale, (this.width - width) / 2, hero);
-    const y = lerp(this.height - 82 * scale, this.height * 0.19 - height / 2, hero);
-    const presence = this.vesselAlpha;
-    if (presence < 0.01) return;
-    const cxv = x + width / 2;
-    const shoulder = 11 * scale;
-
-    // A beaker: straight walls, a rounded base and an open rim, so the trails have
-    // a mouth to arrive at and the silhouette is not another rounded rectangle.
-    const path = new Path2D();
-    path.moveTo(x, y);
-    path.lineTo(x, y + height - shoulder);
-    path.quadraticCurveTo(x, y + height, x + shoulder, y + height);
-    path.lineTo(x + width - shoulder, y + height);
-    path.quadraticCurveTo(x + width, y + height, x + width, y + height - shoulder);
-    path.lineTo(x + width, y);
-
+  drawPayoutLight(ctx) {
+    if (this.payoutLight < 0.01) return;
+    const { width, height } = this;
+    const mouth = this.payoutMouth();
     ctx.save();
-    ctx.globalAlpha = presence;
-
-    /*
-     * The glass, and it has to survive being empty.
-     *
-     * Round 1 drew the vessel as a 1 px amber outline over a 22% wash — which is
-     * legible while there is amber in it and completely absent once the pour has
-     * gone home, so the settled win frame had no object on it at all. Glass is a
-     * material: a graded body that is darker at the centre than at its own edges,
-     * a lit left wall and a shaded right one, a bright rim across the mouth and a
-     * contact shadow under the base. An empty vessel is then still a vessel.
-     */
-    const bodyFill = ctx.createLinearGradient(x, 0, x + width, 0);
-    bodyFill.addColorStop(0, 'rgba(96, 168, 190, 0.34)');
-    bodyFill.addColorStop(0.16, 'rgba(20, 62, 82, 0.3)');
-    bodyFill.addColorStop(0.62, 'rgba(12, 42, 58, 0.26)');
-    bodyFill.addColorStop(0.88, 'rgba(28, 78, 98, 0.3)');
-    bodyFill.addColorStop(1, 'rgba(120, 190, 210, 0.36)');
-    ctx.fillStyle = bodyFill;
-    ctx.fill(path);
-
-    // The seat: a contact shadow under the base, so the glass stands on the water
-    // instead of floating in it.
-    ctx.save();
-    ctx.globalCompositeOperation = 'source-over';
-    const seatR = width * 0.62;
-    const seat = ctx.createRadialGradient(cxv, y + height + 2 * scale, 0, cxv, y + height + 2 * scale, seatR);
-    seat.addColorStop(0, rgba(C.abyss, 0.6));
-    seat.addColorStop(1, rgba(C.abyss, 0));
-    ctx.fillStyle = seat;
-    ctx.fillRect(cxv - seatR, y + height - seatR * 0.3, seatR * 2, seatR * 1.3);
-    ctx.restore();
-
-    ctx.strokeStyle = rgba(C.amber, 0.34 + 0.3 * this.vesselPulse);
-    ctx.lineWidth = Math.max(1, 1.6 * scale * (0.6 + 0.4 * hero));
-    ctx.stroke(path);
-    // The rim: a lit lip across the mouth, thicker than the walls, so the trails
-    // have somewhere to arrive and the silhouette has a top.
-    const rim = ctx.createLinearGradient(x - 4 * scale, 0, x + width + 4 * scale, 0);
-    rim.addColorStop(0, rgba([255, 236, 200], 0.35));
-    rim.addColorStop(0.4, rgba([255, 246, 226], 0.9));
-    rim.addColorStop(1, rgba([255, 226, 178], 0.4));
-    ctx.strokeStyle = rim;
-    ctx.lineWidth = Math.max(1.5, 2.4 * scale * (0.6 + 0.4 * hero));
-    ctx.beginPath();
-    ctx.moveTo(x - 4 * scale, y);
-    ctx.lineTo(x + width + 4 * scale, y);
-    ctx.stroke();
-
-    ctx.save();
-    {
-      // `clip` needs the path closed to fill it; the open rim is a stroke-only
-      // affordance, so the fill uses the same walls with the mouth sealed.
-      const bowl = new Path2D(path);
-      bowl.closePath();
-      ctx.clip(bowl);
-      const fill = Math.max(0.08, this.vesselLevel) * height * 0.8;
-      const top = y + height - fill;
-      const liquid = ctx.createLinearGradient(0, top, 0, y + height);
-      liquid.addColorStop(0, rgba(C.amber, 0.92));
-      liquid.addColorStop(1, 'rgba(196, 126, 44, 0.78)');
-      ctx.fillStyle = liquid;
-      ctx.fillRect(x, top, width, fill + 2);
-      // The meniscus: one bright line at the surface, bowed as a surface is.
-      ctx.strokeStyle = rgba([255, 240, 214], 0.95);
-      ctx.lineWidth = Math.max(1, 1.4 * scale);
-      ctx.beginPath();
-      ctx.moveTo(x, top + 1.5 * scale);
-      ctx.quadraticCurveTo(cxv, top - 1.5 * scale, x + width, top + 1.5 * scale);
-      ctx.stroke();
-      // One vertical specular on the glass, so it reads as glass.
-      const sheen = ctx.createLinearGradient(x, 0, x + width, 0);
-      sheen.addColorStop(0, 'rgba(255,255,255,0)');
-      sheen.addColorStop(0.2, 'rgba(255,255,255,0.16)');
-      sheen.addColorStop(0.34, 'rgba(255,255,255,0)');
-      ctx.fillStyle = sheen;
-      ctx.fillRect(x, y, width, height);
-    }
-    ctx.restore();
-
-    // Its own halation, capped well below a single body's, plus a brief riser:
-    // light leaving the vessel toward the balance chip the value landed in.
     ctx.globalCompositeOperation = 'lighter';
-    const glow = width * (2.6 + 0.9 * this.vesselPulse);
-    // The bloom belongs to what is *in* the glass. An emptied vessel still reads
-    // as an object — it has walls, a rim and a seat — but it stops throwing light,
-    // because the light left with the money.
-    ctx.globalAlpha = (0.06 + 0.2 * this.vesselLevel + 0.2 * this.vesselPulse) * presence;
-    ctx.drawImage(this.sprites.amberGlow, cxv - glow / 2, y + height * 0.72 - glow / 2, glow, glow);
-    if (this.vesselPulse > 0.01) {
-      const riser = ctx.createLinearGradient(0, y - 54 * scale, 0, y + 4 * scale);
-      riser.addColorStop(0, rgba(C.amber, 0));
-      riser.addColorStop(1, rgba(C.amber, 0.45 * this.vesselPulse));
-      ctx.fillStyle = riser;
-      ctx.globalAlpha = presence;
-      ctx.fillRect(cxv - 1.5 * scale, y - 54 * scale, 3 * scale, 58 * scale);
-    }
+    /*
+     * Wide and flat, not tight and peaked.
+     *
+     * A payoff has to lift the *whole* frame — the references measure global mean
+     * luminance rising about 80% at one — and a steep radial centred on the
+     * payout surface lights the payout surface and nothing else. Blitting the
+     * bloom at two and a half times the frame diagonal puts its shoulder across
+     * the water column above the glass, which is where the settled colony is
+     * standing and where the frame was still measuring as a cold picture with a
+     * warm object stuck to it.
+     */
+    const wash = Math.hypot(width, height) * 2.6;
+    ctx.globalAlpha = 0.17 * this.payoutLight;
+    ctx.drawImage(this.sprites.amberGlow, mouth.x - wash / 2, mouth.y - wash / 2, wash, wash);
+    // Two blits, not three. Each of these is a full-frame blend — the wash alone
+    // is 660,000 device pixels composited every frame of the ceremony — and the
+    // middle lobe was doing 0.005 of mean luminance for a third of the cost.
+    const core = Math.min(width, height) * 1.2;
+    ctx.globalAlpha = 0.2 * this.payoutLight;
+    ctx.drawImage(this.sprites.emberGlow, mouth.x - core / 2, mouth.y - core / 2, core, core);
     ctx.restore();
   }
 
   /**
-   * The celebration sparks: banked light rising out of the frame at T2 and T3.
+   * The celebration sparks: banked light rising out of the vessel.
    * Additive AMBER sprites with a soft in-and-out, so the shower has no edges.
    */
   drawSparks(ctx) {

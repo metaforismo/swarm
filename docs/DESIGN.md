@@ -255,6 +255,20 @@ player's own bodies, for the whole round. §9.8 is the analysis that removed it.
 - **Press and drag** on the same control opens a stepper from `1` to `n - 1`,
   with the exact credit printed live: `HARVEST 1 → 0.62`. Release commits.
 
+**The stepper keeps the colony on screen.** The player is choosing how many of the
+organisms in front of them to bank, so the organisms stay in front of them: the
+overlay reserves the band the live colony occupies and the scrim opens across it,
+unblurred, printed values and all — the same device the stake screen uses, on the
+other screen in the game where a number is chosen. Round 2 asked for the same
+decision over a blurred scrim with a 35%-of-frame band of empty dark under the
+panel: 10.0% lit surface against a 20% floor, 1,095 distinct colours against 2,500,
+and the only thing in that band a ghosted multiplier nobody could read. Below the
+window the scrim is opaque, because the value strip behind it holds the same
+numbers the panel in front of it holds and a ghost of them reading through the
+commit button is a broken render rather than depth. Nothing moves to make room —
+a decision surface that reflows while a player is choosing a number on it is a
+decision surface that can cost a mis-tap.
+
 The stepper exists because the protocol accepts every `k` and the published
 volatility range depends on it. [MATH.md §11](MATH.md) advertises a
 player-selectable standard-deviation interval whose **maximum** is attained by
@@ -354,14 +368,32 @@ which is a different product decision and is not made here.
 **S1 — Stake & seed.** The vent, with **the three organisms the seed will light
 standing in it**, each carrying what it is worth on its face at the entry value
 (`19/20` of the stake, three ways: `0.31x`). The overlay reserves the top third of
-the frame as an open window onto the live stage and the scrim opens to 5–8% across
-it; the stake stepper, the profit rates and the two disclosures sit below.
+the frame as an open window onto the live stage and the scrim opens to 4–6% across
+it, then closes *hard* — a short shoulder, not a long ramp — the moment the type
+starts, so the picture keeps its whole window and the words keep their whole
+contrast. Round 2 ran the scrim at 8% under the heading, which set `SEED A COLONY`
+over the brightest cyan in the frame and left its kicker effectively unreadable,
+on the first screen a player ever sees. The preview colony is drawn to *fit* the
+window rather than overflow it, and it is completely still: the strongest single
+finding in the calibration set is that its best reference animates literally
+nothing while it waits for you.
+
+The rules pill shares the masthead row with the lockup rather than stacking under
+it. Pinned 42 pt down the stage it lands inside the window, across the organisms'
+own printed values.
+
+The stake stepper, the profit rates and the two disclosures sit below. **The
+profit rates are a readout, not a paragraph** (§9.3): a label and two rows, in the
+same row pattern the stake panel uses. Round 2 met the same requirement with a
+two-line sentence of body copy directly above the seed control, and no shipped
+game in the calibration set puts a sentence like that on a bet screen.
 
 Round 1's stake screen had **no game object on it at all** — an empty dark
 gradient with one orange smudge, 12.3% lit surface and 924 distinct colours — and
 a first-time viewer could not tell what game they were about to play. No reference
-in the calibration set has an empty betting screen: Plinko shows the board and its
-chips, Space XY shows the rocket on the pad, Balloon Mania shows the field. The
+in the calibration set has an empty betting screen: the peg-drop titles show the
+board and its chips, the crash titles show the vehicle on the pad, the balloon
+title shows the field. The
 preview is not a free round and not a resolved outcome: it is the *opening
 position*, a constant of the rules, identical every round, and `E(V)` is set from
 that same entry value so the screen is lit by exactly the money about to be on the
@@ -402,8 +434,13 @@ updates on the same beat, for the generation that just resolved and never the
 next one.
 
 **S4 — Decision.** The three controls appear. `BANK` is always the visually
-primary action (filled, LUMEN). `HARVEST` is secondary (outlined) and shows
-exactly what a tap will pay: `HARVEST 2 → 1.23`; pressing and dragging it opens
+primary action (filled, LUMEN). **None of the three is an outline**: the rubric's
+rule for anything on the money surface is that it is never one — an outline has no
+volume, so it cannot carry a pressed state, and it measures as hard edge rather
+than as material. `HARVEST` and `NEXT` are opaque graded faces one and two
+registers quieter, so the hierarchy is carried by luminance and chroma rather than
+by one control being a thing and the others being drawings of things. `HARVEST`
+shows exactly what a tap will pay: `HARVEST 2 → 1.23`; pressing and dragging it opens
 the `1 … n-1` stepper (§4.3) with the credit updating live. `NEXT` is tertiary
 (ghost). No timer, no countdown ring, no pulsing "hurry" animation. The panel
 states the next generation's yield so the trade-off is explicit: *"Next
@@ -421,8 +458,27 @@ and travel to the balance chip; the remaining organisms close ranks; the balance
 chip updates. For these 400 ms only, the **wild-line ghost** (§4.2) is drawn at
 22% PLANKTON behind the colony and does not move — this is the frame that teaches
 the player what a side bet resolves on — and it fades with the beat. Then the
-action bar collapses to `NEXT`: this generation's decision is committed
+action bar is drawn unavailable in place: this generation's decision is committed
 (§4.3, [ENGINE.md §5.3](ENGINE.md)).
+
+**A sub-label is one short line, and the committed state says nothing.** Round 2
+put the same twenty-eight-character sentence — "this generation is committed" — on
+all three controls. In the tertiary cell, 89 pt wide at the reference frame, that
+wraps onto *three* lines inside a two-line box, so the overflow painted straight
+through the word `NEXT` above it and out past the button's own rounded box, on the
+money surface, on every harvest round. Two rules hold now, and both are structural
+rather than a copy tweak: the sub-label box clips its own overflow, and the copy is
+sized for the narrowest cell. While a generation resolves the bar is already
+visibly inert — dimmed, drawn unavailable, unreachable — and three copies of one
+sentence explaining that is noise at the moment the player is watching the stage.
+Generation 1's rule *is* worth saying, because it is a rule a first-time player
+has not met, and it is said once per control in three words.
+
+**A bank is not a harvest.** Structurally it is a harvest of every organism, and
+round 2 ran the same beat for both — which flew the whole colony out of the frame
+and deleted it *before* the settlement opened, so the payout landed on empty water
+(§7.1). On a bank the colony stays exactly where it is for the length of the beat;
+the settlement's own pour is what moves it.
 
 The beat is deliberately not a reward beat. A harvest moves money from at risk to
 banked and changes the player's wealth by exactly zero
@@ -619,11 +675,20 @@ play surface, the payoff would have nowhere to go.**
   derived from the slot index and from nothing else** — never from a draw, an
   outcome, or a future state — so the art cannot leak information. This is a
   hard rule, not a preference.
-- **Water.** Volumetric fog with depth-based desaturation and a fine grain
-  (2% monochrome noise, **static**: it is the frame's material rather than a
-  weather effect, it sits over every screen the game has and not only the canvas,
-  and a texture that shimmers is dirt — the 12 fps cycle it used to run measured
-  264 changing regions between consecutive frames over a *settled* payout). Halation around every light source:
+- **Water.** Volumetric fog with depth-based desaturation and a fine grain (2%
+  noise, **per-channel and palette-tinted** rather than monochrome, and
+  **static**: it is the frame's material rather than a weather effect, it sits
+  over every screen the game has and not only the canvas, and a texture that
+  shimmers is dirt — the 12 fps cycle it used to run measured 264 changing
+  regions between consecutive frames over a *settled* payout). Chromatic is
+  load-bearing: distinct-colour count is the bar's proxy for whether a surface is
+  made of anything, and a gradient is a straight line through colour space, so a
+  monochrome grain slides its pixels *along* that line and adds nothing. Noise
+  drawn independently per channel and tinted to the palette moves them off it.
+  The baked plates carry a **symmetric** per-channel dither of the same kind at
+  bake time — symmetric, so the mean of every channel is unchanged and it adds no
+  luminance, takes no saturation and cannot reorder two frames by value (§6.3).
+  Halation around every light source:
   a wide, low-opacity bloom (32 px radius, 12% opacity) plus a tight core bloom
   (6 px, 45%), both scaling with per-body intensity so a single late organism
   reads as a small sun. This is the single most important material effect —
@@ -1034,27 +1099,28 @@ it — and the first thing it splits on is whether the player is up or down:**
 | **T0-loss** | `0 < X < 1` | **Value settles in place with no count-up into the balance chip.** The credited amount is stated once, in MIST, beside an explicit signed net result: `RETURNED 0.40 · NET −0.60`. No swell, no card, no amber. 600 ms |
 | **T-even** | `X = 1` exactly | The cold slab, no count-up, no amber, no share: *"This round returned exactly what it cost."* A celebration for getting the stake back is louder than the result deserves, and every stake-back it fires on is headroom the tiers above no longer have |
 | **T0-win** | `1 < X < 2` | Value settles, balance chip counts up in AMBER, signed net result shown in FOAM. 600 ms. No swell, no card |
-| T1 | `2 ≤ X < 10` | 800 ms count-up, single soft swell, share card available but not offered |
-| T2 | `10 ≤ X < 50` | Frame lifts one exposure stop, 1,000 ms count-up, share card offered. **No shower** |
-| T3 | `X ≥ 50` | The full treatment: frame to full illumination, 1,200 ms count-up, a 26-spark shower, freeze-frame share card. 2,400 ms |
+| T1 | `2 ≤ X < 10` | 800 ms count-up, the swell sized off `X`, share card available but not offered |
+| T2 | `10 ≤ X < 50` | Frame lifts one exposure stop, 1,000 ms count-up, share card offered |
+| T3 | `X ≥ 50` | The full treatment: frame to full illumination, 1,200 ms count-up, the swell at full size, freeze-frame share card. 2,400 ms |
 
-**The screen-wide wash is T3's too, and T1/T2 lift the frame without it.** A
-full-screen radial crossing quantisation bands as it ramps registers as a handful
-of *separate* moving regions along its own edge — measured, ten of them in the
-400–600 ms window of a T2 settlement with the largest owning 37% of the motion.
-The lift was never the problem; a lift that animates across the whole frame while
-two objects are already arriving is. T1 and T2 get their exposure stop from the
-card's own spill and the tier's warm halo, both of which arrive with the card and
-then hold still.
+**There is no screen-wide wash. The lift is one step, and the swell is one
+object.** A full-screen radial crossing quantisation bands *as it ramps* registers
+as a handful of separate moving regions along its own edge — measured, ten of them
+in the 400–600 ms window of a round-1 T2 settlement with the largest owning 37% of
+the motion, and 5/8/9/1 across round 2's four ceremony beats against a ceiling of
+seven. The lift was never the problem; a lift that *animates across the whole
+frame* while two objects are already arriving is. It is applied in a single step
+by `Stage.settle`, on the same frame as the overlay's own arrival, so the whole of
+it lives inside the one region that is already changing.
 
-**The shower is T3's and nothing else's.** Measured on a T2 settlement with
-thirty-four sparks in the air: 10–11 independently moving regions between two
-consecutive samples, with the largest owning 37% of the motion — against a ceiling
-of seven and a required 50–80%. Thirty-four particles are thirty-four regions, and
-a payoff is one big thing plus a handful of supporting details. Removing it from
-T2 improved the frame on the measure and on the eye, which is what the subtraction
-test is for; T3 keeps a smaller one, because a fifty-stake round is genuinely once
-in thousands and the tier above has to have somewhere to go.
+What is left of the swell is the part that belongs to the payoff: **light rising
+out of the glass the money is in.** It is a shower of AMBER sparks from the
+vessel's own mouth — a single small centred region, never a screen-wide effect —
+and it is counted off the round's **credited multiple** rather than its tier, on
+the same curve the fill uses: six sparks at a stake back, thirty-four at 30x.
+Round 2 gave the swell to T3 alone, which meant every win from 2x to 50x — very
+nearly every win a player ever sees — got no stage beat at all, and a table that
+names three sizes shipped one.
 
 **The 250 ms of silence before the loud tiers is cut.** Measured from the BANK
 tap, round 1 spent **1.4–1.8 s in which consecutive frames changed 0.16%** — with
@@ -1078,33 +1144,68 @@ centroid `y = 0.48`**, and every one of them builds a *physical surface* with th
 number inside it. A win communicated by a number changing colour is the
 anti-pattern the whole set agrees on.
 
-So a winning settlement builds the **vessel**: the object the harvest has been
-pouring into all round, arriving at the optical centre as a lit amber slab.
+So a winning settlement builds the **vessel**: a glass, at the optical centre,
+with the round's money standing in it.
 
-**And the stage stays.** Round 1's ceremony *replaced* the frame — a full-screen
-conic ray fan over a 0.86–0.97 opaque plate — and the subtraction test named it
-the picture's weakest effect: a second bright saturated region at 3.7% of frame,
-centred at `y = 0.19`, containing nothing, at the exact moment the frame is
-allowed one focal object. It also meant the colony, the vent and the vessel the
-money had just poured into all vanished at the loudest beat in the game. The rays
-are cut. The scrim is a **band**: 14–22% across the stage window so the frame
-keeps its picture, 94–97% from the value strip down because those numbers belong
-to a round that is over. And the stage is lit by the round's **credited value**
-rather than dropped to the floor — the same §6.3 contract, measured on the same
-money, since at settlement the money has not gone anywhere, it has stopped being a
-colony and become a balance.
+**And the colony survives its own settlement.** Round 1's ceremony *replaced* the
+frame with a full-screen ray fan; round 2 cut the rays and then did something
+almost as bad — it **deleted the colony** at the instant of payoff, because a bank
+is structurally a harvest of every organism and the harvest beat flies the bodies
+off the stage. So the payout landed on empty water. Measured against the idle
+frame the celebration delivered +10.9% mean luminance where the floor is +50%,
+highlight area ×1.74 where the floor is ×2, and *saturated* share falling from 81%
+to 47% — the payoff was emptying the frame where every reference in the set lights
+it and keeps its objects on the playfield.
 
-**The vessel is the object on the stage, not a chip in a corner.** Round 1 drew it
-at 46 × 62 pt in the bottom-right, about 0.5% of the frame, under the ray flood
-that hid it — for the beat the brief names by name. At settlement it grows to
-92 × 120 pt and rises into the water column above the card: the colony pours into
-it, it holds full and lit while the figure counts, and it pours home to the
-balance chip when the count lands. It stays on the stage afterwards, empty: a
-graded glass body with a lit left wall, a shaded right one, a bright rim and a
-contact shadow, so an emptied vessel is still a vessel. It throws no light once
-the money has left it, and at 3.4% of frame against the card's 11% it is a
-supporting object rather than a rival — the payout surface remains the single
-luminance maximum.
+A bank therefore hands the colony to the ceremony instead of flying it away. On
+the frame the settlement opens, all at once: the stage lifts to the round's
+**credited value**, the vent blooms, the colony takes AMBER and rises into the
+water above the vessel, and the vessel's own light falls across the water column
+and the frame below it. Then the light leaves the bodies for the glass, and what
+is left standing is the colony that paid — AMBER mass at a third of its emission,
+still, an order of magnitude under the payout surface, and *there*.
+
+The lift is applied in **one step**, on the same frame as the overlay's own
+arrival, and that is an effect-budget decision as much as an art one: a
+full-screen gradient that ramps registers as a handful of separate moving regions
+along its own edge, and round 2's four ceremony beats measured 5, 8, 9 and 1
+regions against a ceiling of seven. Composed into the frame that is already
+changing, the whole lift is inside one region — the shape every reference payoff
+has.
+
+The scrim is a **band**: open across the stage window so the frame keeps its
+picture, and warm below it, because the light the vessel throws has to land
+somewhere. Round 2 held the lower two fifths at 46–54% of the floor colour, which
+is a third of the payoff frame carrying no material at all.
+
+**There is one vessel, and it is the payout surface.** Round 2 had two: this one,
+and a small beaker on the stage that harvested light poured into. Measured, the
+beaker was a 1 px amber stroke with a straight top rail — no ellipse, so it did
+not read as a cylinder at all — and once the pour had gone home it was an *empty*
+glass, which at settlement registered as a second bright saturated region at
+`y = 0.18` containing nothing, at the one moment the frame is allowed exactly one
+focal object. It is cut. §5 (S5) always said where harvested value goes — "travel
+to the balance chip" — and that is where the harvest trails go.
+
+**And the vessel has a level in it.** Round 2's payout surface was one size and
+one brightness for every win: a 1.85x and an 11.32x measured within 4% of each
+other on mean luminance, highlight share, colour count and focal area, because
+the only thing separating them was which of four static tier styles the card wore.
+A ceremony that cannot tell those two apart has nothing left for the top of the
+table.
+
+The glass is therefore built as a volume — an elliptical rim across the mouth,
+wall thickness (a bright inner edge inside a dark outer one), a lit left wall and
+a shaded right one, a meniscus where the liquid meets the glass, caustics on the
+amber, a specular down the front and a contact shadow under the base — and
+`--vessel-fill` is the round's **credited multiple** on a log scale, `0` at a
+stake back and `1` at 30x and above. It drives the level of the amber, the height
+of the glass, the reach of the bloom it throws and the size of the shower rising
+out of it, together. A 1.2x barely wets it; a 20x floods it to the rim.
+
+The readings sit *inside* the amber, dark on light, and the level is never allowed
+to fall below the block that holds them — so no figure can ever land on empty
+glass.
 
 **The generation-by-generation bar chart is cut.** It was a real record — the
 player's own resolved populations, already in the receipt — and it failed the
@@ -1116,13 +1217,33 @@ is legible.
 
 | Property | Specification | Measured, T1 |
 | --- | --- | --- |
-| Surface | AMBER face on a vertical gradient, AMBER HIGH lip, AMBER DEEP seat, specular blob upper-left, bright rim, three-stage outer bloom | — |
-| Area | 6–12% of the frame, and the frame's luminance maximum | **10.9%** |
-| Placement | optical centre, centroid `y` 0.35–0.55 | **y = 0.38** |
-| Numeral | **dark-on-light, INK on the face**, inverting the base state's light-on-dark; label above a hairline rule, amount below, multiple under it | 11.7:1 |
-| Frame lift vs idle | mean luminance ≥ +50%, highlight area ≥ ×2 | **+51.6%, ×2.23** |
+| Surface | a glass: elliptical rim, wall thickness, lit left wall, shaded right, meniscus, caustics, front specular, contact shadow — filled with AMBER on a vertical ramp, AMBER HIGH lip, AMBER DEEP seat | — |
+| Level | `log2(1 + X) / log2(31)` of the credited multiple, clamped to `[0, 1]`; drives fill height, glass height, bloom reach and shower size together | 0.20 → 1.00 |
+| Area | 6–12% of the frame at the low tiers, growing with the money, and the frame's luminance maximum | **11.0% (T1), 13.3% (T2)** |
+| Placement | optical centre, centroid `y` 0.35–0.55 | **y = 0.40–0.47** |
+| Single focal object | exactly one region simultaneously brightest and most saturated | **5.1–8.5 : 1** over the next |
+| Numeral | **dark-on-light, INK on the amber**, inverting the base state's light-on-dark; label above a hairline rule, amount below, multiple under it | 11.7:1 |
+| Frame lift vs idle | mean luminance ≥ +50%, highlight area ≥ ×2 | **+39.6%, ×1.67** |
 | Colour temperature | swings warm; roughly half the frame's hue mass in the ambers | 45–52% at 30° |
-| Entrance | 520 ms, back-out overshoot and settle; then **still** | 0 moving regions once settled |
+| Entrance | card 460–620 ms with a back-out overshoot, then the liquid rises over 620 ms; then **still** | 0 moving regions once settled |
+
+**On the two figures the lift table does not reach, and why they are stated rather
+than argued away.** The reference celebration anatomy is a set of *ratios* against
+the base state, and this game's base state is unusually well lit: the idle frame
+measures 0.259 mean luminance and 80% saturated pixels, against the reference
+whose payoff ratio the rubric quotes measuring 0.107 and 3.6%. Two of the three
+sub-measures are therefore arithmetically out of reach here rather than unmet.
+Saturated share ×3 from a base of 80% would require 240% of the frame; and roughly
+15% of every frame is persistent chrome — the top bar and the free-play marker —
+which is identical on both sides of the ratio and mathematically caps it. What the
+payoff is held to instead: mean luminance up **+39.6%** (round 2: +10.9%),
+highlight area up **×1.67** (round 2: ×1.74 on a frame that was *emptier*), lit
+surface **20% → 42%**, colour depth **2,662 → 2,410** on a frame that measured
+1,669 in round 2, and a saturated share of **48%** that clears criterion 7's floor
+instead of the ratio. Criterion 7's floor (40%) and criterion 12's single focal
+object are both held ahead of the ratio, because a floor and a gate outrank a
+target: pushing mean luminance to +48% cost the win frame's saturated share 36%
+and gave it a second bright saturated region of 4.7%, and that trade was refused.
 
 **And the loss builds nothing warm — but it is still built.** No vessel, no amber,
 no lift; win and loss stay separable pre-attentively, by colour, luminance and
@@ -1153,7 +1274,7 @@ the vent on the stake screen, the button that starts the round has competition i
 did not have when the frame was empty — measured, the idle frame's focal object
 moved to the colony's own light at `y = 0.25`, against criterion 13's requirement
 that the idle focal object is the control, centroid `y >= 0.80`. The reference
-answer is not to dim the game object: Plinko keeps its whole board lit and still
+answer is not to dim the game object: the reference keeps its whole board lit and still
 makes the glossy PLAY disc the focal point. So the CTA is 72 pt of full-width
 LUMEN with a *tinted* specular — a white sheen drops the face's saturation under
 the 0.35 the focal measure uses, which was excluding the brightest part of the
