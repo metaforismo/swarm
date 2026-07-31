@@ -113,8 +113,21 @@
           <button class="act tertiary" id="next" type="button">NEXT<small id="next-sub"></small></button>
         </section>
 
+        <!--
+          THE FOOTER SAYS WHERE THE ROUND IS, ONCE.
+
+          It used to carry an eighteen-dot progress strip beside the words
+          "GEN 9 / 18" — the same fact, twice, four inches apart, one of them
+          spelled out and one of them requiring the player to count six-pixel
+          circles. The subtraction test is the brief's own rule: if removing an
+          effect improves the frame, it was a defect. Removing this one improves
+          every frame in the game, takes eighteen elements out of the layout and
+          takes their eighteen hard edges with them.
+
+          The readout stays, and it is the accessible one: it is text, it is
+          announced, and it does not need colour to be read.
+        -->
         <footer class="footer">
-          <div class="dots" id="dots" aria-label="Generations"></div>
           <div class="ladder-chip" id="ladder-chip"></div>
         </footer>
 
@@ -133,7 +146,15 @@
         <!-- S0 — first-round explainer ------------------------------------- -->
         <section class="overlay vent-idle" id="s0" hidden aria-label="How SWARM works">
           <div class="wordmark">
-            <h1>SWARM</h1>
+            <!--
+              The same built lockup the play frame carries, and not a second
+              styling of the same word: see `.lockup` in `styles.css`. The
+              `data-text` copy is what the two pseudo-elements set — one cuts the
+              outline and seats the shadow, one carries the lit face — and the
+              real text node stays in the markup so the heading is still a
+              heading to a screen reader.
+            -->
+            <h1><span class="lockup" data-text="SWARM">SWARM</span></h1>
             <p class="kicker">A colony that is your money</p>
           </div>
           <div class="spacer"></div>
@@ -516,32 +537,25 @@
         <div class="toast" id="toast" hidden></div>
 
         <!--
-          §6.2's grain, composited rather than drawn: the tile is generated in
-          `stage.js` from the same seeded noise and handed here as a data URL, so
-          the render loop spends no fill rate on a static texture.
+          THERE IS NO GRAIN LAYER HERE, AND ITS ABSENCE IS THE ART DIRECTION.
 
-          It sits at frame level and over every screen, because the grain is the
-          *frame's* material and not the canvas's. Half of this game's surfaces —
-          the stake screen, the harvest stepper, the settlement — are DOM above the
-          canvas, and a smooth CSS gradient with no material in it is the single
-          most common thing separating a generated interface from a made one. It
-          is under the free-play marker and the toast, and it never takes a tap.
+          Rounds 2 and 3 carried a full-frame chromatic noise tile over every
+          pixel of every screen, on the argument that it bought distinct-colour
+          count. It did — and it cost the thing the count is a *proxy* for. Not
+          one frame in the fifty-one-image calibration library carries a grain
+          layer; at 3x zoom ours read as sensor noise or a compression artefact
+          sitting on top of the art, on the amber liquid, on the glass, on the
+          plaque, on the button faces and on the type. A texture that is
+          identical on the water, on a numeral and on a control is not material:
+          material is what an object is made of, and it differs per object.
 
-          The well is not optional. The layer is over-sized by a tile on every
-          side so it can be *translated* to cycle the noise without exposing an
-          edge, and `.frame` clips its own overflow — which makes `.frame` a
-          scroll container, and an absolutely-positioned child hanging 96 px past
-          its bottom and right edges adds exactly that much scrollable area.
-          Chrome's scroll anchoring then quietly scrolled the frame itself: the
-          top bar left the screen and the whole layout sat 110 px high and 20 px
-          left, on a winning round. This is the second time a decorative layer has
-          been able to move the money in this file. The well is `inset: 0`, so it
-          contributes nothing to the scroll area, and everything over-sized lives
-          inside it.
+          So the colour depth is bought where it is earned instead — the two
+          baked canvas plates carry a symmetric sub-step per-channel dither
+          (`ditherPlate`), which is the printer's trick and is invisible, and
+          every DOM surface is a modelled object with a graded face, a bezel, a
+          specular and a seated shadow. If a surface here measures flat, the fix
+          is to build it, never to sprinkle it.
         -->
-        <div class="grain-well" aria-hidden="true">
-          <div class="stage-grain" id="stage-grain"></div>
-        </div>
       </main>
     </div>
 

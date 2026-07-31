@@ -74,7 +74,6 @@ const dom = {
   harvestSub: $('harvest-sub'),
   next: $('next'),
   nextSub: $('next-sub'),
-  dots: $('dots'),
   ladderChip: $('ladder-chip'),
   s0: $('s0'),
   s0done: $('s0-done'),
@@ -1160,7 +1159,6 @@ function renderFrame(delta) {
   dom.frame.style.setProperty('--strip-exposure', exposureOf(value).toFixed(4));
 
   renderChips();
-  renderDots();
 
   // Where the round is, and nothing more. The one forward-looking number §9.2
   // permits — the next generation's per-organism ladder constant — lives on the
@@ -1260,23 +1258,6 @@ function renderChips() {
     node.textContent = `${bet.label} · ${chip.text ?? chip.state}`;
     dom.chips.append(node);
   }
-}
-
-function renderDots() {
-  const stages = state.config.rules.stages;
-  if (dom.dots.children.length !== stages) {
-    dom.dots.replaceChildren();
-    for (let index = 0; index < stages; index += 1) {
-      const dot = document.createElement('span');
-      dot.className = 'dot';
-      dom.dots.append(dot);
-    }
-  }
-  [...dom.dots.children].forEach((dot, index) => {
-    dot.className = 'dot';
-    if (index + 1 < state.frame.stage) dot.classList.add('done');
-    if (index + 1 === state.frame.stage) dot.classList.add('current');
-  });
 }
 
 /**
@@ -1598,9 +1579,22 @@ function showCeremony() {
    * set at the payout's size — and so the count-up writes digits and nothing else.
    */
   const finalHeadline = down ? signedCredits(net) : credits(credited);
-  dom.settlementHeadline.style.fontSize = `${fitHeadline(`${finalHeadline}·`, tier).toFixed(1)}px`;
+  const headlinePx = fitHeadline(`${finalHeadline}·`, tier);
+  dom.settlementHeadline.style.fontSize = `${headlinePx.toFixed(1)}px`;
+  /*
+   * The figure's box is the size of the *answer*, not the size of whatever is
+   * currently in it.
+   *
+   * Tabular figures fix the width of a digit; they do not fix the length of a
+   * string, and `0.26 → 11.79` grows by two glyphs. A centred headline then
+   * re-centres itself on every tick and the money slides sideways through the
+   * loudest beat in the game. `fitHeadline`'s own advance constant is the right
+   * measure for the reservation, because it is the same set at the same size.
+   */
+  dom.settlementFigure.style.minWidth = `${(finalHeadline.length * 0.62 * headlinePx).toFixed(1)}px`;
   if (down || countUp <= 0) {
     // The value settles in place. The chip is simply the truth, at once.
+    dom.settlement.style.setProperty('--figure-delay', '150ms');
     state.holdBalance = false;
     dom.settlementFigure.textContent = finalHeadline;
     setBalanceChip(balance);
@@ -1611,6 +1605,13 @@ function showCeremony() {
     // and has not reached the balance yet — not a chip that glitched downward.
     state.holdBalance = true;
     dom.settlementFigure.textContent = credits(0n);
+    /*
+     * The numeral does not exist until it is counting. See the note on
+     * `.ceremony .headline` in `styles.css`: a static `0.00` on a glass that has
+     * not filled yet is the least legible frame the capture set contained, and
+     * the honest fix is that the figure arrives on the frame the count begins.
+     */
+    dom.settlement.style.setProperty('--figure-delay', `${silence + 640}ms`);
     /*
      * Where the chip counts from, and it is never backwards.
      *

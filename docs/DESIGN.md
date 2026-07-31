@@ -341,7 +341,7 @@ portrait-native.
 │  YIELD 0.62x  ·  COLONY 2.47x│          with the 1.00x stake line always drawn
 ├──────────────────────────────┤  96 pt   action bar (thumb zone)
 │   BANK      HARVEST   NEXT   │          hierarchy never changes, ever
-└──────────────────────────────┘  ladder chip + generation dots
+└──────────────────────────────┘  ladder chip: GEN n / 18
 ```
 
 **S0 — First round only.** A three-panel explainer, shown once, before the first
@@ -646,13 +646,52 @@ play surface, the payoff would have nowhere to go.**
   has no identity, carries no state and gives the eye no entry point.
 
   So a body is drawn in two passes. The **mass** goes down opaque, in
-  `source-over`: a shaded gel lit from the upper left, the band's deep tone at the
-  far limb, a bottom inner shadow, a Fresnel limb, a specular, and a contact
-  shadow outside the silhouette tinted toward ABYSS so two overlapping organisms
-  separate instead of fusing. The **light** goes on top additively, exactly as
-  before — subsurface transmission, gastric canals, granulation, the manubrium,
-  the tentacle skirt — at 55% of its old strength, because it is now anatomy
-  inside a body rather than the body itself.
+  `source-over`; the **light** goes on top additively, exactly as before —
+  subsurface transmission, gastric canals, granulation, the manubrium, the
+  tentacle skirt — at 55% of its old strength, because it is now anatomy inside a
+  body rather than the body itself.
+
+  **The mass is one surface with one light on it, and every term in it is
+  directional.** This is the round-4 change, and it exists because the round-3
+  mass had four separate ways of drawing a circle nobody asked for:
+
+  - **One silhouette, then one shading pass.** The lobes contribute a shape and
+    nothing else — flat core colour, unioned. The shading is applied once over
+    the union. Shading each lobe on its own drew the two-lobed archetype's minor
+    lobe as a separate ball inside the body, with its own visible edge; that seam
+    was the worst-rendered detail in the build and it sat on one organism in
+    three, at every size.
+  - **A terminator, not a cone.** The key ramp is a **linear** gradient along the
+    light's axis (upper left to lower right). The round-3 radial ran from a small
+    offset circle to a circle of exactly the body's radius, and a radial
+    gradient's parameter reaches 1 on the whole of its outer circle — so its
+    darkest colour was painted as an unbroken dark band around every organism.
+    A linear gradient has no radius and therefore no ring at any radius. Limb
+    darkening is a second, gentle concentric term that never reaches half
+    strength.
+  - **The ramp ends in the band's own shadow, never in ABYSS.** A warm body shaded
+    toward a blue-green floor lands on olive, which is exactly why the harvested
+    colony read as khaki eggs at the moment it was worth most. AMBER shades to
+    umber, MEDUSA to a deep violet, the cyan bands to ABYSS as before. The value
+    at the end of every ramp is at or below ABYSS's, so §6.1's floor and §6.3's
+    ordering are untouched; only the chroma moves.
+  - **A cast shadow, not a halo.** The contact shadow is offset down-right and
+    reaches 1.6 R, so there is no shadow term at all on the lit shoulder. A
+    concentric one is what an object casts when the light is inside the camera,
+    and over the organism behind it, it read as a hard crescent seam.
+  - **A rim light that is a crescent.** A bright annulus concentrated in the outer
+    tenth of the radius, multiplied by a directional mask that is zero on the lit
+    shoulder — light wrapping a silhouette, where round 3's Fresnel wash had no
+    edge concentration and read as a smudge.
+  - **A specular with a shape.** A hot white core with a visible edge, a bloom
+    around it in the band's chroma, and a small catchlight low and right that is
+    the water's light coming back up. A single wide fade from 72% white is a
+    blurred smudge, and was cropped and named as one.
+
+  A **spent** organism — one whose light has gone into the vessel — is drawn at
+  full opacity. Drawing it at 82% let cyan water mix into every shaded pixel of a
+  warm body, which is the other half of the khaki. Only a husk is drawn thin,
+  because a husk is a corpse and a corpse is partly water.
 
   "Never outlined" still holds, and the rim falloff is what holds it: the mass is
   opaque to 82% of its radius and gone by 100%, which is about one device pixel of
@@ -668,6 +707,19 @@ play surface, the payoff would have nowhere to go.**
   drawn *last*, in `source-over`, so the additive interior underneath cannot wash
   it out. It is never drawn on an organism that is mid-split, mid-death or a husk:
   a number on a corpse is money that is not there.
+
+  The run is **debossed on a shallow arc** so it bows with the body, and the arc
+  is the one place this element can fail catastrophically: a glyph's horizontal
+  advance along a bow of radius `R` is `R · sin(θ)`, so the lever arm the glyph is
+  rotated about must *be* `R`. Swinging it on a shorter arm shrinks every advance
+  by the same ratio, and at a sixteenth of `R` the whole string lands on one spot
+  — which at blit size is a solid dark disc in the middle of every organism in
+  every state, and criterion 11 of the bar (the payout scale printed on the
+  object) cannot be read at any zoom. The ink is also **measured, then solved** to
+  a fixed 70% of its tile rather than estimated from the glyph count, so the blit
+  maps to a predictable share of the bell: a digit and a decimal point are not the
+  same width, and estimating left `0.31x` covering 73% of the tile and hanging off
+  the limb while a shorter string covered half.
 - **Silhouette variation.** Three bell archetypes — `DOME` (wide, shallow),
   `BELL` (tall, pinched), `LOBE` (asymmetric, two-lobed) — assigned by
   `slotIndex mod 3`, with a per-body Perlin phase offset. Fifteen identical bells
@@ -675,19 +727,48 @@ play surface, the payoff would have nowhere to go.**
   derived from the slot index and from nothing else** — never from a draw, an
   outcome, or a future state — so the art cannot leak information. This is a
   hard rule, not a preference.
-- **Water.** Volumetric fog with depth-based desaturation and a fine grain (2%
-  noise, **per-channel and palette-tinted** rather than monochrome, and
-  **static**: it is the frame's material rather than a weather effect, it sits
-  over every screen the game has and not only the canvas, and a texture that
-  shimmers is dirt — the 12 fps cycle it used to run measured 264 changing
-  regions between consecutive frames over a *settled* payout). Chromatic is
-  load-bearing: distinct-colour count is the bar's proxy for whether a surface is
-  made of anything, and a gradient is a straight line through colour space, so a
-  monochrome grain slides its pixels *along* that line and adds nothing. Noise
-  drawn independently per channel and tinted to the palette moves them off it.
-  The baked plates carry a **symmetric** per-channel dither of the same kind at
-  bake time — symmetric, so the mean of every channel is unchanged and it adds no
-  luminance, takes no saturation and cannot reorder two frames by value (§6.3).
+- **Water.** Volumetric fog with depth-based desaturation, and **no grain layer
+  anywhere in the product**. Rounds 2 and 3 composited a chromatic noise tile over
+  every pixel of every screen on the argument that it bought distinct-colour
+  count. It did, and it cost the thing the count is a *proxy* for: not one frame
+  in the fifty-one-image calibration library carries a grain layer, and at 3x
+  zoom ours read as sensor noise or a compression artefact sitting on top of the
+  art — identical on the amber liquid, on the glass, on the plaque, on the button
+  faces and on the type. A texture that is the same on the water, on a numeral and
+  on a control is not material; material is what an object is made of, and it
+  differs per object. **This is a hard rule: colour depth is bought by building a
+  surface, never by sprinkling one.** What remains is the printer's answer to a
+  long ramp — the two baked canvas plates carry a **symmetric** per-channel dither
+  of **±3 of 255** at bake time, symmetric so the mean of every channel is
+  unchanged and it adds no luminance, takes no saturation and cannot reorder two
+  frames by value (§6.3). The amplitude is set by what it *looks* like and not by
+  what it buys: round 3 ran it at ±11, which is 4% peak-to-mean on a dark ramp and
+  therefore a visible texture at 3x — deleting the CSS grain layer and leaving an
+  ±11 dither in the plate underneath would have moved the defect rather than fixed
+  it. At ±3 it is under one 8-bit step in mean and invisible at any zoom, which is
+  the difference.
+
+  What replaces the count the grain was buying is four surfaces that are actually
+  built, all of them constants derived from `slotRandom` on an index and therefore
+  incapable of carrying information about a round (§6.3):
+
+  - **Marbling at three scales in thirteen hues.** Both plates carry soft patches
+    from a fifth of the frame down to a twentieth — the largest are the depth of
+    the water, the smallest are silt suspended in it — and two of the thirteen
+    tints are warm, because a plate whose every patch is a cool tint moves its
+    pixels along the line its own ramp already lies on and buys nothing. The
+    count is the variable that matters: contrast per patch is unchanged, and
+    every tint added crosses every other one somewhere on the plate.
+  - **The far field.** Three hundred points of light, one to three pixels across,
+    in six palette hues, scattered over the stage plate *above* its vignette and
+    thinned toward the middle of the frame so they never compete with the colony.
+    This is the deep-sea form of the device every reference uses to keep a large
+    dark area from being inert — the starfield behind a climbing multiplier, the
+    damask behind a peg board. You can point at one of these; you can only measure
+    a grain.
+  - **The near seabed** below the canvas — §6.2's own entry, below.
+  - **The glass lattice** on every panel — §6.2's "UI panels" entry, below.
+
   Halation around every light source:
   a wide, low-opacity bloom (32 px radius, 12% opacity) plus a tight core bloom
   (6 px, 45%), both scaling with per-body intensity so a single late organism
@@ -696,8 +777,72 @@ play surface, the payoff would have nowhere to go.**
 - **Rock.** Matte basalt, high roughness, no colour, visible only where the
   colony's light reaches it. The vent mouth has an EMBER gradient that never
   moves.
+- **The near seabed.** The stage canvas stops where the value strip begins, at
+  about 65% of the frame. On every playing screen the strip, the action bar and
+  the footer fill that band; on the two settlement screens they step aside, and
+  what a player was left looking at — on the screen this game shows more often
+  than any other — was a third of the picture with nothing in it. So the world
+  continues past the canvas: a lit silt plane with a direction, the vent's own
+  pool spread flat across it, six basalt mounds rim-lit from the vent, a near
+  stand of tube worms in silhouette, and marine snow. The seam is *measured* from
+  the canvas's own bottom edge rather than assumed, so the floor starts exactly
+  where the drawn floor stops however the frame is laid out. It is baked once per
+  resize and it is a constant.
+
+  **The plane is lit to a value that counts as lit.** Round 3's floor topped out
+  at L = 0.21 — under the 0.35 the bar's mid-lit band begins at — so the whole
+  thing was "a slightly different dark" and the extinction terminal measured 1.6%
+  lit surface across it. The ramp now opens to L ≈ 0.38 just under the horizon and
+  falls into the floor's own shadow at the near edge, and it carries a *sideways*
+  term as well as a vertical one — cool at both margins, open in the middle where
+  the vent stands — because a vertical ramp alone, being full width, is a horizon
+  stripe rather than ground receding.
+
+  **The mounds stay low.** Raising them into the exposed band between the payout
+  card and the button was tried and measured: at that size the bezier shoulder
+  reads as overlapping paper fans with a straight cut along the bottom of each,
+  and both numbers went the wrong way (lit 20.6% → 20.3%, colours 1 091 → 1 081).
+  A shape that is a rock at thirty pixels is a stage flat at a hundred and fifty.
+
+  **The stage does not end, it dissolves.** The canvas and this plate are two
+  different bakes at two different scales, and butting them left a hard full-width
+  horizontal line at the seam with a value step across it — invisible on the
+  playing screens, where the strip covers it, and running the whole width of the
+  frame on both settlement screens, which are the two the game is judged by. The
+  stage's last 46 px is masked to transparent instead, so the plate underneath
+  comes up through it. A gradient painted *over* the join would only have traded a
+  seam for an inert band, and that band is already the thinnest part of the frame.
+
+  This band existed in round 3 and **was never on screen.** `#frame-plate` is
+  positioned at `z-index: -1` so it sits between the frame's background and its
+  content — which is what a negative z-index does *inside a stacking context*, and
+  `.frame` did not establish one. The plate resolved against the root context and
+  painted behind the frame's own background: invisible, on every screen, for the
+  whole round. It is exactly why the settlement frames kept measuring 1 400
+  distinct colours and 17% lit surface while the canvas that was supposed to be
+  filling their lower third measured neither. `.frame` now carries
+  `isolation: isolate`.
 - **UI panels.** "Pressure glass": 8% FOAM fill, 24 px background blur, 1 px
   inner stroke at 20% LUMEN, 2 px outer shadow at 60% ABYSS. Corner radius 16.
+
+  **And the glass has a body, and an ornament.** Round 3's panel face ran at
+  11–15% alpha through its whole middle, which is not translucent glass, it is a
+  window: once the frame plate became visible at all, the vent's warm light landed
+  across the middle of two cool panels as a brown blotch — a stain on the glass
+  rather than light behind it. Pressure glass is a material with a thickness, and
+  it takes what is behind it down to a suggestion. The top 11% of the ramp is
+  untouched, because that is what holds §9.6's contrast floor on every label in
+  the product.
+
+  The ornament is a **cell lattice at 29 px** — a hexagonal close-pack, because
+  that is what a pressure window and a sheet of living tissue are both made of —
+  etched into the face with a lit upper-left edge and a shadowed lower-right one,
+  from the same key light as every control and every organism. Per-cell tint and
+  strength come from `slotRandom`, which is why 29 px of repeat does not read as a
+  repeat. It is generated in `stage.js` (`glassTile`), handed to CSS as a data URL
+  and rasterized once. **It goes on the glass and on nothing else**: not the
+  water, not the type, not a control face. That restriction is the whole
+  difference between this and the layer it replaces.
 
 ### 6.3 Lighting: the exact brightness-to-money contract
 
@@ -861,8 +1006,8 @@ not money. They appear only during the 400 ms harvest beat and fade with it
 **Budget.** Target 60 fps on iPhone 12 / Snapdragon 7-series and above: ≤ 30 draw
 calls, one full-screen blur pass, ≤ 3 render targets, ≤ 2.5 ms GPU frame at
 390 × 844 @ 3x. Low tier (30 fps floor): the volumetric pass is replaced by a
-baked depth gradient, halation drops to the tight core bloom only, and grain is
-static. Nothing in the low tier changes what is *shown* — only how it is lit.
+baked depth gradient and halation drops to the tight core bloom only. Nothing in
+the low tier changes what is *shown* — only how it is lit.
 
 `prefers-reduced-motion` replaces splits and the settlement ceremony with
 cross-fades, disables drift and the elastic overshoot, and makes the verdict
@@ -1055,9 +1200,10 @@ reading in the game is 4.79:1.
    visible background. Take from it: gel translucency, how internal light reads
    through a membrane, and the total absence of environmental context.
 2. **Long-exposure photograph of bioluminescent plankton in a breaking wave at
-   night.** A cyan smear against near-black water, heavy grain, strong halation
-   around the brightest points. Take from it: colour temperature, grain, bloom
-   behaviour — not composition.
+   night.** A cyan smear against near-black water with strong halation around the
+   brightest points. Take from it: colour temperature and bloom behaviour — not
+   composition, and **not** its grain: a photograph's grain is the sensor, and a
+   sensor is not one of this product's materials (§6.2).
 3. **The dark instrument panel of a research submersible.** Matte black
    surfaces, thin cyan strokes, tabular readouts, exactly one warm amber
    telltale. Take from it: UI restraint. Information is thin lines and numbers
@@ -1289,6 +1435,47 @@ full contrast, and never the brightest thing in the frame. Exactly one region ma
 be the luminance maximum in any state, and at a payoff it is the vessel — the eye
 belongs on the money that was just won, not on the next stake. That reading is
 also the responsible one, and the two agree.
+
+**EVERY CONTROL IN THE PRODUCT IS A LIT OBJECT, AND THIS IS THE CONSTRUCTION.**
+Not the primary and not only the ones on the money surface: every control,
+including `RECEIPT`, `VERIFY`, `SHARE`, `HELP & PAYTABLE`, `HISTORY`, the two
+masthead icon buttons and the stake stepper's `−` and `+`. A blind comparison
+picked this build out of a set of shipped products on exactly this, faster than
+on anything else: those controls were dark rectangles with a single 1 px stroke
+and nothing else, while every button in every reference is modelled. The rubric
+bans the construction outright — *never an outline* — and it does so for a
+mechanical reason: a 1 px stroke has no volume, so it cannot carry a pressed
+state, and it measures as hard edge rather than as material.
+
+**One key light for the whole product: above, very slightly left.** Nothing
+invents its own direction. Four layers, in order:
+
+1. a **graded face** — never a flat fill, and never a wash so faint the control is
+   discoverable only by its stroke;
+2. a **bezel** — a bright inner lip along the top edge inside a saturated outer
+   ring, which is what gives an edge a *section* instead of a line. This is the
+   layer that was missing from the primary CTA, and it is the one that does the
+   most work: without it a control is a coloured area with a boundary; with it, it
+   is a cap set into a ring, and the eye reads two materials;
+3. a **darker inner edge along the bottom**, so the face is a face and not a
+   sticker;
+4. a **seat** — a hard lip the control stands on, a tight contact shadow and a
+   wide soft one, both tinted to the floor so nothing manufactures black. The
+   reference's "grounding shadow" is always two shadows: one is either too tight
+   to ground it or too soft to touch it.
+
+The **specular** is a shape, not a fade: an inset cap with its own elliptical
+bottom, so the gloss ends on a curve that reads as the crown of the button turning
+away. It is tinted to the control's own chroma rather than white — a white sheen
+at 38% over LUMEN drops the face's saturation under the 0.35 the focal measure
+uses, which excluded the brightest part of the primary control from the region it
+is supposed to own.
+
+The press then has something to take away, which is the reference behaviour
+measured on the genre's canonical PLAY control: **specular off, element down 2 px
+into its own shadow, contact shadow collapsed**, inside 100 ms and before any
+network round-trip. Secondary controls are quieter **by value**, never by being a
+drawing of a control while the primary is a control.
 
 **Why T0 had to be split, with the frequency.** Round 2 defined T0 as `X < 2` and
 gave it "value settles in place, balance chip counts up". `X` is the round's

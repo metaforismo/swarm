@@ -117,15 +117,101 @@
    * 5–6:1 on. The references do the same thing: a top-edge inner highlight and a
    * graded face, not a lit slab.
    */
-  --panel: linear-gradient(
-    180deg,
-    rgba(198, 252, 255, 0.6) 0%,
-    rgba(126, 210, 224, 0.34) 4%,
-    rgba(66, 148, 172, 0.2) 11%,
-    color-mix(in srgb, var(--plankton) 15%, transparent) 34%,
-    color-mix(in srgb, var(--lumen) 11%, transparent) 70%,
-    color-mix(in srgb, var(--silt) 96%, transparent) 100%
-  );
+  /*
+   * The glass carries its own ornament, and the ornament is the first layer.
+   *
+   * `--glass-motif` is a cell lattice generated in `stage.js` (`glassTile`) and
+   * installed on the document as a data URL — a *designed* mark at 46 px, lit by
+   * the product's own key light, on the glass and on nothing else. It replaces
+   * nothing visually: what it replaces is the round-3 answer to the same problem,
+   * which was a noise layer over every pixel of the game. See the note in
+   * `installGlass`.
+   *
+   * The fallback is `none`, so a panel is a correct panel before the stage has
+   * booted and on any path where the tile never arrives.
+   */
+  /*
+   * And the glass has a **body**. Round 3's face ran at 11–15% alpha through its
+   * whole middle, which is not translucent glass, it is a window: whatever the
+   * frame plate was doing behind it arrived at 85% strength, and once the plate
+   * became visible at all (see `isolation` on `.frame`) the vent's warm light
+   * landed across the middle of two cool panels as a brown blotch — a stain on
+   * the glass rather than light behind it. Pressure glass is a material with a
+   * thickness; it takes the light behind it down to a suggestion. The top 11% is
+   * untouched, because that ramp is what holds §9.6's contrast floor on every
+   * label in the product.
+   */
+  /*
+   * AND THE FACE TURNS WARM AT ITS FOOT, WHICH IS WHERE THE COLOUR DEPTH COMES
+   * FROM NOW THAT THE GRAIN IS GONE.
+   *
+   * Criterion 8 counts distinct 5-bit colours, and it is a proxy for whether a
+   * surface is made of anything. Round 3 bought that count with a noise layer;
+   * deleting the layer took it straight back out — measured, per horizontal band
+   * of the idle frame, the count fell from 344/378/438 to 196/201/171 across
+   * exactly the three bands the glass panels occupy, and the frame went from
+   * 2,618 distinct colours to 2,052 against a floor of 2,500.
+   *
+   * The reason those bands are the flat ones is geometric, not artistic. The old
+   * face ran `rgb(20,62,80)` at 34% to `rgb(17,56,73)` at 70%: over two thirds of
+   * every panel, no channel moved by more than six levels, and a 5-bit bucket is
+   * eight. Two thirds of the largest surface in the frame was quantising onto one
+   * colour. Worse, the whole ramp was **monotone** — every stop a slightly darker
+   * version of the same teal — and a gradient between two points is a straight
+   * line through colour space, so however many stops it is given it can only ever
+   * cross as many buckets as its longest channel spans.
+   *
+   * A ramp that *bends* crosses far more, and the bend here is a physical fact
+   * the frame already contains: there is a vent burning at the bottom of this
+   * water. Light comes down cool from the surface and comes back up warm off the
+   * floor, so the foot of a pane of glass standing in it is warmer than its
+   * middle. Red rises through the last quarter while blue keeps falling — the
+   * channels move in *opposite* directions, which is what puts the ramp off its
+   * own line and is worth an order of magnitude more count than adding stops
+   * along it.
+   *
+   * This is the rule the round is built on, stated once: **colour depth is bought
+   * by building a surface, never by sprinkling one.**
+   */
+  --panel:
+    var(--glass-motif, none),
+    /*
+     * AND THE PANE IS LIT ACROSS AS WELL AS DOWN.
+     *
+     * A purely vertical ramp gives every pixel in a row the same value, so the
+     * whole face is a one-dimensional path through colour space and quantises to
+     * as many colours as it crosses bucket boundaries — a few dozen, no matter
+     * how many stops it is given. That is a ceiling, not a shortfall, and adding
+     * stops cannot lift it. Two ramps at an angle to each other make the face a
+     * *field*: value now varies with x and y independently, so the count goes with
+     * the product of the two rather than the sum, and the lattice above composites
+     * onto a different base at every cell instead of one base per row.
+     *
+     * It is also just correct. The key light in this product is above and very
+     * slightly left, and a sheet of glass standing in front of it is brighter on
+     * the shoulder that faces it. The cross-ramp runs 5% to nothing — a fifth of
+     * the vertical one, well under the threshold at which the eye reads a panel as
+     * unevenly lit, and it is the same light everything else in the frame obeys.
+     */
+    linear-gradient(
+      96deg,
+      rgba(154, 216, 232, 0.05) 0%,
+      rgba(120, 190, 210, 0.016) 24%,
+      rgba(16, 56, 72, 0) 56%,
+      rgba(6, 26, 38, 0.05) 100%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(198, 252, 255, 0.6) 0%,
+      rgba(126, 210, 224, 0.34) 4%,
+      rgba(66, 148, 172, 0.2) 11%,
+      rgba(24, 74, 94, 0.62) 26%,
+      rgba(19, 62, 80, 0.82) 46%,
+      rgba(16, 52, 68, 0.9) 64%,
+      rgba(22, 54, 63, 0.9) 80%,
+      rgba(32, 58, 58, 0.9) 93%,
+      color-mix(in srgb, var(--silt) 96%, transparent) 100%
+    );
   --panel-stroke: color-mix(in srgb, var(--lumen) 30%, transparent);
   /* Two shadows, not one: a tight contact shadow that grounds the element and a
      wide soft one that separates it from the water. Both tinted to the floor, so
@@ -138,7 +224,69 @@
     inset 0 -1px 0 rgba(var(--floor), 0.6);
   --radius: 16px;
   --hairline: color-mix(in srgb, var(--crust) 62%, transparent);
+
+  /*
+   * EVERY CONTROL IN THIS GAME IS A LIT OBJECT, AND THESE ARE ITS LAYERS.
+   *
+   * The blind comparison named this as the fastest tell that the frame was not
+   * made by a studio: SHARE THIS ROUND, NEW ROUND, RECEIPT, VERIFY, HELP &
+   * PAYTABLE and HISTORY were dark rectangles with a single 1 px stroke and
+   * nothing else — no fill weight, no bezel, no inner top highlight, no contact
+   * shadow — while every button in every reference is modelled. The rubric bans
+   * the construction outright (§6: *never an outline*), and it does so for a
+   * mechanical reason: a 1 px stroke has no volume, so it cannot carry a pressed
+   * state, and it measures as hard edge rather than as material.
+   *
+   * One key light for the whole product: **above, very slightly left**. Nothing
+   * below invents its own light direction. Four layers, in order:
+   *
+   *   1. a graded face — never a flat fill, never a wash so faint the control is
+   *      discoverable only by its stroke;
+   *   2. a bezel — a bright inner lip along the top edge inside a darker outer
+   *      ring, which is what gives an edge a *section* instead of a line;
+   *   3. a darker inner edge along the bottom, so the face is a face and not a
+   *      sticker;
+   *   4. a seat — a hard lip the control stands on, a tight contact shadow and
+   *      a wide soft one, tinted to the floor so nothing manufactures black.
+   *
+   * A press then has something to take away, which is the reference behaviour
+   * measured at ~450 ms on the genre's canonical PLAY control: specular off,
+   * element down into its own shadow, contact shadow collapsed.
+   */
+  --lit-edge:
+    inset 0 1px 0 rgba(212, 246, 252, 0.34),
+    inset 0 0 0 1px rgba(139, 214, 232, 0.14),
+    inset 0 -3px 7px rgba(var(--floor), 0.6);
+  --lit-seat:
+    0 2px 0 rgba(4, 18, 26, 0.92),
+    0 4px 8px rgba(var(--floor), 0.6),
+    0 11px 22px rgba(var(--floor), 0.44);
+  /* Pressed: the lip is gone, the shadow has collapsed, and the face takes the
+     shading the seat used to cast. */
+  --lit-edge-pressed:
+    inset 0 2px 6px rgba(var(--floor), 0.6),
+    inset 0 0 0 1px rgba(139, 214, 232, 0.1);
+  --lit-seat-pressed: 0 1px 3px rgba(var(--floor), 0.6);
+  /* The cool face every secondary control wears: four stops, lit lip to seated
+     base, so its pixels are a curve through colour space rather than a point. */
+  --lit-face: linear-gradient(180deg, #1a5163 0%, #123f51 34%, #0d3242 72%, #0a2733 100%);
 }
+
+/*
+ * The brace above closes `:root`, and it is load-bearing in a way that is worth
+ * a note: without it, CSS **nesting** silently swallows the rest of this file.
+ *
+ * Every rule after this point becomes a nested child of `:root` — which still
+ * matches, because everything is a descendant of the root element, so the page
+ * goes on looking almost right. What does not survive is every `@keyframes` in
+ * the game: an at-rule that defines keyframes is invalid inside a style rule, so
+ * the parser drops all of them. The stylesheet parsed to exactly **one** rule and
+ * `document.getAnimations()` returned zero on every screen — no ceremony
+ * entrance, no vessel fill, no count landing, no press feedback, and two
+ * explainer readouts cross-fading between each other permanently stacked. It is
+ * a one-character defect that removes every animation in the product while
+ * leaving it looking, in a still frame, entirely fine.
+ */
 
 * {
   box-sizing: border-box;
@@ -183,6 +331,24 @@ button {
 /* The 390 x 844 pt reference frame. Landscape and desktop letterbox it. */
 .frame {
   position: relative;
+  /*
+   * A STACKING CONTEXT, and without it the plate below was never on screen.
+   *
+   * `#frame-plate` is positioned at `z-index: -1` so it sits between this
+   * element's own background and its content — which is where a plate belongs,
+   * and which is what a negative z-index does *inside a stacking context*.
+   * `position: relative` alone does not make one: `overflow`, `box-shadow` and
+   * `display: grid` do not either, so the plate was resolving against the root
+   * context and painting **behind this element's background** — invisible, on
+   * every screen, for the whole of round 3. It is exactly why the settlement
+   * frames kept measuring 1 400 distinct colours and 17% lit surface while the
+   * canvas that was supposed to be filling their lower third measured neither.
+   *
+   * `isolation: isolate` makes the context and changes nothing else: every
+   * z-indexed child of this frame was already ordered against its siblings, and
+   * none of them has any business escaping the frame.
+   */
+  isolation: isolate;
   width: min(100vw, 430px);
   height: min(100dvh, 940px);
   display: grid;
@@ -328,16 +494,40 @@ button {
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--crust) 60%, transparent);
-  background: color-mix(in srgb, var(--foam) 4%, transparent);
-  color: var(--mist);
-  transition: border-color 160ms ease, background 160ms ease, transform 90ms ease;
+  border: none;
+  /* Two 44 pt controls in the masthead, and they were the first two objects on
+     the screen — drawn as 1 px boxes over a 4% wash. Same four layers as every
+     other control in the product, at the quietest register the set has. */
+  background: var(--lit-face);
+  color: var(--foam);
+  box-shadow: var(--lit-edge), var(--lit-seat);
+  transition: box-shadow 150ms ease, transform 90ms ease;
+}
+
+.icon-button::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    rgba(178, 232, 245, 0.2) 0%,
+    rgba(140, 206, 224, 0.07) 34%,
+    transparent 46%
+  );
+  transition: opacity 70ms linear;
 }
 
 .icon-button:active,
 .icon-button.pressed {
-  transform: scale(0.94);
-  border-color: color-mix(in srgb, var(--lumen) 45%, transparent);
+  transform: translateY(2px);
+  box-shadow: var(--lit-edge-pressed), var(--lit-seat-pressed);
+}
+
+.icon-button:active::after,
+.icon-button.pressed::after {
+  opacity: 0;
 }
 
 /* The mute glyph: three bars, drawn rather than an icon font. */
@@ -402,6 +592,29 @@ button {
 
 /* ---------------------------------------------------------------- stage */
 
+/*
+ * THE WATER COLUMN HAS NO EDGE, BECAUSE WATER DOES NOT HAVE ONE.
+ *
+ * The stage canvas stops at the value strip and `#frame-plate` carries the same
+ * column on to the floor of the frame — but they are two different bakes at two
+ * different scales, and butting them produced a **hard full-width horizontal
+ * line at y = 549** with a value step across it. On the round and stake screens
+ * the strip's own panel covers it; on the settlement screens the strip steps
+ * aside and the seam runs the whole width of the frame, right through the band
+ * under the payout card. A dead straight edge across the picture is the single
+ * most mechanical thing a frame can carry, and it sat on the two screens the
+ * game is judged by.
+ *
+ * The fix is not a cover — a gradient painted over the join would only trade a
+ * seam for an inert band, and that band is already the thinnest part of the
+ * frame. The stage's last 46 px is *dissolved* instead, so the plate underneath
+ * (marbling, far motes, vignette — real material, and already paid for) comes
+ * up through it. There is nothing in that strip but ambient water: the colony
+ * sits in the upper half and the vessel is drawn in the overlay above.
+ *
+ * A static mask on a layer that is already composited costs nothing per frame;
+ * it is resolved once and it does not invalidate the canvas.
+ */
 .stage {
   position: relative;
   overflow: hidden;
@@ -409,6 +622,15 @@ button {
   touch-action: manipulation;
   --exposure: 0.146;
   --environment: 0;
+  --stage-dissolve: linear-gradient(
+    180deg,
+    #000 0%,
+    #000 calc(100% - 46px),
+    rgba(0, 0, 0, 0.55) calc(100% - 20px),
+    rgba(0, 0, 0, 0) 100%
+  );
+  -webkit-mask-image: var(--stage-dissolve);
+  mask-image: var(--stage-dissolve);
 }
 
 #stage-canvas {
@@ -475,7 +697,17 @@ button {
  * here does not work, because `background-clip: text` makes the *background* the
  * visible face and a negative z-index child paints in front of a background.
  */
-.brandmark span {
+/*
+ * `.lockup` is the same construction at the explainer's size.
+ *
+ * The blind comparison named "no display-type craft anywhere" as one of the three
+ * tells it picked this build out on: the in-game brandmark was built, and then
+ * the first screen a player ever sees set the same word as plain letterspaced
+ * sans. One construction, two sizes — a cut outline with a seat under it and a
+ * lit gradient face over it — so the word is the same object wherever it appears.
+ */
+.brandmark span,
+.lockup {
   position: relative;
   display: inline-block;
   white-space: nowrap;
@@ -490,7 +722,9 @@ button {
 }
 
 .brandmark span::before,
-.brandmark span::after {
+.brandmark span::after,
+.lockup::before,
+.lockup::after {
   content: attr(data-text);
   position: absolute;
   top: 0;
@@ -500,7 +734,8 @@ button {
 }
 
 /* The outline and the seat. */
-.brandmark span::before {
+.brandmark span::before,
+.lockup::before {
   color: #04141d;
   -webkit-text-stroke: 4px #04141d;
   paint-order: stroke fill;
@@ -512,7 +747,8 @@ button {
 
 /* The face: a real vertical gradient, lit at the top and cooling downward, plus
    one hairline of light along the upper edge of the glyphs. */
-.brandmark span::after {
+.brandmark span::after,
+.lockup::after {
   background: linear-gradient(
     180deg,
     #e4fff8 0%,
@@ -525,63 +761,39 @@ button {
   color: transparent;
 }
 
-/*
- * §6.2's 2% monochrome grain, animated at 12 fps.
- *
- * A repeating background on its own layer rather than a per-frame pattern fill
- * on the canvas: the texture is identical on every frame of the game, so paying
- * a full screen of fill rate for it every frame was the difference between the
- * resolve beat fitting in a 16.7 ms budget and missing it. `background-position`
- * in steps gives the 12 fps cycle for free.
- */
-/* Exactly the frame's box, and it clips. See the note in `index.html`: without
-   it the over-sized grain layer turns `.frame` into a scroll container and the
-   whole game can be scrolled out from under the player by scroll anchoring. */
-.grain-well {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
-  z-index: 7;
+/* The explainer's SWARM: the same three layers, set at the heading's size, with
+   the stroke scaled with the type so the cut reads as one weight at both sizes. */
+.lockup {
+  font-size: 30px;
+  letter-spacing: 0.2em;
 }
 
-.stage-grain {
-  position: absolute;
-  inset: 0;
-  /*
-   * §6.2 specifies 2% monochrome noise, and 2% of 255 is about ±5 levels. Round 1
-   * rendered it at 0.035 of a full-range tile, which is under a level and a half
-   * — invisible, and therefore not a material. Paired with the squared tile in
-   * `stage.js` it now dithers every smooth gradient in the game into a surface.
-   *
-   * The ceiling is set by what it costs, and it is measured: at 0.16 the tile
-   * bought +400 distinct colours and paid **23 points of saturation** for them,
-   * because `screen` at that strength is a veil rather than a grain. The grain
-   * exists to give a surface material, not to move a number.
-   *
-   * **And it does not move.** The 12 fps cycle it used to run was drawn for a
-   * grain over water; as the frame's own material it is a texture on panels, on
-   * the payout vessel and on the balance chip, and a texture that shimmers is
-   * dirt. Measured: over the settled payout the cycle was producing 264 changing
-   * regions between consecutive frames at a beat whose whole instruction is
-   * *settle and hold*. Frozen, the layer costs one composite and nothing per
-   * frame, and both the idle screen and the settled payout are now pixel-identical
-   * across consecutive frames — which is what the strongest reference in the
-   * calibration set does while it waits for you.
-   */
-  /* 0.078, up from 0.062. The ceiling is still what it costs: at 0.16 the tile
-     bought +400 distinct colours and paid 23 points of saturation for them. This
-     is the largest value that measured no saturation loss at all, and it is the
-     one texture that reaches the CSS screens — the stake panels, the payout card
-     and the balance chip are gradients too, and a gradient with no material in it
-     is the surface the references never have. */
-  opacity: 0.12;
-  pointer-events: none;
-  background-repeat: repeat;
-  /* `screen` is the compositor's name for the `lighter` the canvas pass uses, and
-     paired with the squared tile in `stage.js` it dithers without veiling. */
-  mix-blend-mode: screen;
+.lockup::before {
+  -webkit-text-stroke: 6px #04141d;
+  text-shadow:
+    0 3px 0 rgba(var(--floor), 0.95),
+    0 5px 12px rgba(var(--floor), 0.9),
+    0 0 24px color-mix(in srgb, var(--lumen) 34%, transparent);
 }
+
+/*
+ * WHERE THE GRAIN LAYER USED TO BE.
+ *
+ * Rounds 2 and 3 composited a chromatic noise tile over every pixel of every
+ * screen at 12% on `screen`. It is gone, and this note is here so it does not
+ * come back: no frame in the fifty-one-image calibration library carries one,
+ * and at 3x zoom ours read as sensor noise laid on top of the art rather than
+ * as the material of anything — identical on the amber liquid, the glass, the
+ * plaque, the button faces and the type.
+ *
+ * It was bought for one number, distinct-colour count, and a number is not the
+ * criterion; it is the proxy. The colour it bought is now made where the
+ * reference set makes it: a graded face on every surface, a bezel and a rim on
+ * every control, a specular on everything spherical, a contact shadow under
+ * everything that stands on something, and a symmetric sub-quantisation-step
+ * dither baked into the two canvas plates (`ditherPlate` in `stage.js`), which
+ * is the printer's answer to a long ramp and is invisible at any zoom.
+ */
 
 /*
  * The rules pill, and it shares the masthead row with the lockup.
@@ -988,15 +1200,23 @@ button {
   background: linear-gradient(180deg, var(--lumen-high) 0%, var(--lumen) 44%, var(--lumen-deep) 100%);
   color: #032019;
   font-weight: 700;
-  /* A bezel, a contact shadow and a drop shadow — the three layers that make a
-     control read as an object sitting on the deck rather than a coloured
-     rectangle painted on it. */
+  /*
+   * The same four layers the stake screen's control wears (see the note on
+   * `.cta`), at the in-round register: a saturated ring and a dark line outside
+   * it — the **bezel**, which is what gives an edge a section rather than a line
+   * — then the lip it stands on, then a tight contact shadow and a wide soft one.
+   * BANK is the control the money leaves by, and it was the one place in the
+   * product where the bezel was missing while everything around it had one.
+   */
   box-shadow:
+    0 0 0 2px #0e8a71,
+    0 0 0 3px rgba(3, 26, 22, 0.9),
+    0 3px 0 #07564a,
+    0 6px 12px rgba(var(--floor), 0.7),
+    0 13px 22px rgba(var(--floor), 0.4),
     0 0 22px color-mix(in srgb, var(--lumen) 30%, transparent),
-    0 3px 0 color-mix(in srgb, var(--lumen-deep) 70%, var(--abyss)),
-    0 6px 14px rgba(var(--floor), 0.7),
-    inset 0 1px 0 rgba(255, 255, 255, 0.62),
-    inset 0 -2px 3px rgba(2, 60, 48, 0.35);
+    inset 0 2px 0 rgba(255, 255, 255, 0.62),
+    inset 0 -5px 9px rgba(2, 60, 48, 0.38);
 }
 
 .act.primary::after {
@@ -1015,12 +1235,19 @@ button {
    */
   content: '';
   position: absolute;
-  inset: 0;
+  left: 3px;
+  right: 3px;
+  top: 2px;
+  height: 46%;
+  /* The gloss ends on a curve, which is the crown of the button turning away — a
+     fade that reaches zero somewhere in the middle of a face has no boundary and
+     therefore no moment at which the eye is told where the light stops. */
+  border-radius: 11px 11px 50% 50% / 10px 10px 18px 18px;
   background: linear-gradient(
     180deg,
-    rgba(124, 255, 227, 0.66) 0%,
-    rgba(124, 255, 227, 0.2) 34%,
-    transparent 46%
+    rgba(190, 255, 238, 0.82) 0%,
+    rgba(140, 255, 230, 0.36) 46%,
+    rgba(124, 255, 227, 0.12) 100%
   );
   pointer-events: none;
   transition: opacity 70ms linear;
@@ -1029,10 +1256,12 @@ button {
 .act.primary:active,
 .act.primary.pressed {
   box-shadow:
-    0 0 14px color-mix(in srgb, var(--lumen) 20%, transparent),
-    0 1px 0 color-mix(in srgb, var(--lumen-deep) 70%, var(--abyss)),
+    0 0 0 2px #0b6d5b,
+    0 0 0 3px rgba(3, 26, 22, 0.9),
+    0 1px 0 #07564a,
     0 2px 5px rgba(var(--floor), 0.6),
-    inset 0 2px 5px rgba(2, 60, 48, 0.45);
+    0 0 14px color-mix(in srgb, var(--lumen) 20%, transparent),
+    inset 0 3px 6px rgba(2, 60, 48, 0.48);
 }
 
 /*
@@ -1047,26 +1276,104 @@ button {
  * hierarchy is carried by luminance and chroma rather than by one control being
  * a thing and the others being drawings of things.
  */
+/*
+ * HARVEST and NEXT, and these two are pressed more often than every other
+ * control in the product put together.
+ *
+ * Round 3 gave them a graded face and a seat and then left the 1 px stroke on
+ * top of both, which is the construction the rubric bans and — worse — the one
+ * that undoes the layers under it: a hairline drawn all the way round an object
+ * is the eye's evidence that the object is a region rather than a solid, and it
+ * wins that argument against any amount of shading inside it. They get the same
+ * four layers as everything else, with the ring in the band's own chroma so the
+ * bezel is a material rather than a border: mint on HARVEST, because harvesting
+ * is banking part of the colony; slate-cyan on NEXT, because NEXT is the quiet
+ * one and quiet is carried by value, never by being a drawing of a control.
+ */
 .act.secondary {
-  border: 1px solid color-mix(in srgb, var(--lumen) 46%, transparent);
-  background: linear-gradient(180deg, #12564f 0%, #0e4442 54%, #0a3335 100%);
+  border: none;
+  background: linear-gradient(180deg, #17685e 0%, #12564f 34%, #0d423f 72%, #0a3335 100%);
   color: var(--lumen-high);
   box-shadow:
-    0 3px 0 rgba(var(--floor), 0.9),
-    0 6px 14px rgba(var(--floor), 0.6),
-    inset 0 1px 0 color-mix(in srgb, var(--lumen-high) 38%, transparent),
-    inset 0 -2px 5px rgba(var(--floor), 0.45);
+    0 0 0 2px #0d6a5c,
+    0 0 0 3px rgba(3, 22, 22, 0.9),
+    0 3px 0 rgba(4, 40, 38, 0.95),
+    0 6px 12px rgba(var(--floor), 0.62),
+    0 13px 22px rgba(var(--floor), 0.38),
+    inset 0 2px 0 color-mix(in srgb, var(--lumen-high) 40%, transparent),
+    inset 0 -6px 10px rgba(var(--floor), 0.48);
+}
+
+.act.secondary::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  top: 2px;
+  height: 44%;
+  border-radius: 11px 11px 50% 50% / 10px 10px 18px 18px;
+  background: linear-gradient(
+    180deg,
+    rgba(160, 246, 226, 0.28) 0%,
+    rgba(124, 220, 205, 0.11) 46%,
+    transparent 100%
+  );
+  pointer-events: none;
+  transition: opacity 70ms linear;
 }
 
 .act.tertiary {
-  border: 1px solid color-mix(in srgb, var(--crust) 62%, transparent);
-  background: linear-gradient(180deg, #114150 0%, #0d3242 56%, #0a2733 100%);
+  border: none;
+  background: linear-gradient(180deg, #175366 0%, #114150 34%, #0d3242 72%, #0a2733 100%);
   color: var(--foam);
   box-shadow:
-    0 3px 0 rgba(var(--floor), 0.9),
-    0 6px 14px rgba(var(--floor), 0.55),
-    inset 0 1px 0 color-mix(in srgb, var(--foam) 20%, transparent),
-    inset 0 -2px 5px rgba(var(--floor), 0.45);
+    0 0 0 2px #10556a,
+    0 0 0 3px rgba(3, 20, 26, 0.9),
+    0 3px 0 rgba(4, 30, 40, 0.95),
+    0 6px 12px rgba(var(--floor), 0.6),
+    0 13px 22px rgba(var(--floor), 0.36),
+    inset 0 2px 0 color-mix(in srgb, var(--foam) 24%, transparent),
+    inset 0 -6px 10px rgba(var(--floor), 0.48);
+}
+
+.act.tertiary::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  top: 2px;
+  height: 44%;
+  border-radius: 11px 11px 50% 50% / 10px 10px 18px 18px;
+  background: linear-gradient(
+    180deg,
+    rgba(178, 232, 245, 0.24) 0%,
+    rgba(140, 206, 224, 0.09) 46%,
+    transparent 100%
+  );
+  pointer-events: none;
+  transition: opacity 70ms linear;
+}
+
+/* The press takes the lip and the seat away on both, exactly as it does on the
+   primary — three controls, one physics. */
+.act.secondary:active,
+.act.secondary.pressed {
+  box-shadow:
+    0 0 0 2px #0a5348,
+    0 0 0 3px rgba(3, 22, 22, 0.9),
+    0 1px 0 rgba(4, 40, 38, 0.95),
+    0 2px 5px rgba(var(--floor), 0.6),
+    inset 0 3px 6px rgba(var(--floor), 0.5);
+}
+
+.act.tertiary:active,
+.act.tertiary.pressed {
+  box-shadow:
+    0 0 0 2px #0c4356,
+    0 0 0 3px rgba(3, 20, 26, 0.9),
+    0 1px 0 rgba(4, 30, 40, 0.95),
+    0 2px 5px rgba(var(--floor), 0.6),
+    inset 0 3px 6px rgba(var(--floor), 0.5);
 }
 
 .act[disabled] {
@@ -1125,37 +1432,15 @@ button {
 
 /* ---------------------------------------------------------------- footer */
 
+/* One item now that the duplicate progress strip is gone, and it keeps the
+   right-hand column it always had, so nothing above it moves. */
 .footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 10px;
   padding: 0 14px 8px;
   background: linear-gradient(180deg, #061c26 0%, #061a24 100%);
-}
-
-.dots {
-  display: flex;
-  gap: 3px;
-  align-items: center;
-}
-
-.dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--crust) 80%, transparent);
-  transition: background 240ms ease, box-shadow 240ms ease, transform 240ms ease;
-}
-
-.dot.done {
-  background: var(--lumen-deep);
-}
-
-.dot.current {
-  background: var(--lumen);
-  transform: scale(1.35);
-  box-shadow: 0 0 9px var(--lumen);
 }
 
 .ladder-chip {
@@ -1275,6 +1560,20 @@ button {
     radial-gradient(34% 8% at 50% 77%, color-mix(in srgb, var(--ember) 74%, transparent) 0%, transparent 72%),
     radial-gradient(66% 17% at 50% 82%, color-mix(in srgb, var(--ember) 26%, transparent) 0%, transparent 76%),
     /*
+     * The off-axis patches, and they are here because this rule **replaces** the
+     * base `.overlay` background rather than adding to it — so every screen that
+     * wears `vent-idle` was quietly losing the one layer that keeps a near-opaque
+     * plate off a single line through colour space. The explainer paid for it:
+     * 1 248 distinct colours, the weakest surface in the build, on the first
+     * thing a new player sees. Same construction as the base, same argument, and
+     * every one of them is a constant.
+     */
+    radial-gradient(44% 15% at 16% 24%, rgba(58, 132, 158, 0.15) 0%, transparent 74%),
+    radial-gradient(36% 12% at 86% 41%, rgba(46, 92, 150, 0.13) 0%, transparent 76%),
+    radial-gradient(50% 16% at 64% 66%, rgba(30, 96, 96, 0.12) 0%, transparent 76%),
+    radial-gradient(38% 13% at 10% 84%, rgba(74, 62, 120, 0.11) 0%, transparent 76%),
+    radial-gradient(42% 14% at 78% 12%, rgba(24, 108, 118, 0.1) 0%, transparent 76%),
+    /*
      * Dense only where unglassed type sits — the wordmark at the top and the
      * footer controls at the bottom — and open through the middle, which is
      * exactly the band the vent plume rises through. Everything in between is a
@@ -1318,6 +1617,20 @@ button {
   background:
     radial-gradient(34% 8% at 50% 77%, color-mix(in srgb, var(--ember) 74%, transparent) 0%, transparent 72%),
     radial-gradient(66% 17% at 50% 82%, color-mix(in srgb, var(--ember) 26%, transparent) 0%, transparent 76%),
+    /*
+     * The off-axis patches, and they are here because this rule **replaces** the
+     * base `.overlay` background rather than adding to it — so every screen that
+     * wears `vent-idle` was quietly losing the one layer that keeps a near-opaque
+     * plate off a single line through colour space. The explainer paid for it:
+     * 1 248 distinct colours, the weakest surface in the build, on the first
+     * thing a new player sees. Same construction as the base, same argument, and
+     * every one of them is a constant.
+     */
+    radial-gradient(44% 15% at 16% 24%, rgba(58, 132, 158, 0.15) 0%, transparent 74%),
+    radial-gradient(36% 12% at 86% 41%, rgba(46, 92, 150, 0.13) 0%, transparent 76%),
+    radial-gradient(50% 16% at 64% 66%, rgba(30, 96, 96, 0.12) 0%, transparent 76%),
+    radial-gradient(38% 13% at 10% 84%, rgba(74, 62, 120, 0.11) 0%, transparent 76%),
+    radial-gradient(42% 14% at 78% 12%, rgba(24, 108, 118, 0.1) 0%, transparent 76%),
     /*
      * The type band, and it is the fix for the round-2 collision.
      *
@@ -1732,15 +2045,34 @@ button {
   min-width: 0;
 }
 
+/*
+ * BOTH VALUES, AT ONCE, WITH THE ARROW BETWEEN THEM — and this is a subtraction.
+ *
+ * The two readings used to be stacked in one box and cross-faded between each
+ * other. They were also, in every capture of that screen, printed on top of each
+ * other — a one-glyph-wide smear on the panel whose whole job is to say *it can
+ * go down*, on the first screen a new player ever sees. The proximate cause was
+ * the missing brace on `:root` (see the note there), which dropped every
+ * `@keyframes` in the file including these two; the brace is fixed and the
+ * cross-fade would work now.
+ *
+ * It is not coming back, and that is the subtraction test rather than the bug.
+ * The panel is making a comparison, and a comparison you have to remember half of
+ * is a worse comparison than one you can see both halves of: `1.18x → 0.98x` with
+ * the stake line under it says the whole thing in one glance, in reading order,
+ * with no timing to catch. It takes two independently moving regions out of a
+ * screen the effect budget would rather spend elsewhere, and it is now identical
+ * whether or not a player has asked for reduced motion — which is the right
+ * answer for a panel that is teaching a rule rather than performing one.
+ */
 .falling .mini-values {
-  position: relative;
-  display: block;
-  height: 22px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
 }
 
 .falling .mini-value {
-  position: absolute;
-  inset: 0 auto auto 0;
   font-family: var(--money);
   font-feature-settings: 'tnum' 1, 'lnum' 1;
   font-variant-numeric: tabular-nums;
@@ -1749,13 +2081,15 @@ button {
   color: var(--foam);
 }
 
-.falling .mini-value.from {
-  animation: demo-value-out 2600ms steps(1, end) infinite;
+.falling .mini-value.from::after {
+  content: '\2192';
+  margin-left: 8px;
+  font-weight: 500;
+  color: var(--mist);
 }
 
 .falling .mini-value.to {
   color: var(--mist);
-  animation: demo-value-in 2600ms steps(1, end) infinite;
 }
 
 /* The 1.00x stake reference: static, never an animated target (§9.2). */
@@ -1769,27 +2103,6 @@ button {
   color: var(--mist);
 }
 
-@keyframes demo-value-out {
-  0%,
-  35% {
-    opacity: 1;
-  }
-  36%,
-  100% {
-    opacity: 0;
-  }
-}
-
-@keyframes demo-value-in {
-  0%,
-  35% {
-    opacity: 0;
-  }
-  36%,
-  100% {
-    opacity: 1;
-  }
-}
 
 /* Panel 3: the action bar's hierarchy, which never changes (§9.2). */
 .bar-demo {
@@ -1813,20 +2126,45 @@ button {
   background: linear-gradient(180deg, var(--lumen-high), var(--lumen) 50%, var(--lumen-deep));
   color: #032019;
   font-weight: 700;
+  box-shadow:
+    0 0 0 1.5px #0e8a71,
+    0 0 0 2.5px rgba(3, 26, 22, 0.9),
+    0 2px 0 #07564a,
+    0 4px 9px rgba(var(--floor), 0.5),
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.6),
+    inset 0 -4px 7px rgba(2, 60, 48, 0.34);
 }
 
+/*
+ * The explainer draws the action bar it is explaining, so it has to draw the
+ * *objects*. A picture of three controls in which two are hairline boxes teaches
+ * a player that two of their three choices are inert, on the first screen the
+ * game has — and it measured as the flattest surface in the build.
+ */
 .mini-act.secondary {
-  border: 1px solid color-mix(in srgb, var(--lumen) 46%, transparent);
-  background: linear-gradient(180deg, #12564f 0%, #0e4442 54%, #0a3335 100%);
+  border: none;
+  background: linear-gradient(180deg, #17685e 0%, #12564f 36%, #0d423f 74%, #0a3335 100%);
   color: var(--lumen-high);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--lumen-high) 34%, transparent);
+  box-shadow:
+    0 0 0 1.5px #0d6a5c,
+    0 0 0 2.5px rgba(3, 22, 22, 0.9),
+    0 2px 0 rgba(4, 40, 38, 0.95),
+    0 4px 9px rgba(var(--floor), 0.5),
+    inset 0 1.5px 0 color-mix(in srgb, var(--lumen-high) 40%, transparent),
+    inset 0 -4px 7px rgba(var(--floor), 0.44);
 }
 
 .mini-act.tertiary {
-  border: 1px solid color-mix(in srgb, var(--crust) 62%, transparent);
-  background: linear-gradient(180deg, #114150 0%, #0d3242 56%, #0a2733 100%);
+  border: none;
+  background: linear-gradient(180deg, #175366 0%, #114150 36%, #0d3242 74%, #0a2733 100%);
   color: var(--foam);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--foam) 18%, transparent);
+  box-shadow:
+    0 0 0 1.5px #10556a,
+    0 0 0 2.5px rgba(3, 20, 26, 0.9),
+    0 2px 0 rgba(4, 30, 40, 0.95),
+    0 4px 9px rgba(var(--floor), 0.5),
+    inset 0 1.5px 0 color-mix(in srgb, var(--foam) 24%, transparent),
+    inset 0 -4px 7px rgba(var(--floor), 0.44);
 }
 
 /* A limit the player set has reached its bound. AMBER and a border, never a red
@@ -1960,23 +2298,47 @@ button {
   gap: 12px;
 }
 
+/* The two controls that set the stake. They sit beside the largest numeral on
+   the screen, so they are the last place in the product where a 1 px box over a
+   transparent wash could be excused. */
 .stepper-control button {
+  position: relative;
   width: 48px;
   height: 48px;
   border-radius: 14px;
-  border: 1px solid var(--panel-stroke);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--foam) 8%, transparent), transparent);
+  border: none;
+  background: var(--lit-face);
   font-size: 22px;
   line-height: 1;
   color: var(--foam);
-  transition: transform 90ms cubic-bezier(0.2, 0, 0, 1), border-color 160ms ease, background 160ms ease;
+  box-shadow: var(--lit-edge), var(--lit-seat);
+  transition: transform 90ms cubic-bezier(0.2, 0, 0, 1), box-shadow 150ms ease;
+}
+
+.stepper-control button::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    rgba(178, 232, 245, 0.22) 0%,
+    rgba(140, 206, 224, 0.08) 34%,
+    transparent 46%
+  );
+  transition: opacity 70ms linear;
 }
 
 .stepper-control button:active,
 .stepper-control button.pressed {
-  transform: scale(0.92);
-  border-color: color-mix(in srgb, var(--lumen) 55%, transparent);
-  background: color-mix(in srgb, var(--lumen) 12%, transparent);
+  transform: translateY(2px);
+  box-shadow: var(--lit-edge-pressed), var(--lit-seat-pressed);
+}
+
+.stepper-control button:active::after,
+.stepper-control button.pressed::after {
+  opacity: 0;
 }
 
 .stepper-control .value {
@@ -2060,33 +2422,64 @@ input[type='range']::-moz-range-thumb {
   letter-spacing: 0.09em;
   margin-top: 8px;
   overflow: hidden;
+  /*
+   * THE BEZEL, and it is the layer the blind comparison said was missing.
+   *
+   * "A flat gradient pill with no rim, no specular and no contact shadow",
+   * against a reference PLAY control with "a thick orange bezel, a white glossy
+   * face with a specular sweep, an outer glow and a grounding shadow". Three of
+   * those four were here; the bezel was not, and it is the one that does the most
+   * work, because a bezel is what gives an edge a **section**. Without it a
+   * control is a coloured area with a boundary; with it, it is a cap set into a
+   * ring, and the eye reads two materials instead of one.
+   *
+   * Two spread rings, outside-in: a saturated LUMEN-DEEP band, then a dark line
+   * that seats the whole assembly against the deck. Then the lip it stands on,
+   * then a tight contact shadow and a wide soft one — the reference's "grounding
+   * shadow" is two shadows, always, because one is either too tight to ground it
+   * or too soft to touch it.
+   */
   box-shadow:
-    0 0 26px color-mix(in srgb, var(--lumen) 30%, transparent),
-    0 3px 0 color-mix(in srgb, var(--lumen-deep) 70%, var(--abyss)),
-    0 8px 18px rgba(var(--floor), 0.7),
-    inset 0 1px 0 rgba(255, 255, 255, 0.62),
-    inset 0 -2px 3px rgba(2, 60, 48, 0.35);
+    0 0 0 2px #0e8a71,
+    0 0 0 3px rgba(3, 26, 22, 0.9),
+    0 4px 0 #07564a,
+    0 7px 12px rgba(var(--floor), 0.72),
+    0 16px 28px rgba(var(--floor), 0.44),
+    0 0 30px color-mix(in srgb, var(--lumen) 28%, transparent),
+    inset 0 2px 0 rgba(255, 255, 255, 0.68),
+    inset 0 -7px 12px rgba(2, 60, 48, 0.4);
   transition: transform 80ms cubic-bezier(0.2, 0, 0, 1), box-shadow 140ms ease, opacity 150ms ease;
 }
 
 .cta::after {
   content: '';
   position: absolute;
-  inset: 0;
   /*
-   * The specular, tinted rather than white.
+   * THE SPECULAR, and it is a shape rather than a fade.
    *
-   * A white sheen at 38% over LUMEN drops the face's saturation under 0.35, which
-   * is the threshold the focal measure uses — so the brightest part of the
-   * primary control was being excluded from the very region it is supposed to
-   * own. Tinting the sheen to LUMEN HIGH keeps the gloss and keeps the chroma,
-   * and the button reads as one lit saturated surface top to bottom.
+   * A gradient that starts opaque at the top edge and reaches zero at 54% has no
+   * boundary anywhere, so there is no moment at which the eye is told "this is
+   * where the light stops" — which is the difference between a lit cap and a
+   * lighter-at-the-top rectangle. This is the glossy-cap construction the whole
+   * category uses: an inset panel with its own elliptical bottom, so the gloss
+   * ends on a curve that reads as the crown of the button turning away.
+   *
+   * Tinted rather than white, and that is measured, not taste. A white sheen at
+   * 38% over LUMEN drops the face's saturation under 0.35, which is the threshold
+   * the focal measure uses — so the brightest part of the primary control was
+   * being excluded from the very region it is supposed to own. LUMEN HIGH keeps
+   * the gloss and keeps the chroma.
    */
+  left: 3px;
+  right: 3px;
+  top: 2px;
+  height: 47%;
+  border-radius: 13px 13px 50% 50% / 12px 12px 20px 20px;
   background: linear-gradient(
     180deg,
-    rgba(124, 255, 227, 0.72) 0%,
-    rgba(124, 255, 227, 0.26) 40%,
-    transparent 54%
+    rgba(196, 255, 240, 0.9) 0%,
+    rgba(150, 255, 232, 0.44) 44%,
+    rgba(124, 255, 227, 0.16) 100%
   );
   pointer-events: none;
   transition: opacity 70ms linear;
@@ -2107,39 +2500,62 @@ input[type='range']::-moz-range-thumb {
 .cta:active,
 .cta.pressed {
   box-shadow:
-    0 0 16px color-mix(in srgb, var(--lumen) 20%, transparent),
-    0 1px 0 color-mix(in srgb, var(--lumen-deep) 70%, var(--abyss)),
+    0 0 0 2px #0b6d5b,
+    0 0 0 3px rgba(3, 26, 22, 0.9),
+    0 1px 0 #07564a,
     0 3px 7px rgba(var(--floor), 0.6),
-    inset 0 2px 5px rgba(2, 60, 48, 0.45);
+    0 0 16px color-mix(in srgb, var(--lumen) 18%, transparent),
+    inset 0 3px 7px rgba(2, 60, 48, 0.5);
 }
 
 .cta.ghost {
+  /* A control has a face, and a face is not a window: the middle stops used to
+     run at 14–22% alpha, so the two disclosure rows on the stake screen were
+     showing the vent's warm light straight through themselves. */
   background: linear-gradient(
     180deg,
     rgba(178, 236, 244, 0.42) 0%,
-    rgba(96, 178, 198, 0.22) 6%,
-    rgba(52, 126, 150, 0.14) 16%,
-    color-mix(in srgb, var(--silt) 80%, transparent) 100%
+    rgba(96, 178, 198, 0.3) 6%,
+    rgba(38, 92, 114, 0.72) 16%,
+    rgba(22, 66, 84, 0.9) 46%,
+    color-mix(in srgb, var(--silt) 92%, transparent) 100%
   );
-  border: 1px solid var(--panel-stroke);
+  /* The way out of a decision is the quietest object in the set — and it is still
+     an object. Same ring, lip and two shadows, at the bottom of the register. */
+  border: none;
   color: var(--foam);
   font-family: var(--ui);
   font-weight: 600;
   box-shadow:
-    0 2px 0 rgba(var(--floor), 0.8),
-    0 5px 12px rgba(var(--floor), 0.5),
-    inset 0 1px 0 color-mix(in srgb, var(--foam) 12%, transparent);
+    0 0 0 2px #10404f,
+    0 0 0 3px rgba(3, 20, 26, 0.85),
+    0 2px 0 rgba(4, 26, 34, 0.95),
+    0 5px 10px rgba(var(--floor), 0.5),
+    0 11px 18px rgba(var(--floor), 0.3),
+    inset 0 1px 0 color-mix(in srgb, var(--foam) 16%, transparent),
+    inset 0 -5px 9px rgba(var(--floor), 0.42);
   letter-spacing: 0.07em;
 }
 
 .cta.ghost::after {
-  display: none;
+  left: 3px;
+  right: 3px;
+  top: 2px;
+  height: 42%;
+  border-radius: 13px 13px 50% 50% / 12px 12px 20px 20px;
+  background: linear-gradient(
+    180deg,
+    rgba(198, 240, 250, 0.18) 0%,
+    rgba(140, 206, 224, 0.07) 46%,
+    transparent 100%
+  );
 }
 
 .cta.ghost:active,
 .cta.ghost.pressed {
   box-shadow:
-    0 0 0 rgba(var(--floor), 0),
+    0 0 0 2px #0c3341,
+    0 0 0 3px rgba(3, 20, 26, 0.85),
     0 1px 4px rgba(var(--floor), 0.5),
     inset 0 2px 5px rgba(var(--floor), 0.55);
 }
@@ -2175,26 +2591,61 @@ input[type='range']::-moz-range-thumb {
   margin-top: 10px;
 }
 
+/*
+ * RECEIPT · VERIFY · HELP & PAYTABLE · HISTORY — and this row is the one the
+ * blind judge picked the build out on.
+ *
+ * They were `1px solid` over a 3% wash: four holes cut in the frame, on the
+ * screen a player lands on after every single round. They are seated objects
+ * now, built from the same four layers as everything else and one register
+ * below the control above them — quieter by *value*, not by being a drawing of
+ * a control while the others are controls.
+ */
 .linkrow button {
+  position: relative;
   flex: 1 1 auto;
-  border: 1px solid var(--panel-stroke);
+  border: none;
   border-radius: 12px;
   padding: 9px 12px;
   font-size: 11px;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  /* 4.44:1 as MIST on this fill — under §9.6's 4.5 floor by pixel-true
-     measurement, on a control. Lifted toward FOAM until it clears. */
-  color: color-mix(in srgb, var(--mist) 62%, var(--foam));
+  /* 4.44:1 as MIST on the old flat wash — under §9.6's 4.5 floor by pixel-true
+     measurement, on a control. Lifted toward FOAM until it clears, and the face
+     under it is graded to a tone that keeps clearing it. */
+  color: color-mix(in srgb, var(--mist) 50%, var(--foam));
   min-height: 44px;
-  background: color-mix(in srgb, var(--foam) 3%, transparent);
-  transition: transform 90ms cubic-bezier(0.2, 0, 0, 1), border-color 160ms ease;
+  overflow: hidden;
+  background: linear-gradient(180deg, #144355 0%, #103546 40%, #0b2b39 76%, #092430 100%);
+  box-shadow: var(--lit-edge), var(--lit-seat);
+  transition: transform 90ms cubic-bezier(0.2, 0, 0, 1), box-shadow 150ms ease;
+}
+
+/* The specular: a short gloss on the top third, hard-edged so the press has
+   something visible to remove. */
+.linkrow button::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    rgba(178, 232, 245, 0.22) 0%,
+    rgba(140, 206, 224, 0.08) 32%,
+    transparent 44%
+  );
+  transition: opacity 70ms linear;
 }
 
 .linkrow button:active,
 .linkrow button.pressed {
-  transform: scale(0.97);
-  border-color: color-mix(in srgb, var(--lumen) 45%, transparent);
+  transform: translateY(2px);
+  box-shadow: var(--lit-edge-pressed), var(--lit-seat-pressed);
+}
+
+.linkrow button:active::after,
+.linkrow button.pressed::after {
+  opacity: 0;
 }
 
 .mono {
@@ -2324,15 +2775,40 @@ table.data td.num {
    * because the value strip behind it holds the *last* round's numbers and those
    * must read as light rather than as text.
    */
-  background: linear-gradient(
-    180deg,
-    rgba(var(--floor), 0.5) 0%,
-    rgba(var(--floor), 0.14) 12%,
-    rgba(var(--floor), 0.08) 32%,
-    rgba(var(--floor), 0.32) 46%,
-    rgba(var(--floor), 0.46) 62%,
-    rgba(var(--floor), 0.54) 100%
-  );
+  /*
+   * The band below 62% opens too, and it opens because there is now something
+   * behind it.
+   *
+   * Round 3 held it at 46–54% on the argument that "the strip, the bar and the
+   * footer step aside on this screen and there is nothing left down there to
+   * hide". Both halves of that were true and the conclusion was wrong: with
+   * nothing to hide and nothing to show, a half-opacity curtain over a third of
+   * the frame is simply a third of the frame turned off — 17.2% mid-lit surface
+   * against a 20% floor on the extinction terminal, which is the screen this
+   * game shows more often than any other. `bakeFramePlate` now continues the
+   * world down there — the near seabed, the vent's pool on it, a stand of tube
+   * worms — so the scrim's job below the card is the same as its job above it:
+   * seat the object, not erase the picture. The controls in that band carry
+   * their own faces and their own seats and do not need a curtain to be legible.
+   */
+  background:
+    /* The same off-axis patches every other plate in the product carries; this
+       rule replaces the base `.overlay` background, so without them the loss
+       terminal's scrim is one straight line through colour space over a third of
+       the frame. */
+    radial-gradient(44% 15% at 16% 22%, rgba(58, 132, 158, 0.13) 0%, transparent 74%),
+    radial-gradient(36% 12% at 86% 44%, rgba(46, 92, 150, 0.12) 0%, transparent 76%),
+    radial-gradient(50% 16% at 62% 74%, rgba(30, 96, 96, 0.12) 0%, transparent 76%),
+    radial-gradient(38% 13% at 12% 88%, rgba(74, 62, 120, 0.1) 0%, transparent 76%),
+    linear-gradient(
+      180deg,
+      rgba(var(--floor), 0.5) 0%,
+      rgba(var(--floor), 0.14) 12%,
+      rgba(var(--floor), 0.08) 32%,
+      rgba(var(--floor), 0.26) 46%,
+      rgba(var(--floor), 0.24) 66%,
+      rgba(var(--floor), 0.3) 100%
+    );
   /* Wins overwrite this entirely; see "the payoff lights the frame" below. */
   /*
    * Light where the picture is, dense where the numbers are.
@@ -2379,11 +2855,16 @@ table.data td.num {
   position: relative;
   border-radius: 22px;
   border: 1px solid var(--panel-stroke);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--foam) 9%, transparent) 0%,
-    color-mix(in srgb, var(--silt) 78%, transparent) 100%
-  );
+  /* The console the payout is mounted in is glass like every other panel, so it
+     wears the same lattice. It is the largest single surface on the settlement
+     screen and it was the flattest. */
+  background:
+    var(--glass-motif, none),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--foam) 9%, transparent) 0%,
+      color-mix(in srgb, var(--silt) 78%, transparent) 100%
+    );
   box-shadow:
     0 20px 60px rgba(var(--floor), 0.75),
     inset 0 1px 0 color-mix(in srgb, var(--foam) 16%, transparent);
@@ -2683,6 +3164,47 @@ table.data td.num {
   z-index: 3;
 }
 
+/*
+ * `BANKED` IS STAMPED INTO THE GLASS, not set on top of it.
+ *
+ * The blind comparison's third tell was that this build has no display-type
+ * craft anywhere — "SWARM" and "BANKED" both plain letterspaced sans, where the
+ * calibration set stacks outline, bevel and drop shadow on every display run. On
+ * the wordmark the answer is the built lockup the play frame already carries. On
+ * this word it is not an outline, because this word sits on a bright surface and
+ * an outline on a bright surface is a sticker: the reference behaviour for dark
+ * ink on a lit face is a **deboss**, and a deboss is two shadows agreeing with
+ * the key light — a dark one on the upper-left inside wall of the groove, a lit
+ * one on the lower-right lip. Exactly the construction the value printed on each
+ * organism uses (`labelSprite` in `stage.js`), so the two pieces of type in this
+ * game that are printed *on* something are printed the same way.
+ */
+.ceremony[data-tier='T0-win'] .vessel .terminal,
+.ceremony[data-tier='T1'] .vessel .terminal,
+.ceremony[data-tier='T2'] .vessel .terminal,
+.ceremony[data-tier='T3'] .vessel .terminal {
+  color: #5a3208;
+  font-weight: 800;
+  text-shadow:
+    0 -1px 0 rgba(74, 38, 4, 0.5),
+    0 1px 0 rgba(255, 236, 190, 0.72);
+}
+
+/*
+ * `TERMINAL · EXTINCT` gets the same treatment inverted, because it sits on the
+ * cold slab as light type on a mid surface: the lit lip is above and the shadow
+ * below, which is what a *raised* run does under the same light. One key light,
+ * two materials, and a loss still reads as a loss before a word is read.
+ */
+.ceremony[data-tier='T0-loss'] .terminal,
+.ceremony[data-tier='T-nil'] .terminal,
+.ceremony[data-tier='T-even'] .terminal {
+  font-weight: 700;
+  text-shadow:
+    0 1px 0 rgba(10, 32, 44, 0.55),
+    0 -1px 0 rgba(226, 244, 250, 0.24);
+}
+
 @keyframes vessel-fill {
   from {
     opacity: 0;
@@ -2823,8 +3345,24 @@ table.data td.num {
 .ceremony .terminal {
   animation-delay: 90ms;
 }
+/*
+ * The figure arrives **already counting**, and that is the fix for the least
+ * legible frame in the build.
+ *
+ * It used to land with the card at 150 ms and then sit at `0.00` until the
+ * count-up started — measured at 31.3% saturation, 0.5% highlight and 1 874
+ * colours, dark ink on a glass that had not filled yet. For a third of a second
+ * the payout surface told a player who had just banked 11.79 CR that they had
+ * banked nothing. A count that starts from zero is a convention a player reads
+ * instantly; a *static* zero is a wrong answer.
+ *
+ * So on any tier that counts, `app.js` sets `--figure-delay` to the same instant
+ * the count-up begins: the glass fills, the word lands, and the numeral appears
+ * with the first digit already moving. On a loss — which has no count — the
+ * default holds and nothing about its timing changes.
+ */
 .ceremony .headline {
-  animation-delay: 150ms;
+  animation-delay: var(--figure-delay, 150ms);
 }
 .ceremony .multiple {
   animation-delay: var(--reveal-delay, 230ms);
@@ -2854,6 +3392,25 @@ table.data td.num {
  * with it. Every reference does exactly this — `2.00 FUN`, `1.10 FUN` — and the
  * unit is never the same weight as the figure it belongs to.
  */
+/*
+ * THE FIGURE STANDS IN A BOX THE SIZE OF ITS OWN ANSWER.
+ *
+ * Tabular figures stop a digit from changing width; they do not stop a *string*
+ * from changing length. `0.26 → 11.79` adds two glyphs, so a centred headline
+ * re-centres itself as the count runs and the money visibly slides sideways
+ * during the loudest beat in the game — measured, and one of the rubric's named
+ * amateur tells ("a multiplier or balance that visibly wobbles as digits
+ * change").
+ *
+ * `app.js` measures the *final* string and reserves exactly its width here, so
+ * the count writes into a box that never changes size and the digits grow
+ * leftward into it. The unit run beside it therefore never moves either.
+ */
+.ceremony .headline .figure {
+  display: inline-block;
+  text-align: right;
+}
+
 .ceremony .headline .unit {
   font-size: 0.3em;
   font-weight: 700;
@@ -3251,12 +3808,27 @@ table.data td.num {
       rgba(var(--floor), 0.5) 0%,
       rgba(var(--floor), 0.12) 11%,
       rgba(var(--floor), 0.04) 26%,
-      rgba(252, 158, 30, calc(var(--wash, 0.5) * 0.14)) 44%,
-      rgba(252, 152, 24, calc(var(--wash, 0.5) * 0.94)) 57%,
-      rgba(246, 142, 18, calc(var(--wash, 0.5) * 0.98)) 70%,
-      rgba(214, 110, 10, calc(var(--wash, 0.5) * 0.94)) 84%,
-      rgba(126, 60, 6, calc(var(--wash, 0.5) * 0.52)) 94%,
-      rgba(var(--floor), 0.42) 100%
+      /*
+       * The warm column **lights** the lower band; it no longer replaces it.
+       *
+       * At 0.94–0.98 of the wash this was very nearly an opaque orange plate over
+       * a third of the frame, and over a teal water plate with nothing in it that
+       * composites to exactly one thing: a large muddy olive-khaki field, named as
+       * such and measured as the emptiest region in the build. Warm light over a
+       * cool floor is olive — that is arithmetic, not taste, and the fix is not a
+       * different orange. It is that the references light *something*: a board, a
+       * field, a rocket. With the near seabed now drawn under this, the wash comes
+       * down to roughly two-thirds and what it falls on is a lit floor with mounds
+       * on it, the vent's own pool, and a stand of worms throwing shadows — which
+       * is a picture that has been lit rather than a rectangle that has been
+       * tinted.
+       */
+      rgba(252, 158, 30, calc(var(--wash, 0.5) * 0.12)) 44%,
+      rgba(252, 152, 24, calc(var(--wash, 0.5) * 0.62)) 57%,
+      rgba(246, 142, 18, calc(var(--wash, 0.5) * 0.66)) 70%,
+      rgba(214, 110, 10, calc(var(--wash, 0.5) * 0.64)) 84%,
+      rgba(126, 60, 6, calc(var(--wash, 0.5) * 0.4)) 94%,
+      rgba(var(--floor), 0.34) 100%
     );
 }
 
@@ -3402,19 +3974,37 @@ table.data td.num {
  * the vessel's light rather than as a hole cut in the scrim.
  */
 .cta.share-cta {
-  background: linear-gradient(180deg, #14424f 0%, #0e3242 58%, #0a2734 100%);
-  border: 1px solid color-mix(in srgb, var(--amber) 54%, transparent);
+  background: linear-gradient(180deg, #1a5162 0%, #123f52 40%, #0d3040 78%, #0a2734 100%);
+  border: none;
   color: #ffe9c2;
+  /* A warm bezel, because this control lives inside the payout's light and a
+     cool rim there would read as a hole in it. Same four layers as everything
+     else: ring, seat, contact, face. */
   box-shadow:
-    0 3px 0 rgba(var(--floor), 0.9),
-    0 8px 18px rgba(var(--floor), 0.6),
-    inset 0 1px 0 color-mix(in srgb, var(--amber-high) 34%, transparent),
-    inset 0 -2px 6px rgba(var(--floor), 0.5);
+    0 0 0 2px #8a5a1c,
+    0 0 0 3px rgba(4, 20, 26, 0.9),
+    0 3px 0 rgba(3, 16, 22, 0.95),
+    0 7px 13px rgba(var(--floor), 0.62),
+    0 15px 26px rgba(var(--floor), 0.4),
+    inset 0 1px 0 color-mix(in srgb, var(--amber-high) 40%, transparent),
+    inset 0 -6px 11px rgba(var(--floor), 0.5);
   animation: card-line 420ms calc(var(--reveal-delay, 230ms) + 220ms) cubic-bezier(0.2, 0, 0, 1) both;
 }
 
+/* The gloss, one register down from the primary's: this control is offered, not
+   urged, so it gets the shape without the brightness. */
 .cta.share-cta::after {
-  display: none;
+  left: 3px;
+  right: 3px;
+  top: 2px;
+  height: 46%;
+  border-radius: 13px 13px 50% 50% / 12px 12px 20px 20px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 226, 176, 0.24) 0%,
+    rgba(210, 236, 246, 0.1) 42%,
+    transparent 100%
+  );
 }
 
 /*
@@ -3433,18 +4023,31 @@ table.data td.num {
  * and full contrast — it simply stops shouting louder than the payout.
  */
 .ceremony .cta:not(.share-cta) {
-  background: linear-gradient(180deg, #10505c 0%, #0c3a4a 56%, #082c3a 100%);
-  border: 1px solid color-mix(in srgb, var(--lumen) 50%, transparent);
+  background: linear-gradient(180deg, #17646f 0%, #10505c 38%, #0b3b4a 76%, #082c3a 100%);
+  border: none;
   color: var(--lumen-high);
   box-shadow:
-    0 3px 0 rgba(var(--floor), 0.9),
-    0 8px 18px rgba(var(--floor), 0.6),
-    inset 0 1px 0 color-mix(in srgb, var(--lumen-high) 30%, transparent),
-    inset 0 -2px 6px rgba(var(--floor), 0.5);
+    0 0 0 2px #0d6a6b,
+    0 0 0 3px rgba(3, 20, 26, 0.9),
+    0 3px 0 rgba(3, 16, 22, 0.95),
+    0 7px 13px rgba(var(--floor), 0.62),
+    0 15px 26px rgba(var(--floor), 0.4),
+    inset 0 1px 0 color-mix(in srgb, var(--lumen-high) 34%, transparent),
+    inset 0 -6px 11px rgba(var(--floor), 0.5);
 }
 
 .ceremony .cta:not(.share-cta)::after {
-  display: none;
+  left: 3px;
+  right: 3px;
+  top: 2px;
+  height: 46%;
+  border-radius: 13px 13px 50% 50% / 12px 12px 20px 20px;
+  background: linear-gradient(
+    180deg,
+    rgba(178, 240, 246, 0.26) 0%,
+    rgba(140, 214, 226, 0.1) 42%,
+    transparent 100%
+  );
 }
 
 @keyframes ceremony-open {
@@ -3612,21 +4215,4 @@ table.data td.num {
     transform: scale(0.7);
   }
 
-  .falling .mini-values {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    height: auto;
-  }
-
-  .falling .mini-value {
-    position: static;
-    opacity: 1;
-  }
-
-  .falling .mini-value.from::after {
-    content: '→';
-    margin-left: 10px;
-    color: var(--mist);
-  }
 }

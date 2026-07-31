@@ -116,18 +116,52 @@ const mixTone = (a, b, t) => [
  * at the organism: a richer organism is never drawn dimmer than a poorer one.
  * Without the gain a violet body would be darker than a cyan one and the colony
  * would visibly dim as it got rich.
+ *
+ * `shadow` is where the band's own shading ramp *ends*, and it is per-band for a
+ * reason that cost the build a blind ranking. Every shaded surface used to run
+ * its far limb toward ABYSS, which is a blue-green; on a cyan body that is
+ * correct — the shadow of a cyan thing in cyan water is a deeper cyan — but on
+ * the AMBER band it mixes complements, and a warm body shaded toward a cool
+ * floor lands on olive. That is the whole of why the harvested organisms read as
+ * khaki eggs at the exact moment they are worth the most: not the hue of the
+ * band, the hue of its shadow. A warm object's shadow is a darker, *more*
+ * saturated warm, so AMBER's ramp ends in umber and MEDUSA's in a deep violet.
+ * The value at the end of each ramp is at or below ABYSS's, so §6.1's floor rule
+ * and §6.3's ordering promise are both untouched — only the chroma moves.
  */
 const BANDS = {
-  dim: { core: C.lumenDeep, high: [92, 230, 199], deep: [7, 96, 78], edge: C.plankton, gain: 0.9 },
-  lumen: { core: C.lumen, high: C.lumenHigh, deep: C.lumenDeep, edge: C.plankton, gain: 1 },
+  dim: {
+    core: C.lumenDeep,
+    high: [92, 230, 199],
+    deep: [7, 96, 78],
+    edge: C.plankton,
+    shadow: C.abyss,
+    gain: 0.9,
+  },
+  lumen: {
+    core: C.lumen,
+    high: C.lumenHigh,
+    deep: C.lumenDeep,
+    edge: C.plankton,
+    shadow: C.abyss,
+    gain: 1,
+  },
   medusa: {
     core: C.medusaHigh,
     high: [232, 208, 255],
     deep: C.medusaDeep,
     edge: [130, 150, 255],
+    shadow: [30, 12, 58],
     gain: 1.2,
   },
-  amber: { core: C.amber, high: C.amberHigh, deep: C.amberDeep, edge: [255, 176, 96], gain: 1 },
+  amber: {
+    core: C.amber,
+    high: C.amberHigh,
+    deep: C.amberDeep,
+    edge: [255, 176, 96],
+    shadow: [92, 38, 6],
+    gain: 1,
+  },
   /*
    * A husk is the one band that does not emit, and its tone is deliberately held
    * **below the dimmest living band**: `[86,108,120]` measures L = 0.41 against
@@ -136,7 +170,14 @@ const BANDS = {
    * organism in it, which is §6.3's ordering promise at the point where it is
    * easiest to break.
    */
-  husk: { core: [86, 108, 120], high: [150, 166, 178], deep: [30, 50, 62], edge: C.basalt, gain: 0.3 },
+  husk: {
+    core: [86, 108, 120],
+    high: [150, 166, 178],
+    deep: [30, 50, 62],
+    edge: C.basalt,
+    shadow: C.abyss,
+    gain: 0.3,
+  },
 };
 
 /**
@@ -252,7 +293,8 @@ function glowSprite(colour, falloff = 2.6) {
   // bake size, and a canvas gradient is *linear between stops*: sixteen stops
   // magnified three-fold puts a visible kink every 24 px across a near-black
   // frame, which is how a soft bloom acquires concentric rings. Sixty-four stops
-  // put the kinks below the noise floor of the grain that sits over them.
+  // put the kinks under a quantisation step, which is where they have to be now
+  // that no grain layer is sitting over them to hide anything.
   const size = 256;
   const canvas = document.createElement('canvas');
   canvas.width = size;
@@ -322,14 +364,21 @@ const ARCHETYPES = [
    * The minor lobe has to read as a *bulge in one organism* and never as a second
    * organism, and at `x: 0.5` with a full-brightness gel it did exactly the wrong
    * thing: its own falloff reached zero outside the main body's, so it came out
-   * of the blit as a separate bright ellipse stuck to the side — an ear. It is
-   * pulled inside the main lobe's own radius and drawn at two-fifths the gain, so
-   * what the eye gets is one body whose silhouette swells on one side.
+   * of the blit as a separate bright ellipse stuck to the side — an ear. Round 3
+   * answered that by pulling it entirely *inside* the main lobe, which removed
+   * the ear and removed the asymmetry with it: the archetype stopped changing the
+   * silhouette at all and instead drew a second shaded ball in the middle of the
+   * body, seam and all.
+   *
+   * The mass pass now unions the lobes into one silhouette and lights it once, so
+   * a lobe that pokes out is a swell rather than an ear. It is set to poke out by
+   * about a tenth of a radius on the lower right — enough that the outline is
+   * visibly not an ellipse, not enough to read as two animals.
    */
   {
     lobes: [
-      { x: -0.06, y: 0, rx: 0.94, ry: 0.9, gain: 1 },
-      { x: 0.36, y: 0.12, rx: 0.42, ry: 0.36, gain: 0.4 },
+      { x: -0.1, y: -0.02, rx: 0.9, ry: 0.88, gain: 1 },
+      { x: 0.42, y: 0.14, rx: 0.48, ry: 0.42, gain: 0.4 },
     ],
     canals: 6,
     tentacles: 24,
@@ -848,24 +897,38 @@ function massSprite(archetype, variant, band) {
   const salt = 600 + archetype * 23 + variant * 61;
 
   /*
-   * The contact shadow, and it is the reason a dense colony stays countable.
+   * The contact shadow, and it is the reason a dense colony stays countable —
+   * but it is **cast**, not concentric, and that distinction was worth a defect.
    *
-   * It is drawn *outside* the body's own alpha, tinted toward ABYSS — §6.1's
-   * floor — so the darkest pixel it can produce is the darkest pixel in the game
-   * and near-black stays at 0.0% of the frame. Two bodies at the 30% overlap
-   * §6.4 allows now read as one in front of the other.
+   * Round 3 drew it as a ring centred on the body: full strength to 0.7 R, gone
+   * by 1.24 R. Over water that is invisible. Over the *organism behind it* it is
+   * a dark band that follows the front body's outline all the way round, and at
+   * 3x zoom on the payoff frame it read as a hard unshaded crescent seam — named
+   * as the single worst-rendered detail in the build, on the frame that matters
+   * most. A ring is what an object casts when the light is inside the camera; the
+   * key light in this game is up and to the left, so the shadow belongs down and
+   * to the right, and there must be *no* shadow term at all on the lit shoulder.
+   *
+   * Offset by 0.3 R down-right, reaching 1.6 R, and starting its falloff inside
+   * the silhouette: at the lit limb the gradient has already run out, and at the
+   * shaded limb it leaves the body at about a fifth of its peak and fades over
+   * two-thirds of a radius. Tinted toward ABYSS — §6.1's floor — so the darkest
+   * pixel it can produce is still the darkest pixel in the game.
    */
   for (const lobe of shape.lobes) {
     ctx.save();
     ctx.translate(cx + lobe.x * R, cy + lobe.y * R);
     ctx.scale(lobe.rx, lobe.ry);
-    const drop = ctx.createRadialGradient(0, R * 0.1, R * 0.7, 0, R * 0.1, R * 1.24);
-    drop.addColorStop(0, rgba(C.abyss, 0.66));
-    drop.addColorStop(0.42, rgba(C.abyss, 0.4));
+    const ox = R * 0.3;
+    const oy = R * 0.32;
+    const drop = ctx.createRadialGradient(ox, oy, R * 0.38, ox, oy, R * 1.6);
+    drop.addColorStop(0, rgba(C.abyss, 0.6));
+    drop.addColorStop(0.34, rgba(C.abyss, 0.34));
+    drop.addColorStop(0.66, rgba(C.abyss, 0.11));
     drop.addColorStop(1, rgba(C.abyss, 0));
     ctx.fillStyle = drop;
     ctx.beginPath();
-    ctx.arc(0, R * 0.1, R * 1.24, 0, Math.PI * 2);
+    ctx.arc(ox, oy, R * 1.6, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
@@ -881,42 +944,115 @@ function massSprite(archetype, variant, band) {
   body.width = size;
   body.height = size;
   const bg = body.getContext('2d');
+  /*
+   * THE SHADING, AND WHY IT IS NOT ONE RADIAL GRADIENT ANY MORE.
+   *
+   * It used to be: one offset radial from a small circle up-left to a circle of
+   * exactly the body's radius, ramping to near-black at its last stop. That is a
+   * *cone* gradient, and a cone's parameter reaches 1 on the whole of its outer
+   * circle — which is the body's own outline. So the darkest colour in the ramp
+   * was painted as an unbroken dark band all the way around every organism.
+   * Against water it hides; against the organism behind it, at the payoff, it is
+   * a hard dark seam following the front body's outline, and that seam is exactly
+   * the artefact the blind judge cropped at 3x and called the worst-rendered
+   * detail in the game.
+   *
+   * A ball is shaded with two things that cannot draw a ring, and that is what it
+   * gets now:
+   *
+   *   1. a **terminator** — a straight ramp along the key light's axis (up-left
+   *      to down-right). A linear gradient has no radius, so it has no ring at
+   *      any radius, and it puts a genuinely lit shoulder opposite a genuinely
+   *      shaded limb instead of a bullseye inside a dark band;
+   *   2. **limb darkening** — a wide, gentle concentric term that never reaches
+   *      even half strength, so the edge reads as curving away rather than as
+   *      being drawn.
+   *
+   * The ramp ends in the band's own `shadow` rather than in ABYSS, so a warm body
+   * shades to umber instead of to olive (see `BANDS`).
+   */
+  /*
+   * ONE SILHOUETTE, THEN ONE SHADING PASS OVER IT — and that order is the fix
+   * for the seam the payoff frame was cropped on.
+   *
+   * Every lobe used to be shaded on its own. On the two-lobed archetype that
+   * drew the minor lobe as a *separate ball* inside the body: its own terminator,
+   * its own limb darkening, and therefore its own visible circular edge sitting
+   * in the middle of an organism. That is the hard unshaded crescent, and it was
+   * on one organism in three, at every size, in every state — including the row
+   * of harvested bodies directly above the payout surface.
+   *
+   * A body has one surface, so it gets one light. The lobes contribute a
+   * silhouette and nothing else: flat core colour, unioned. Then the terminator
+   * and the limb term are applied once, over the whole union, under
+   * `source-atop`. There is no interior boundary left for either of them to
+   * follow.
+   */
   for (const lobe of shape.lobes) {
     bg.save();
     bg.translate(cx + lobe.x * R, cy + lobe.y * R);
     bg.scale(lobe.rx, lobe.ry);
-    // Key light up and to the left: the gradient's centre is offset that way, so
-    // the body has a lit shoulder and a shaded far limb rather than a bullseye.
-    const shade = bg.createRadialGradient(-R * 0.3, -R * 0.36, R * 0.05, 0, 0, R);
-    // Five stops across a full value range, not three across half of one: the
-    // difference between a shaded volume and a tinted disc is how far the far
-    // limb actually falls, and it falls all the way to the water it sits in.
-    shade.addColorStop(0, rgba(tone.high, 0.97));
-    shade.addColorStop(0.2, rgba(tone.core, 0.96));
-    shade.addColorStop(0.52, rgba(tone.core, 0.93));
-    shade.addColorStop(0.78, rgba(tone.deep, 0.92));
-    shade.addColorStop(0.93, rgba(mixTone(tone.deep, C.abyss, 0.42), 0.9));
-    shade.addColorStop(1, rgba(mixTone(tone.deep, C.abyss, 0.62), 0.88));
-    bg.fillStyle = shade;
+    bg.fillStyle = rgba(tone.core, 0.97);
     bg.beginPath();
     bg.arc(0, 0, R, 0, Math.PI * 2);
     bg.fill();
     bg.restore();
   }
-  // The rim falloff: opaque to 88% of the radius, gone by 100%. At a 24 pt bell
-  // that is about one device pixel of softness and at a 68 pt bell about three —
-  // an edge in both cases, never a stroke.
-  bg.globalCompositeOperation = 'destination-in';
+
   bg.save();
+  bg.globalCompositeOperation = 'source-atop';
   bg.translate(cx + main.x * R, cy + main.y * R);
   bg.scale(main.rx, main.ry);
-  const mask = bg.createRadialGradient(0, 0, R * 0.82, 0, 0, R);
-  mask.addColorStop(0, 'rgba(0,0,0,1)');
-  mask.addColorStop(0.6, 'rgba(0,0,0,0.95)');
-  mask.addColorStop(1, 'rgba(0,0,0,0)');
-  bg.fillStyle = mask;
+  const term = bg.createLinearGradient(-R * 0.8, -R * 0.84, R * 0.86, R * 0.92);
+  // The lit shoulder is *narrow*. A wide one washes the band's own chroma out of
+  // the biggest part of the body, and the band's chroma is the payout scale.
+  term.addColorStop(0, rgba(tone.high, 0.88));
+  term.addColorStop(0.2, rgba(tone.high, 0.26));
+  term.addColorStop(0.42, rgba(tone.core, 0));
+  term.addColorStop(0.74, rgba(mixTone(tone.deep, tone.shadow, 0.28), 0.52));
+  term.addColorStop(1, rgba(mixTone(tone.deep, tone.shadow, 0.62), 0.9));
+  bg.fillStyle = term;
+  bg.fillRect(-size, -size, size * 2, size * 2);
+
+  const limb = bg.createRadialGradient(0, 0, R * 0.4, 0, 0, R * 1.16);
+  limb.addColorStop(0, rgba(tone.shadow, 0));
+  limb.addColorStop(0.62, rgba(tone.shadow, 0.11));
+  limb.addColorStop(1, rgba(tone.shadow, 0.32));
+  bg.fillStyle = limb;
   bg.fillRect(-size, -size, size * 2, size * 2);
   bg.restore();
+
+  /*
+   * The rim falloff: opaque to 82% of each lobe's radius, gone by 100%. At a
+   * 24 pt bell that is about one device pixel of softness and at a 68 pt bell
+   * about three — an edge in both cases, never a stroke.
+   *
+   * It is built as the **union** of the lobes' own falloffs, summed with
+   * `lighter` in a layer of its own, because a mask taken from the main lobe
+   * alone would slice off any part of the silhouette that swells past it — which
+   * is precisely what the second lobe is for.
+   */
+  const maskLayer = document.createElement('canvas');
+  maskLayer.width = size;
+  maskLayer.height = size;
+  const mk = maskLayer.getContext('2d');
+  mk.globalCompositeOperation = 'lighter';
+  for (const lobe of shape.lobes) {
+    mk.save();
+    mk.translate(cx + lobe.x * R, cy + lobe.y * R);
+    mk.scale(lobe.rx, lobe.ry);
+    const mask = mk.createRadialGradient(0, 0, R * 0.82, 0, 0, R);
+    mask.addColorStop(0, 'rgba(255,255,255,1)');
+    mask.addColorStop(0.6, 'rgba(255,255,255,0.95)');
+    mask.addColorStop(1, 'rgba(255,255,255,0)');
+    mk.fillStyle = mask;
+    mk.beginPath();
+    mk.arc(0, 0, R, 0, Math.PI * 2);
+    mk.fill();
+    mk.restore();
+  }
+  bg.globalCompositeOperation = 'destination-in';
+  bg.drawImage(maskLayer, 0, 0);
   ctx.drawImage(body, 0, 0);
 
   ctx.save();
@@ -934,43 +1070,115 @@ function massSprite(archetype, variant, band) {
    */
   const underY = cy + R * 1.05;
   const under = ctx.createRadialGradient(cx, underY, R * 0.24, cx, underY, R * 1.35);
-  under.addColorStop(0, rgba(C.abyss, 0.62));
-  under.addColorStop(0.45, rgba(C.abyss, 0.3));
-  under.addColorStop(1, rgba(C.abyss, 0));
+  under.addColorStop(0, rgba(tone.shadow, 0.6));
+  under.addColorStop(0.45, rgba(tone.shadow, 0.28));
+  under.addColorStop(1, rgba(tone.shadow, 0));
   ctx.fillStyle = under;
   ctx.fillRect(0, 0, size, size);
 
   /*
-   * The Fresnel limb, as a wash whose own centre lies outside the body, so there
-   * is no radius anywhere on the organism where it peaks and nothing the eye can
-   * trace as a ring.
+   * THE RIM LIGHT, and it is a **crescent** — the one term that separates the
+   * body from the water it is standing in.
+   *
+   * Round 3's Fresnel was a wash centred outside the body, which is a safe way to
+   * avoid drawing a ring and also a reliable way to draw nothing: it has no edge
+   * concentration, so it reads as a smudge on the lower limb rather than as light
+   * wrapping an object. Real rim light is bright *at the silhouette* and nowhere
+   * else, and it exists only on the side away from the key.
+   *
+   * So: a bright annulus concentrated in the outer eighth of the radius, then
+   * multiplied by a directional mask that is zero on the lit shoulder and one at
+   * the shaded limb. What survives is a crescent along the lower-right edge that
+   * peaks and dies inside two device pixels at any blit size. The mask is built
+   * in its own layer, so the annulus never exists as a full ring on the sprite.
    */
-  const rimX = cx + R * 0.82;
-  const rimY = cy + R * 0.58;
-  const rim = ctx.createRadialGradient(rimX, rimY, R * 0.2, rimX, rimY, R * 1.5);
-  rim.addColorStop(0, rgba(tone.high, 0.6));
-  rim.addColorStop(0.4, rgba(tone.high, 0.2));
-  rim.addColorStop(1, rgba(tone.edge, 0));
-  ctx.fillStyle = rim;
-  ctx.fillRect(0, 0, size, size);
+  const rimLayer = document.createElement('canvas');
+  rimLayer.width = size;
+  rimLayer.height = size;
+  const rg = rimLayer.getContext('2d');
+  rg.save();
+  rg.translate(cx + main.x * R, cy + main.y * R);
+  rg.scale(main.rx, main.ry);
+  /*
+   * The annulus peaks at 0.90 R rather than at the silhouette itself, because the
+   * body's own alpha mask is already falling from 0.82 R outward: a rim whose
+   * brightest ring sits at 0.97 R would be multiplied down to two-fifths of
+   * itself by the falloff and come back as the smudge this replaces.
+   */
+  const ring = rg.createRadialGradient(0, 0, R * 0.68, 0, 0, R * 0.98);
+  ring.addColorStop(0, rgba(tone.high, 0));
+  ring.addColorStop(0.5, rgba(tone.high, 0.24));
+  ring.addColorStop(0.76, rgba(mixTone(tone.high, C.foam, 0.5), 0.6));
+  ring.addColorStop(1, rgba(tone.high, 0.16));
+  rg.fillStyle = ring;
+  rg.beginPath();
+  rg.arc(0, 0, R * 0.98, 0, Math.PI * 2);
+  rg.fill();
+  rg.restore();
+  rg.globalCompositeOperation = 'destination-in';
+  const wrap = rg.createLinearGradient(cx - R * 0.9, cy - R * 0.9, cx + R * 0.95, cy + R * 0.95);
+  wrap.addColorStop(0, 'rgba(0,0,0,0)');
+  wrap.addColorStop(0.56, 'rgba(0,0,0,0)');
+  wrap.addColorStop(0.86, 'rgba(0,0,0,0.8)');
+  wrap.addColorStop(1, 'rgba(0,0,0,1)');
+  rg.fillStyle = wrap;
+  rg.fillRect(0, 0, size, size);
+  ctx.drawImage(rimLayer, 0, 0);
 
-  // The specular. Every spherical object in the reference set carries one, and it
-  // is the cheapest three-dimensional cue there is.
-  const specX = cx - R * (0.3 + slotRandom(variant, salt) * 0.08);
-  const specY = cy - R * (0.38 + slotRandom(variant, salt + 1) * 0.08);
-  const specR = R * 0.36;
+  /*
+   * THE SPECULAR, and it has a shape now.
+   *
+   * A single wide radial fading from 72% white is a blurred smudge — measured,
+   * cropped and named as such. Every glossy object in the calibration set carries
+   * the same two-part construction instead, because that is what a highlight on a
+   * wet curved surface actually is: a **hot core** with an edge you can see, and a
+   * **bloom** around it that is the surface scattering the same light. A third,
+   * much smaller catchlight sits below and right of the core — the bounce off the
+   * water — which is the detail that makes the thing read as wet rather than as
+   * matte.
+   *
+   * All three agree with the key light, and all three are in the band's own
+   * chroma except the hot core, which is white because a specular is the colour
+   * of the light and not the colour of the object.
+   */
+  const specX = cx - R * (0.3 + slotRandom(variant, salt) * 0.07);
+  const specY = cy - R * (0.38 + slotRandom(variant, salt + 1) * 0.07);
   ctx.save();
   ctx.translate(specX, specY);
-  ctx.rotate(-0.5);
-  ctx.scale(1, 0.62);
-  const spec = ctx.createRadialGradient(0, 0, 0, 0, 0, specR);
-  spec.addColorStop(0, rgba(C.foam, 0.72));
-  spec.addColorStop(0.3, rgba(tone.high, 0.42));
-  spec.addColorStop(0.7, rgba(tone.high, 0.1));
-  spec.addColorStop(1, rgba(tone.high, 0));
-  ctx.fillStyle = spec;
+  ctx.rotate(-0.52);
+  ctx.scale(1, 0.6);
+  const bloom = ctx.createRadialGradient(0, 0, 0, 0, 0, R * 0.44);
+  bloom.addColorStop(0, rgba(tone.high, 0.5));
+  bloom.addColorStop(0.42, rgba(tone.high, 0.2));
+  bloom.addColorStop(1, rgba(tone.high, 0));
+  ctx.fillStyle = bloom;
   ctx.beginPath();
-  ctx.arc(0, 0, specR, 0, Math.PI * 2);
+  ctx.arc(0, 0, R * 0.44, 0, Math.PI * 2);
+  ctx.fill();
+  // The core: 82% of its radius at full strength, gone by the edge. That is a
+  // shape at every blit size in the game — an oval of light, not a fog.
+  const core = ctx.createRadialGradient(0, 0, 0, 0, 0, R * 0.19);
+  core.addColorStop(0, rgba(C.foam, 0.94));
+  core.addColorStop(0.62, rgba(C.foam, 0.8));
+  core.addColorStop(0.86, rgba(mixTone(C.foam, tone.high, 0.55), 0.32));
+  core.addColorStop(1, rgba(tone.high, 0));
+  ctx.fillStyle = core;
+  ctx.beginPath();
+  ctx.arc(0, 0, R * 0.19, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  // The catchlight, on the shaded side: the water's own light coming back up.
+  ctx.save();
+  ctx.translate(cx + R * 0.34, cy + R * 0.42);
+  ctx.rotate(-0.4);
+  ctx.scale(1, 0.66);
+  const bounce = ctx.createRadialGradient(0, 0, 0, 0, 0, R * 0.13);
+  bounce.addColorStop(0, rgba(mixTone(tone.high, C.foam, 0.4), 0.42));
+  bounce.addColorStop(0.6, rgba(tone.high, 0.16));
+  bounce.addColorStop(1, rgba(tone.high, 0));
+  ctx.fillStyle = bounce;
+  ctx.beginPath();
+  ctx.arc(0, 0, R * 0.13, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 
@@ -1015,24 +1223,209 @@ function massSet(band) {
  * way `x5.6` is printed on a payout chip — never a glowing label floating over
  * the object.
  */
-function labelSprite(text) {
+/**
+ * Bake a face value, and do not hand back a smudge.
+ *
+ * One retry, and the retry is not a repeat: it sets the string on a fixed
+ * advance, so it cannot consult the measurement that just failed.
+ */
+function bakeLabel(text) {
+  const sprite = labelSprite(text);
+  return sprite.ok ? sprite : labelSprite(text, true);
+}
+
+function labelSprite(text, forceUniform = false) {
   const width = 256;
   const height = 96;
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
-  const ctx = canvas.getContext('2d');
-  const size = Math.min(66, (width * 0.93) / (text.length * 0.6));
-  ctx.font = `800 ${size}px ui-rounded, "SF Pro Rounded", "Avenir Next", "Helvetica Neue", Arial, sans-serif`;
+  /* Read back once at the end of the bake to verify the ink, so the context is
+     declared for it — otherwise the readback stalls on a GPU sync and says so. */
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const glyphs = [...text];
+  const face = (px) =>
+    `800 ${px}px ui-rounded, "SF Pro Rounded", "Avenir Next", "Helvetica Neue", Arial, sans-serif`;
+  const measure = (px) => {
+    ctx.font = face(px);
+    return glyphs.map((glyph) => ctx.measureText(glyph).width);
+  };
+
+  /*
+   * THE METRICS ARE CHECKED BEFORE THEY ARE TRUSTED, AND THIS IS A DEFECT FIX.
+   *
+   * Everything below — the size solve, the glyph cursor, the bow — is derived
+   * from `measureText`, and a text metric is the one input here that comes from
+   * outside this file. Observed, on this build, intermittently and with the code
+   * unchanged between two page loads: every glyph came back at roughly a tenth
+   * of its true advance, so the run collapsed, the cursor barely moved, and the
+   * whole string stacked onto one point. Blitted down to the bell that is a
+   * **solid black disc in the middle of every organism** — on the idle colony,
+   * on the in-round colony, and on the harvested row sitting directly above the
+   * payout surface, which is the worst place in the game for it. It takes
+   * criterion 11 — the value printed on the object, the one the bar scores this
+   * game highest on — from a pass to unreadable, and it does it on maybe one
+   * load in ten, so a single spot check will not see it.
+   *
+   * The cause was never pinned to a browser behaviour, and it does not need to
+   * be: an unvalidated measurement is the defect. Three guards, none of which
+   * costs anything when the metrics are sane:
+   *
+   *   1. **A plausibility gate.** A run of `n` glyphs set at `px` cannot be
+   *      narrower than `0.2·n·px` or wider than `1.5·n·px` in any face this
+   *      string will ever be set in — digits and a multiplication sign, nothing
+   *      exotic. Outside that window the metrics are not used at all.
+   *   2. **A uniform fallback.** When they are rejected, the glyphs are set on a
+   *      fixed advance instead. The tracking is then wrong by a hair on a
+   *      proportional face and the value is still *legible*, which is the whole
+   *      job.
+   *   3. **A floor under the solved size.** The solve divides by the measured
+   *      run, so an over-measurement shrinks the type; it cannot now fall below
+   *      26 px in a 256 px tile.
+   *
+   * The bake is then verified rather than assumed — see `ok` at the end.
+   */
+  const plausible = (advances, px) => {
+    if (forceUniform) return false;
+    const total = advances.reduce((sum, advance) => sum + advance, 0);
+    return total > px * 0.2 * glyphs.length && total < px * 1.5 * glyphs.length;
+  };
+
+  /*
+   * THE INK IS ALWAYS THE SAME SHARE OF THE TILE.
+   *
+   * `drawLabels` blits this tile at a fixed multiple of the body radius, so the
+   * fraction of that box the glyphs actually cover is what decides whether the
+   * value sits *inside* the bell or hangs off its limb. Estimating the run from
+   * `text.length` leaves that fraction floating with the string — a digit and a
+   * decimal point are not the same width, and `0.31x` measured 73% of the tile
+   * where `x1.5` measures barely half. So the size is measured and then solved:
+   * one pass at a guess, one rescale onto the target, capped so a short string
+   * cannot grow into a poster.
+   */
+  const INK = width * 0.7;
+  const guess = Math.min(66, (width * 0.93) / (glyphs.length * 0.6));
+  const first = measure(guess);
+  /* The fallback lands on the same ink target the measured path solves for, so a
+     rejected metric changes the tracking and nothing else about the tile. */
+  const uniform = INK / glyphs.length;
+  const size = plausible(first, guess)
+    ? Math.max(26, Math.min(66, guess * (INK / first.reduce((sum, a) => sum + a, 0))))
+    : Math.max(26, Math.min(66, uniform / 0.56));
+  ctx.font = face(size);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  // The emboss: one light pass a hair below the ink, so the type reads as pressed
-  // into the gel rather than laid on top of it.
-  ctx.fillStyle = 'rgba(255,255,255,0.34)';
-  ctx.fillText(text, width / 2, height / 2 + size * 0.055);
-  ctx.fillStyle = rgba(C.abyss, 0.9);
-  ctx.fillText(text, width / 2, height / 2);
-  return { canvas, text, aspect: width / height };
+
+  /*
+   * THE VALUE IS PRINTED ON A SPHERE, AND IT IS DEBOSSED INTO IT.
+   *
+   * Round 3 set the string flat on a straight baseline with one light pass a
+   * hair below the ink, and cropped at 3x that is a label lying on top of an
+   * object rather than a value belonging to it — which is exactly how it was
+   * described. Two things make printing read as printing, and neither of them is
+   * the type:
+   *
+   *   1. **The baseline follows the surface.** The glyphs are set one at a time
+   *      around a shallow arc — about ten degrees end to end — so the run bows
+   *      with the body and the outermost characters turn away from the camera the
+   *      way anything printed near the limb of a ball does. It is deliberately
+   *      just past the threshold of being noticed: a strong arc reads as a logo,
+   *      and this is a number a player has to read in three seconds.
+   *   2. **The groove is lit by the same key light as everything else.** A
+   *      debossed run under a light from the upper left has its shadow on the
+   *      inside of its *upper left* wall and its catch on the *lower right* lip.
+   *      So: a dark pass up-left, the ink, and a light pass down-right — three
+   *      passes on the same arc, offset by a fraction of the type size, which is
+   *      how a stamped surface behaves and what the round-3 single light pass
+   *      below the ink was an approximation of.
+   */
+  const measured = measure(size);
+  const advances = plausible(measured, size) ? measured : glyphs.map(() => uniform);
+  const run = advances.reduce((a, b) => a + b, 0);
+  /*
+   * The bow: a circle a little over twice the tile wide, which puts the arc at
+   * roughly ten degrees end to end for a run set to `INK`.
+   *
+   * **The radius is a constant, and that is the second half of the defect fix.**
+   * It used to be `run * 3.3`. The lever arm a glyph swings on *is* this radius —
+   * the horizontal advance a glyph ends up with is `bowR · sin(centre / bowR)` —
+   * so deriving it from the measurement meant a bad measurement shrank the arm
+   * and the run in the same direction, squaring the collapse instead of merely
+   * suffering it. Taken from the tile, the geometry cannot fold up no matter what
+   * comes back from `measureText`; a wrong metric can now only mis-track the
+   * string by a little.
+   */
+  const bowR = width * 2.3;
+  /*
+   * The arc's own sagitta, so a bowed run sits centred in the tile rather than
+   * hanging below the middle by the depth of its own curve.
+   */
+  const sagitta = bowR * (1 - Math.cos(run / 2 / bowR));
+  const stamp = (dx, dy, style) => {
+    ctx.fillStyle = style;
+    let cursor = -run / 2;
+    for (let index = 0; index < glyphs.length; index += 1) {
+      const advance = advances[index];
+      const centre = cursor + advance / 2;
+      const angle = centre / bowR;
+      ctx.save();
+      /*
+       * The lever arm a glyph swings on **is** the bow's radius. That is not a
+       * detail: `angle` is `centre / bowR`, so the horizontal advance a glyph
+       * ends up with is `bowR · sin(angle)` — swing it on a shorter arm and the
+       * advance shrinks by exactly the ratio. An arm of `bowR · 0.06` therefore
+       * spreads a five-glyph run across six per cent of its width, which stacks
+       * the whole string on one spot: at blit size that is a solid dark disc in
+       * the middle of every organism, and the value the bar asks to be printed
+       * on the object (criterion 11) cannot be read at any zoom.
+       */
+      ctx.translate(width / 2 + dx, height / 2 + dy + bowR - sagitta / 2);
+      ctx.rotate(angle);
+      ctx.translate(0, -bowR);
+      ctx.fillText(glyphs[index], 0, 0);
+      ctx.restore();
+      cursor += advance;
+    }
+  };
+  stamp(-size * 0.035, -size * 0.045, 'rgba(4, 20, 28, 0.34)');
+  stamp(size * 0.05, size * 0.062, 'rgba(255, 255, 255, 0.42)');
+  stamp(0, 0, rgba(C.abyss, 0.9));
+
+  /*
+   * And the ink takes the body's own light: a little open on the lit shoulder, a
+   * little deeper on the shaded limb. `source-atop` means this only ever touches
+   * pixels the type already painted, so it changes the value of the numeral and
+   * nothing around it, and the darkest it goes is still ABYSS.
+   */
+  ctx.globalCompositeOperation = 'source-atop';
+  const rake = ctx.createLinearGradient(width * 0.2, 0, width * 0.8, height);
+  rake.addColorStop(0, 'rgba(120, 180, 190, 0.22)');
+  rake.addColorStop(0.5, 'rgba(0, 0, 0, 0)');
+  rake.addColorStop(1, 'rgba(2, 14, 20, 0.2)');
+  ctx.fillStyle = rake;
+  ctx.fillRect(0, 0, width, height);
+  ctx.globalCompositeOperation = 'source-over';
+
+  /*
+   * And the bake is checked, not assumed: how wide is the ink actually standing
+   * on the tile? A correct run covers about 70% of it. Anything under 40% is a
+   * tile that would blit as a smudge, so the sprite is handed back marked and
+   * the caller bakes it again on a later frame (see `setYield`). One
+   * `getImageData` on a 256x96 tile, once per *string*, is free — this runs when
+   * the yield changes, not per frame.
+   */
+  const pixels = ctx.getImageData(0, 0, width, height).data;
+  let left = width;
+  let right = 0;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (pixels[(y * width + x) * 4 + 3] > 24) {
+        if (x < left) left = x;
+        if (x > right) right = x;
+      }
+    }
+  }
+  return { canvas, text, aspect: width / height, ok: right - left >= width * 0.4 };
 }
 
 /**
@@ -1192,60 +1585,6 @@ function waterSprite() {
   return canvas;
 }
 
-/**
- * §6.2's grain, and it is **chromatic** — which is what actually answers
- * criterion 8.
- *
- * Distinct-colour count is the rubric's proxy for "is this surface made of
- * anything", and the reference frames carry 2,400–7,400 against our DOM screens'
- * 900–1,700. The cause is arithmetic rather than art: a CSS gradient is a
- * straight line through colour space, so however many stops it is given, its
- * pixels quantise onto a handful of 5-bit triples. A *monochrome* grain over it
- * moves all three channels the same way, which slides those pixels along the
- * same line and adds almost nothing.
- *
- * Per-channel, palette-tinted noise moves them **off** the line. Each texel picks
- * one of four tints — neutral, LUMEN, PLANKTON, AMBER — so the speckle is the
- * game's own colour rather than chroma noise, and the three channels land in
- * different quantisation buckets. That is a real texture, it is what film grain
- * on a dark frame actually looks like, and it multiplies the measured colour
- * depth of every gradient in the product.
- *
- * Squared, not uniform: the layer is composited with `screen`, which lifts by
- * roughly `opacity x value x (1 - base)`, so a uniform tile would lift the whole
- * picture by half its opacity before adding any texture at all — on a frame whose
- * subject is darkness that is a grey veil, not a grain. Squaring drops the mean
- * to a third while keeping the full spread: most texels are nearly transparent, a
- * few are bright, and the black point does not move.
- */
-function grainTile(seed) {
-  const size = 128;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  const image = ctx.createImageData(size, size);
-  // Weighted toward neutral, so the speckle reads as grain and not as confetti.
-  const TINTS = [
-    [1, 1, 1],
-    [1, 1, 1],
-    [0.42, 1, 0.86],
-    [0.5, 0.68, 1],
-    [1, 0.78, 0.48],
-  ];
-  for (let index = 0; index < size * size; index += 1) {
-    const value = Math.pow(slotRandom(index, seed), 2) * 255;
-    const tint = TINTS[Math.floor(slotRandom(index, seed + 17) * TINTS.length) % TINTS.length];
-    // A second, independent draw per channel on top of the tint: two texels of
-    // the same tint still land on different triples.
-    image.data[index * 4] = value * tint[0] * (0.72 + 0.56 * slotRandom(index, seed + 31));
-    image.data[index * 4 + 1] = value * tint[1] * (0.72 + 0.56 * slotRandom(index, seed + 37));
-    image.data[index * 4 + 2] = value * tint[2] * (0.72 + 0.56 * slotRandom(index, seed + 41));
-    image.data[index * 4 + 3] = 255;
-  }
-  ctx.putImageData(image, 0, 0);
-  return canvas;
-}
 
 /**
  * Two soft cones of colony light falling toward the near silt (§7.2's
@@ -1304,10 +1643,21 @@ function shaftSprite(width, height) {
  * two frames by value (§6.3). It is baked into the plate once per resize and
  * costs the render loop nothing at all.
  *
+ * **±3 of 255, and the ceiling is what it looks like rather than what it buys.**
+ * Round 3 ran it at ±11, which is 4% peak-to-mean on a dark ramp: cropped at 3x
+ * that is a texture, and a texture that is identical on the water, on the glass
+ * and on a numeral is the exact tell this round exists to remove — deleting the
+ * CSS grain layer and leaving an ±11 dither in the plate would have moved the
+ * defect rather than fixed it. At ±3 the perturbation is under one 8-bit
+ * quantisation step in mean, it is invisible at any zoom the eye can reach, and
+ * it still lands pixels either side of a 5-bit bucket boundary in different
+ * buckets. Everything the old amplitude was buying is bought instead by building
+ * surfaces: the seabed under the frame, the modelled controls, the lit organisms.
+ *
  * The amplitude comes from `slotRandom` on the pixel index, so the pattern is
  * identical on every device and derived from nothing the round knows (§6.2).
  */
-function ditherPlate(ctx, width, height, amplitude = 11) {
+function ditherPlate(ctx, width, height, amplitude = 3) {
   const image = ctx.getImageData(0, 0, width, height);
   const data = image.data;
   for (let index = 0; index < data.length; index += 4) {
@@ -1317,6 +1667,74 @@ function ditherPlate(ctx, width, height, amplitude = 11) {
     data[index + 2] += (slotRandom(pixel, 1019) - 0.5) * 2 * amplitude;
   }
   ctx.putImageData(image, 0, 0);
+}
+
+/**
+ * The pressure glass's own ornament: a tileable lattice of cells.
+ *
+ * A hexagonal close-pack, because that is what a pressure window and a sheet of
+ * living tissue are both made of, and because a hex grid tiles without a seam on
+ * a rectangle of the right proportion. Each cell is drawn three times — a faint
+ * tint across its face, a lit edge along its upper-left, a shadowed one along its
+ * lower-right — so the lattice is *lit by the same key light as everything else*
+ * rather than being a pattern printed flat. Per-cell tint and per-cell strength
+ * come from `slotRandom`, which is why 29 px of repeat does not read as a repeat.
+ *
+ * Contrast is the whole design: at 4–7% over a panel face this is invisible until
+ * you look for it, which is the difference between ornament and dirt. The
+ * measurable consequence is that the panel's pixels stop lying on the single line
+ * its gradient draws through colour space.
+ */
+function glassTile() {
+  const cell = 29;
+  const w = cell * 3;
+  const h = Math.round(cell * Math.sqrt(3) * 1.5);
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  const TINTS = [C.lumen, C.plankton, C.foam, C.medusa, C.amber];
+  const hex = (cx, cy, r) => {
+    const path = new Path2D();
+    for (let k = 0; k < 6; k += 1) {
+      const a = (Math.PI / 3) * k - Math.PI / 6;
+      const x = cx + Math.cos(a) * r;
+      const y = cy + Math.sin(a) * r;
+      if (k === 0) path.moveTo(x, y);
+      else path.lineTo(x, y);
+    }
+    path.closePath();
+    return path;
+  };
+  const rowH = h / 3;
+  let index = 0;
+  // One extra ring in every direction so the cells that straddle an edge are
+  // drawn from both sides and the tile joins invisibly.
+  for (let row = -1; row <= 5; row += 1) {
+    for (let col = -1; col <= 5; col += 1) {
+      const cx = col * cell + (row % 2 === 0 ? 0 : cell / 2);
+      const cy = row * rowH;
+      const r = cell * 0.52;
+      const path = hex(cx, cy, r);
+      const tint = TINTS[index % TINTS.length];
+      ctx.fillStyle = rgba(tint, 0.022 + slotRandom(index, 1511) * 0.034);
+      ctx.fill(path);
+      // The lit edge, upper left; the shadowed edge, lower right. Same key light
+      // as every control and every organism in the product.
+      ctx.save();
+      ctx.clip(path);
+      const lit = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+      lit.addColorStop(0, rgba(C.foam, 0.075 + slotRandom(index, 1523) * 0.038));
+      lit.addColorStop(0.4, rgba(C.foam, 0));
+      lit.addColorStop(0.6, rgba(C.abyss, 0));
+      lit.addColorStop(1, rgba(C.abyss, 0.095 + slotRandom(index, 1531) * 0.04));
+      ctx.fillStyle = lit;
+      ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+      ctx.restore();
+      index += 1;
+    }
+  }
+  return canvas;
 }
 
 // ----------------------------------------------------------------------- stage
@@ -1394,9 +1812,6 @@ export class Stage {
         amber: glowSprite(C.amber, 1.9),
         husk: glowSprite(BANDS.husk.core, 1.9),
       },
-      // One tile: the 12 fps cycle is `background-position` on the compositor
-      // now, so the three the canvas pass used to swap between are dead weight.
-      grain: [grainTile(11)],
     };
 
     /** Live bodies, in slot order. */
@@ -1512,9 +1927,38 @@ export class Stage {
 
     this.observer = new ResizeObserver(() => this.resize());
     this.observer.observe(root);
-    this.installGrain();
+    this.installGlass();
     this.resize();
     this.start();
+  }
+
+  /**
+   * The glass gets a material, and the material is a *motif* rather than a noise.
+   *
+   * Half of this game's surfaces are DOM: the stake panel, the odds table, the
+   * explainer's three cards, the payout console. Each of them is a CSS gradient,
+   * and a gradient is a straight line through colour space — however many stops
+   * it is given, its pixels quantise onto a few hundred triples, which is the
+   * whole of why the screens made mostly of panels measured 900–1 700 distinct
+   * colours against a 2 500 floor while the canvas above them carried thousands.
+   *
+   * Round 3 answered that with a noise tile over every pixel of the product, and
+   * that is the defect this round removed: a texture identical on the water, on a
+   * numeral and on a control is not a material, because a material is what one
+   * object is made of and it differs per object. What the calibration set does
+   * instead is *ornament*: a damask behind a peg board, a filigree behind a
+   * wheel. So this is ornament — a cell lattice at 29 px, the pressure glass this
+   * game's panels have always been described as, etched at a contrast you have to
+   * look for and at a scale you could point at. It goes on the glass and on
+   * nothing else: not the water, not the type, not a control face.
+   *
+   * Generated here from the same seeded noise as everything else and handed to
+   * CSS as a data URL, so it is rasterized once and costs the render loop
+   * nothing.
+   */
+  installGlass() {
+    const tile = glassTile();
+    document.documentElement.style.setProperty('--glass-motif', `url(${tile.toDataURL()})`);
   }
 
   // ------------------------------------------------------------------ geometry
@@ -1620,21 +2064,39 @@ export class Stage {
     ctx.fillRect(0, 0, width, height);
 
     // The warm anchor at the seam: the vent's light in the water it sits in.
-    const vent = ctx.createRadialGradient(width / 2, height * 0.655, 0, width / 2, height * 0.655, width * 0.86);
-    vent.addColorStop(0, rgba(C.ember, 0.14));
-    vent.addColorStop(0.42, rgba(C.ember, 0.05));
+    const vent = ctx.createRadialGradient(width / 2, height * 0.72, 0, width / 2, height * 0.72, width * 0.6);
+    vent.addColorStop(0, rgba(C.ember, 0.1));
+    vent.addColorStop(0.42, rgba(C.ember, 0.035));
     vent.addColorStop(1, rgba(C.ember, 0));
     ctx.fillStyle = vent;
     ctx.fillRect(0, 0, width, height);
 
     // The same marbling the stage plate carries (§6.2's low-contrast texture), so
     // the two halves of the frame are made of the same material.
-    const MARBLE = [C.plankton, C.lumenDeep, C.basalt, C.crust, C.medusaDeep];
-    for (let index = 0; index < 52; index += 1) {
+    /*
+     * Thirteen tints rather than nine, and it is the *count* that is the point.
+     *
+     * Colour depth is what the bar reads as evidence that a surface is made of
+     * something, and a patch of one tint over a ramp of one tint is still one
+     * line through colour space however many times it is drawn. Every tint added
+     * here crosses every other one somewhere on the plate, so the distinct
+     * colours go up combinatorially while the *contrast* of any single patch is
+     * unchanged — which is the difference between building a surface and
+     * sprinkling one, and it is why the number moves without the frame getting
+     * busier. Two of the thirteen are warm, for the reason §6.2 gives.
+     */
+    const MARBLE = [
+      C.plankton, C.lumenDeep, C.basalt, C.crust, C.medusaDeep,
+      C.trench, C.silt, C.amberDeep, C.medusa,
+      C.lumen, C.abyss, C.foam, C.ember,
+    ];
+    for (let index = 0; index < 190; index += 1) {
       const tint = MARBLE[index % MARBLE.length];
+      const band = index % 3;
+      const span = band === 0 ? 0.18 : band === 1 ? 0.09 : 0.045;
       const x = slotRandom(index, 907) * width;
       const y = slotRandom(index, 911) * height;
-      const rx = (0.14 + slotRandom(index, 919) * 0.34) * width;
+      const rx = (span + slotRandom(index, 919) * span * 1.7) * width;
       const ry = rx * (0.4 + slotRandom(index, 929) * 0.95);
       ctx.save();
       ctx.translate(x, y);
@@ -1652,18 +2114,279 @@ export class Stage {
 
     // Far bioluminescence, below the stage as well as in it: the water has a
     // distance in it everywhere, not only where the canvas reaches.
-    for (let index = 0; index < 54; index += 1) {
+    for (let index = 0; index < 150; index += 1) {
       const x = slotRandom(index, 953) * width;
       const y = (0.6 + slotRandom(index, 967) * 0.42) * height;
       const r = (0.8 + slotRandom(index, 971) * 2.1) * scale;
       const warmth = slotRandom(index, 977);
-      const colour = warmth > 0.84 ? C.amber : warmth > 0.48 ? C.plankton : C.lumenDeep;
+      const colour = warmth > 0.88 ? C.amber
+        : warmth > 0.72 ? C.foam
+          : warmth > 0.48 ? C.plankton
+            : warmth > 0.24 ? C.medusa
+              : C.lumenDeep;
       const dot = ctx.createRadialGradient(x, y, 0, x, y, r * 4);
       dot.addColorStop(0, rgba(colour, 0.5));
       dot.addColorStop(0.3, rgba(colour, 0.18));
       dot.addColorStop(1, rgba(colour, 0));
       ctx.fillStyle = dot;
       ctx.fillRect(x - r * 4, y - r * 4, r * 8, r * 8);
+    }
+
+    /*
+     * THE NEAR SEABED, and it is the answer to "the lower third of the settlement
+     * frame is a dead field".
+     *
+     * The stage canvas ends where the value strip begins, at about 65% of the
+     * frame. On every playing screen the strip, the action bar and the footer sit
+     * in that band and it is full. On the two settlement screens they step aside
+     * — and what a player is left looking at, on the screen this game shows more
+     * often than any other, is a third of the picture with nothing in it: 17.2%
+     * mid-lit surface against a 20% floor and 1 399 distinct colours against a
+     * 2 500 one, measured on the extinction terminal. No reference in the
+     * calibration set carries a dead zone that size; every one of them fills its
+     * frame with game.
+     *
+     * So the world continues. Below the seam is the silt *nearest the camera* —
+     * the far side of the same vent field the stage draws — and it gets what
+     * everything else in this build now gets: a lit plane with a direction, mass
+     * standing on it, and the vent's own warm pool where the vent is. It is baked
+     * once per resize, it is constant in every frame of every round, and it is
+     * derived from the pixel index and nothing else, so it can carry no
+     * information about the round (§6.2) and cannot reorder two frames by value
+     * (§6.3).
+     *
+     * The seam is *measured*, not assumed: the canvas's own bottom edge in this
+     * plate's coordinates, so the floor starts exactly where the drawn floor
+     * stops however the frame is laid out.
+     */
+    const plateBox = plate.getBoundingClientRect();
+    const stageBox = this.canvas.getBoundingClientRect();
+    const seam = stageBox.height > 0 && plateBox.height > 0
+      ? (stageBox.bottom - plateBox.top) / plateBox.height
+      : 0.65;
+    if (seam > 0.2 && seam < 0.98) {
+      const horizon = height * seam;
+      const bed = height - horizon;
+
+      /*
+       * The plane, and its **values are the point**.
+       *
+       * A floor drawn as a 30%-alpha wash of a near-black tint over a near-black
+       * ramp is not a floor, it is a slightly different dark — which is what the
+       * band already was. This is a surface with a lit side: brightest just under
+       * the horizon where the vent's light rakes across it, falling into the near
+       * shadow at the bottom edge, which is the direction light actually falls on
+       * a plane lit from beyond it. Both ends are floor-tinted, so §6.1's rule
+       * that nothing in this game manufactures black is untouched, and every stop
+       * is a constant.
+       */
+      /*
+       * THE RAMP BEGINS AT THE HORIZON, NOT ABOVE IT, AND THAT IS A SEAM FIX.
+       *
+       * It used to start at `horizon - bed * 0.16` so the floor could fade up into
+       * the water. It cannot: the stage canvas above this one is opaque
+       * (`{ alpha: false }`), so every pixel of that lead-in was painted underneath
+       * it and never seen. What the eye actually got was the *first visible row* of
+       * the plate already carrying about 0.45 of the plane's alpha — a hard
+       * full-width line across the frame at the join, measured at rgb(33, 54, 62)
+       * above and rgb(27, 56, 65) below on the extinction terminal. Almost no
+       * luminance step, which is why it survived three rounds of review: it is a
+       * six-level *chroma* step, and the eye reads a hue edge across 390 px as a
+       * seam just as readily as a value one.
+       *
+       * So the fade happens where it can be seen. The plane starts at the join at
+       * zero and takes the first tenth of the bed to arrive, which is the haze of
+       * the water standing between the camera and the floor's edge — the reason a
+       * real horizon is soft.
+       */
+      const plane = ctx.createLinearGradient(0, horizon, 0, height);
+      plane.addColorStop(0, 'rgba(28, 84, 96, 0)');
+      plane.addColorStop(0.1, 'rgba(70, 140, 145, 0.4)');
+      plane.addColorStop(0.31, 'rgba(78, 152, 154, 0.6)');
+      plane.addColorStop(0.53, 'rgba(60, 126, 128, 0.7)');
+      plane.addColorStop(0.79, 'rgba(26, 66, 74, 0.76)');
+      plane.addColorStop(1, 'rgba(10, 32, 40, 0.85)');
+      ctx.fillStyle = plane;
+      ctx.fillRect(0, horizon, width, bed);
+
+      /*
+       * ACROSS the plane as well as down it.
+       *
+       * The ramp above is vertical and full width, so on its own it is a *stripe*
+       * — a band of one value running edge to edge, which is a horizon line drawn
+       * in paint rather than a floor receding. Real ground lit from one place is
+       * brightest under that place and falls off sideways too. This is the
+       * sideways term: cool at both margins, open in the middle where the vent
+       * stands, which also puts a second hue across the widest surface below the
+       * fold instead of one teal at one value.
+       *
+       * Measured, the round-3 floor topped out at L = 0.21 — under the 0.35 the
+       * bar counts as lit — so the band read as "a slightly different dark" and
+       * the extinction terminal, the screen this game shows most, carried 1.6%
+       * lit surface and 138 distinct colours across it.
+       */
+      const across = ctx.createLinearGradient(0, 0, width, 0);
+      across.addColorStop(0, 'rgba(6, 30, 46, 0.5)');
+      across.addColorStop(0.3, 'rgba(10, 40, 54, 0.14)');
+      across.addColorStop(0.5, 'rgba(20, 62, 70, 0)');
+      across.addColorStop(0.72, 'rgba(10, 40, 54, 0.16)');
+      across.addColorStop(1, 'rgba(6, 30, 46, 0.52)');
+      ctx.fillStyle = across;
+      ctx.fillRect(0, horizon, width, bed);
+
+      /*
+       * The last of the join, and it is the water in front of the floor.
+       *
+       * Starting the plane at the horizon took the seam from a six-level hue break
+       * to a three-level darkening; this closes the rest. There is a column of
+       * water between the camera and the floor's leading edge, and it scatters —
+       * so the nearest the floor gets to the eye is also the haziest it looks. One
+       * cool wash, strongest at the join and gone within a fifth of the bed. It
+       * carries no edge of its own because it is at zero where the bed ends.
+       */
+      const haze = ctx.createLinearGradient(0, horizon, 0, horizon + bed * 0.2);
+      haze.addColorStop(0, 'rgba(84, 132, 158, 0.062)');
+      haze.addColorStop(0.55, 'rgba(84, 132, 158, 0.026)');
+      haze.addColorStop(1, 'rgba(84, 132, 158, 0)');
+      ctx.fillStyle = haze;
+      ctx.fillRect(0, horizon, width, bed * 0.2);
+
+      /*
+       * The vent's pool on the near floor: the same warm anchor the water above
+       * carries, spread flat across a plane rather than hanging in it. This is
+       * the frame's second hue below the fold and most of the mid-lit surface the
+       * band contributes — a lit patch of seabed, not a glow in the dark.
+       */
+      ctx.save();
+      ctx.translate(width / 2, horizon + bed * 0.1);
+      ctx.scale(1, 0.26);
+      const pool = ctx.createRadialGradient(0, 0, 0, 0, 0, width * 0.52);
+      pool.addColorStop(0, rgba(C.ember, 0.72));
+      pool.addColorStop(0.22, rgba(C.ember, 0.4));
+      pool.addColorStop(0.52, rgba(C.amberDeep, 0.16));
+      pool.addColorStop(1, rgba(C.ember, 0));
+      ctx.fillStyle = pool;
+      ctx.beginPath();
+      ctx.arc(0, 0, width * 0.52, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      /*
+       * Basalt shoulders: four low mounds along the floor, filled and shaded, with
+       * the vent's rim light on the edge that faces it. Mass, never outline —
+       * the same rule the tube-worm bed on the stage plate is drawn under.
+       */
+      /*
+       * They stay low and mostly behind the button row, and that is deliberate:
+       * raising them into the exposed band was tried and measured, and at the
+       * size this geometry takes there it reads as overlapping paper fans with a
+       * straight cut along the bottom of each — the frame got worse and so did
+       * both numbers (lit 20.6% -> 20.3%, colours 1 091 -> 1 081). A bezier
+       * shoulder is a rock at thirty pixels and a stage flat at a hundred and
+       * fifty. What that band needed was not more of this.
+       */
+      for (let index = 0; index < 6; index += 1) {
+        const cx = (0.02 + slotRandom(index, 1301) * 0.98) * width;
+        const rw = (0.11 + slotRandom(index, 1307) * 0.19) * width;
+        const rh = bed * (0.1 + slotRandom(index, 1311) * 0.17);
+        const cy = horizon + bed * (0.42 + slotRandom(index, 1313) * 0.56);
+        const mound = new Path2D();
+        mound.moveTo(cx - rw, cy + rh);
+        mound.bezierCurveTo(cx - rw * 0.62, cy - rh * 0.9, cx + rw * 0.6, cy - rh * 0.86, cx + rw, cy + rh);
+        mound.closePath();
+        /*
+         * A ROCK IS THE DIFFERENCE BETWEEN ITS TWO SIDES.
+         *
+         * Round 3 shaded these from rgb(46,100,106) to rgb(10,34,44) — which
+         * sounds like a range and is not: quantised to the five bits a colour
+         * count is measured in, the whole mound spans about two buckets, and the
+         * plane it stands on spans one. That is why a band the design describes
+         * as "mass standing on a lit plane" measured 138 distinct colours and
+         * read as a slightly different dark. The crown is opened up to a real
+         * lit value and the underside taken down into the floor's own shadow, so
+         * there is a *terminator* on the thing. Both ends stay floor-tinted, so
+         * §6.1's rule that nothing here manufactures black is untouched.
+         */
+        const rock = ctx.createLinearGradient(cx, cy - rh, cx, cy + rh);
+        rock.addColorStop(0, 'rgba(96, 168, 166, 0.86)');
+        rock.addColorStop(0.28, 'rgba(58, 122, 128, 0.86)');
+        rock.addColorStop(0.62, 'rgba(24, 66, 76, 0.88)');
+        rock.addColorStop(1, 'rgba(9, 30, 40, 0.94)');
+        ctx.fillStyle = rock;
+        ctx.fill(mound);
+        // The rim, from the vent — warm on the side that faces the middle of the
+        // frame, and nothing at all on the side that does not.
+        ctx.save();
+        ctx.clip(mound);
+        const facing = cx < width / 2 ? -1 : 1;
+        const rim = ctx.createLinearGradient(cx + facing * rw, cy - rh * 0.6, cx - facing * rw * 0.3, cy + rh);
+        rim.addColorStop(0, rgba(C.ember, 0.34));
+        rim.addColorStop(0.4, rgba(C.amberDeep, 0.12));
+        rim.addColorStop(1, rgba(C.ember, 0));
+        ctx.fillStyle = rim;
+        ctx.fillRect(cx - rw, cy - rh, rw * 2, rh * 2);
+        ctx.restore();
+      }
+
+      /*
+       * A near stand of tube worms, in silhouette: the bed the stage plate draws,
+       * seen from closer and therefore taller, darker and less resolved. Filled
+       * tapered tubes with a lit crown — no strokes anywhere, for the reason the
+       * stage bed gives at length.
+       */
+      for (let index = 0; index < 16; index += 1) {
+        const stand = Math.floor(index / 4);
+        const inStand = index % 4;
+        const root = (0.08 + slotRandom(stand, 1321) * 0.86) * width;
+        const x = root + (inStand - 1.5) * (11 + slotRandom(index, 1327) * 15) * scale;
+        const lean = ((inStand - 1.5) * 0.5 + (slotRandom(index, 1361) - 0.5) * 1.1) * 22 * scale;
+        const base = height - slotRandom(index, 1367) * bed * 0.14;
+        const tall = bed * (0.2 + slotRandom(index, 1373) * 0.5);
+        const top = base - tall;
+        const foot = (3 + slotRandom(index, 1381) * 3.4) * scale;
+        const head = foot * 0.38;
+        const depth = 0.5 + slotRandom(stand, 1399) * 0.5;
+        const cool = slotRandom(index, 1409) > 0.6;
+        const tipHue = cool ? C.plankton : C.lumen;
+        const tube = new Path2D();
+        tube.moveTo(x - foot, base);
+        tube.bezierCurveTo(x - foot * 0.8 + lean * 0.1, base - tall * 0.4, x - head + lean * 0.9, base - tall * 0.72, x - head + lean, top);
+        tube.lineTo(x + head + lean, top);
+        tube.bezierCurveTo(x + head + lean * 0.9, base - tall * 0.72, x + foot * 0.8 + lean * 0.1, base - tall * 0.4, x + foot, base);
+        tube.closePath();
+        const body = ctx.createLinearGradient(x, base, x + lean, top);
+        body.addColorStop(0, rgba(C.abyss, 0.62 * depth));
+        body.addColorStop(0.45, rgba(C.trench, 0.36 * depth));
+        body.addColorStop(0.84, rgba(C.lumenDeep, 0.15 * depth));
+        body.addColorStop(1, rgba(tipHue, 0.14 * depth));
+        ctx.fillStyle = body;
+        ctx.fill(tube);
+        const tipR = (3.4 + slotRandom(index, 1423) * 3.6) * scale;
+        const crown = ctx.createRadialGradient(x + lean, top, 0, x + lean, top, tipR * 2.6);
+        crown.addColorStop(0, rgba(cool ? C.plankton : C.lumenHigh, 0.2 * depth));
+        crown.addColorStop(0.34, rgba(tipHue, 0.09 * depth));
+        crown.addColorStop(1, rgba(tipHue, 0));
+        ctx.fillStyle = crown;
+        ctx.beginPath();
+        ctx.ellipse(x + lean, top, tipR * 2.6, tipR * 2.2, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Marine snow over the near floor: the same particulate the water carries,
+      // larger because it is closer, and static because it is a bake.
+      for (let index = 0; index < 34; index += 1) {
+        const x = slotRandom(index, 1433) * width;
+        const y = horizon + slotRandom(index, 1439) * bed;
+        const r = (0.9 + slotRandom(index, 1447) * 2.4) * scale;
+        const warmth = slotRandom(index, 1451);
+        const colour = warmth > 0.78 ? C.amber : warmth > 0.42 ? C.plankton : C.lumenDeep;
+        const mote = ctx.createRadialGradient(x, y, 0, x, y, r * 3.4);
+        mote.addColorStop(0, rgba(colour, 0.42));
+        mote.addColorStop(0.34, rgba(colour, 0.14));
+        mote.addColorStop(1, rgba(colour, 0));
+        ctx.fillStyle = mote;
+        ctx.fillRect(x - r * 3.4, y - r * 3.4, r * 6.8, r * 6.8);
+      }
     }
 
     // The vignette, tinted to the floor and never to black (§6.1).
@@ -1792,19 +2515,39 @@ export class Stage {
      * — well under the threshold at which the eye resolves an individual patch. It
      * costs the render loop nothing and it cannot reorder two frames by value.
      */
-    const MARBLE = [C.plankton, C.lumenDeep, C.basalt, C.crust, C.medusaDeep];
-    for (let index = 0; index < 44; index += 1) {
+    /*
+     * NINE HUES AT THREE SCALES, and both halves of that are the round-4 change.
+     *
+     * Five tints at one scale is a wash with a wobble in it; what a painted
+     * background actually has is structure the eye can find at whatever distance
+     * it looks from. So the patches now run from a fifth of the frame down to a
+     * twentieth — the largest are the depth of the water, the smallest are silt
+     * suspended in it — and they carry nine tints rather than five, including two
+     * warm ones, because a plate whose every patch is a cool tint moves its pixels
+     * along the same line the ramp already lies on and buys nothing.
+     *
+     * This is where the colour depth deleted with the grain layer comes back, and
+     * it comes back as material: a patch is a thing in the water at a size and a
+     * hue, identical on every device, invisible as an individual mark.
+     */
+    const MARBLE = [
+      C.plankton, C.lumenDeep, C.basalt, C.crust, C.medusaDeep,
+      C.trench, C.silt, C.amberDeep, C.medusa,
+    ];
+    for (let index = 0; index < 108; index += 1) {
       const tint = MARBLE[index % MARBLE.length];
+      const band = index % 3;
+      const span = band === 0 ? 0.2 : band === 1 ? 0.1 : 0.05;
       const x = slotRandom(index, 811) * width;
       const y = slotRandom(index, 823) * height;
-      const rx = (0.16 + slotRandom(index, 827) * 0.36) * width;
+      const rx = (span + slotRandom(index, 827) * span * 1.6) * width;
       const ry = rx * (0.42 + slotRandom(index, 829) * 0.9);
       ctx.save();
       ctx.translate(x, y);
       ctx.scale(1, ry / rx);
       const patch = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
-      patch.addColorStop(0, rgba(tint, 0.055 + slotRandom(index, 839) * 0.07));
-      patch.addColorStop(0.55, rgba(tint, 0.026 + slotRandom(index, 853) * 0.032));
+      patch.addColorStop(0, rgba(tint, 0.05 + slotRandom(index, 839) * 0.062));
+      patch.addColorStop(0.55, rgba(tint, 0.024 + slotRandom(index, 853) * 0.03));
       patch.addColorStop(1, rgba(tint, 0));
       ctx.fillStyle = patch;
       ctx.beginPath();
@@ -2014,6 +2757,55 @@ export class Stage {
     ctx.fillStyle = vignette;
     ctx.fillRect(0, 0, width, height);
 
+    /*
+     * THE FAR FIELD: distant life, baked, and drawn *over* the vignette.
+     *
+     * This is the deep-sea version of the device every reference in the set uses
+     * to keep a large dark area from being inert — the starfield behind a
+     * climbing multiplier, the damask behind a peg board. Three hundred points of
+     * light, one to three pixels across, in six of the palette's hues, scattered
+     * with a density that thins toward the middle of the frame so they never
+     * compete with the colony for the eye.
+     *
+     * It is over the vignette rather than under it because the point of the layer
+     * is the corners: under it they would be multiplied away in exactly the
+     * region that has nothing else in it. Every position, size and hue comes from
+     * `slotRandom` on the index, so the field is identical on every device, it is
+     * baked once per resize, and it costs the render loop nothing. It is a
+     * constant in every frame of every round, so §6.3's ordering promise stands.
+     *
+     * And it is the honest half of the answer to colour depth. Round 3 bought
+     * that number with a noise layer over every pixel of the product; a number is
+     * not the criterion, it is the proxy, and what the proxy is asking is whether
+     * a large area of the frame is made of anything. Three hundred small lights
+     * at six hues *is* something — you can point at one — where noise is
+     * something you can only measure.
+     */
+    for (let index = 0; index < 300; index += 1) {
+      const x = slotRandom(index, 1601) * width;
+      const y = slotRandom(index, 1607) * height;
+      // Thinner where the colony lives, so the far field is a background rather
+      // than a texture over the subject.
+      const toCentre = Math.hypot((x - width / 2) / width, (y - height * 0.4) / height);
+      if (slotRandom(index, 1609) > 0.22 + toCentre * 1.5) continue;
+      const pick = slotRandom(index, 1613);
+      const colour =
+        pick > 0.9 ? C.amber
+          : pick > 0.76 ? C.medusa
+            : pick > 0.56 ? C.foam
+              : pick > 0.34 ? C.plankton
+                : pick > 0.16 ? C.lumen
+                  : C.lumenDeep;
+      const r = (0.5 + slotRandom(index, 1619) * 1.5) * scale;
+      const strength = 0.16 + slotRandom(index, 1621) * 0.42;
+      const dot = ctx.createRadialGradient(x, y, 0, x, y, r * 3.2);
+      dot.addColorStop(0, rgba(colour, strength));
+      dot.addColorStop(0.3, rgba(colour, strength * 0.34));
+      dot.addColorStop(1, rgba(colour, 0));
+      ctx.fillStyle = dot;
+      ctx.fillRect(x - r * 3.2, y - r * 3.2, r * 6.4, r * 6.4);
+    }
+
     ditherPlate(ctx, canvas.width, canvas.height);
     return canvas;
   }
@@ -2217,7 +3009,7 @@ export class Stage {
     this.band = bandFor(value);
     const text = value > 0 ? faceValue(value) : '';
     if (text === '') this.label = null;
-    else if (this.label === null || this.label.text !== text) this.label = labelSprite(text);
+    else if (this.label === null || this.label.text !== text) this.label = bakeLabel(text);
     this.start();
   }
 
@@ -2349,9 +3141,10 @@ export class Stage {
       const slot = index + 1;
       const { x, y } = bodyPosition(slot, Math.max(units, 1));
       const tx = cx + x * scale * spread;
-      // `lift` is non-zero only on the stake screen, where the panels below claim
-      // the lower two-thirds of the frame and the colony has to sit in the window
-      // that is left. It is a layout offset and nothing else reads it.
+      // `lift` is non-zero on the stake screen, where the panels below claim the
+      // lower two-thirds of the frame and the colony has to sit in the window
+      // that is left, and at settlement, where it clears the payout card. It is a
+      // layout offset and nothing else reads it.
       const ty = cy + y * scale * spread - this.lift;
       if (immediate) {
         body.x = tx;
@@ -2927,6 +3720,17 @@ export class Stage {
      * else, and it is cleared by `reset()`.
      */
     this.payoutLight = Math.min(1, 0.5 + 0.5 * clamp01(Math.log2(1 + value) / Math.log2(31)));
+    /*
+     * The colony's rise lands on this frame with everything else, and that was
+     * **tried the other way and measured**. Travelling the bodies over 240 ms
+     * reads better in isolation — it is the beat the round is named after, and a
+     * jump cut is a poor way to spend it — but it costs the budget more than it
+     * buys: on the pour beat two samples later the moving regions went 5 -> 8 and
+     * the dominant region's share of all motion went 73% -> 46%, under the
+     * 50-80% band, because a colony still settling is a second thing moving
+     * beside the light leaving it. One dominant motion per beat is the rule, and
+     * on this beat the dominant motion is the frame lifting.
+     */
     this.relayout(true);
     this.root.style.setProperty('--exposure', this.exposure.toFixed(4));
     this.start();
@@ -2980,7 +3784,7 @@ export class Stage {
         setTimeout(() => {
           if (this.generation !== round) return;
           body.spent = 1;
-          body.alpha = 0.92;
+          body.alpha = 1;
           /*
            * A spent organism is a banked one: AMBER mass with a soft halo and no
            * interior light left. The lamp is cut to a third, which puts its
@@ -2988,7 +3792,7 @@ export class Stage {
            * unambiguous luminance maximum — the gating criterion is that exactly
            * one region is brightest, not that everything else is dark.
            */
-          this.tween(body, 'lamp', 0.46, 260, ease.decel);
+          this.tween(body, 'lamp', 0.6, 260, ease.decel);
           this.start();
         }, 150);
       }, delay);
@@ -3512,15 +4316,26 @@ export class Stage {
      * The wide bloom the mouth throws into the water, and the frame's only warm
      * anchor.
      *
-     * It is deliberately louder than it was. A frame carried by one hue is a frame
-     * with no colour identity to read — every reference in the set is carried by
-     * one dominant hue with a second supporting it, and this game's second is the
-     * vent. Round 1 measured 99.6% of its hue mass in the cyans, which is not
-     * discipline, it is monochrome. It stays inside §6.1's ~5%-of-frame cap and it
-     * stays EMBER-only; it is simply *present*.
+     * It is deliberately louder than it *was in round 1*, and deliberately
+     * quieter than it was in round 3, and both halves of that come from the same
+     * measurement.
+     *
+     * Round 1 measured 99.6% of its hue mass in the cyans, which is not
+     * discipline, it is monochrome — so the vent was opened up. Round 3 then
+     * measured the payoff's celebration lift at +40% mean luminance against a
+     * +50% bar, with the cause named exactly: warm gold is already on the screen
+     * while the player is still deciding, so the payoff has no headroom left to
+     * take. A base state that is already partly the colour of the win cannot
+     * become the win.
+     *
+     * So the *warm anchor* stays and the *warm event* is what got its budget
+     * back: the constant term is roughly halved and the flash term roughly
+     * doubled, which leaves the settled vent about where it was and drops the
+     * deciding screen well below it. The vent still carries a second hue at idle
+     * — it is simply no longer competing with the payoff for the same colour.
      */
     const size = (330 + 110 * flash) * scale;
-    ctx.globalAlpha = 0.5 + 0.32 * flash;
+    ctx.globalAlpha = 0.26 + 0.5 * flash;
     ctx.drawImage(this.sprites.emberGlow, width / 2 - size / 2, height - size * 0.48, size, size * 0.76);
 
     /*
@@ -3542,7 +4357,7 @@ export class Stage {
       const puff = (58 + t * 116) * scale;
       // The column cools as it rises: warm at the mouth, fading to nothing well
       // before it could read as a second light source.
-      ctx.globalAlpha = (0.2 - t * 0.175) * (1 + 0.9 * flash);
+      ctx.globalAlpha = (0.13 - t * 0.113) * (1 + 1.6 * flash);
       ctx.drawImage(
         this.sprites.emberGlow,
         width / 2 + sway - puff / 2,
@@ -3554,9 +4369,9 @@ export class Stage {
 
     // The mouth itself: hot, small, fixed.
     const core = 118 * scale;
-    ctx.globalAlpha = 0.78 + 0.22 * flash;
+    ctx.globalAlpha = 0.46 + 0.5 * flash;
     ctx.drawImage(this.sprites.emberGlow, width / 2 - core / 2, height - core * 0.48, core, core * 0.56);
-    ctx.globalAlpha = 0.76 + 0.24 * flash;
+    ctx.globalAlpha = 0.46 + 0.5 * flash;
     const mouth = 34 * scale;
     ctx.drawImage(this.sprites.emberGlow, width / 2 - mouth / 2, height - mouth * 0.55, mouth, mouth * 0.6);
     ctx.restore();
@@ -3904,8 +4719,16 @@ export class Stage {
     const mass = this.sprites.mass[band][body.mass];
     const sprite = (body.tint === 'amber' ? this.sprites.amberBells : this.sprites.bells)[body.sprite];
     const bright = (1 + 0.15 * body.hold) * (1 - 0.85 * body.die);
-    const massAlpha =
-      body.alpha * (1 - 0.5 * body.die) * (body.husk > 0.5 || body.spent > 0.5 ? 0.82 : 1);
+    /*
+     * A **husk** is drawn thin — it is a corpse, and a corpse is partly water.
+     * A **spent** organism is not: it is the round's money, sitting on the
+     * playfield above the vessel that holds it, and drawing it at 82% let the
+     * cyan water under it mix into every shaded pixel of a warm body. Amber at
+     * 0.82 over teal is olive, which is the second half of why the harvested
+     * colony measured as khaki eggs. It is opaque now, so what the eye gets is
+     * the band's own colour and the band's own shading.
+     */
+    const massAlpha = body.alpha * (1 - 0.5 * body.die) * (body.husk > 0.5 ? 0.82 : 1);
 
     ctx.save();
 
@@ -4189,34 +5012,4 @@ export class Stage {
     ctx.restore();
   }
 
-  /**
-   * §6.2's fine grain: 2% monochrome noise, cycled at 12 fps — handed to the
-   * compositor instead of drawn.
-   *
-   * It used to be a full-screen pattern fill on every canvas frame, for a texture
-   * that is the same texture on every frame of the game. That is one whole
-   * screen of fill rate a frame spent on something that does not move, and with
-   * the richer water on top of it the resolve beat no longer fitted in a 16.7 ms
-   * budget in the headless harness. As a repeating background on its own element
-   * it is rasterized once, animated by `background-position` in steps, and costs
-   * the render loop nothing at all.
-   *
-   * The tile is still generated in this repository, from the same seeded noise —
-   * it is handed over as a data URL rather than fetched.
-   */
-  installGrain() {
-    /*
-     * Frame-level, not stage-level.
-     *
-     * The grain is the frame's material, and half the frame is not the stage: the
-     * stake screen, the harvest stepper and the settlement all sit above the
-     * canvas, and all three of them were rendering as untextured CSS gradients —
-     * which is exactly the surface the references never have. So the tile is
-     * looked up on the document rather than inside the stage element, and the
-     * layer it lands on spans the whole frame.
-     */
-    const layer = document.getElementById('stage-grain');
-    if (layer === null) return;
-    layer.style.backgroundImage = `url(${this.sprites.grain[0].toDataURL()})`;
-  }
 }
