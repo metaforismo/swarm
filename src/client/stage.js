@@ -1231,7 +1231,116 @@ function massSet(band) {
  */
 function bakeLabel(text) {
   const sprite = labelSprite(text);
-  return sprite.ok ? sprite : labelSprite(text, true);
+  if (sprite.ok) return sprite;
+  const uniform = labelSprite(text, true);
+  return uniform.ok ? uniform : vectorLabelSprite(text);
+}
+
+/*
+ * A font-independent last resort for the value on an organism.
+ *
+ * The ordinary path deliberately uses the platform's rounded face. Browsers can,
+ * however, fail more deeply than returning a bad advance: a canvas may ignore a
+ * font assignment and keep its 10 px default face. Fixed tracking makes that
+ * failure wide enough to pass a width-only check while the glyphs remain only a
+ * few pixels tall. This fallback draws the tiny alphabet used by a face value
+ * (digits, decimal point and multiplication sign) as rounded vector segments, so
+ * a broken font subsystem can change the lettering style but can never turn the
+ * payout scale into a dot or a hairline.
+ */
+function vectorLabelSprite(text) {
+  const width = 256;
+  const height = 96;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  const glyphs = [...text];
+  const segments = {
+    0: 'ab cdef'.replace(/ /gu, ''),
+    1: 'bc',
+    2: 'abdeg',
+    3: 'abcdg',
+    4: 'bcfg',
+    5: 'acdfg',
+    6: 'acdefg',
+    7: 'abc',
+    8: 'abcdefg',
+    9: 'abcdfg',
+  };
+  const weight = (glyph) => (glyph === '.' ? 0.24 : glyph === '×' || glyph === 'x' ? 0.58 : 0.68);
+  const gapWeight = 0.12;
+  const totalWeight =
+    glyphs.reduce((sum, glyph) => sum + weight(glyph), 0) +
+    Math.max(0, glyphs.length - 1) * gapWeight;
+  const target = width * 0.7;
+  const unit = target / Math.max(1, totalWeight);
+  const glyphHeight = Math.min(height * 0.62, unit * 1.18);
+  const thickness = Math.max(3.4, glyphHeight * 0.105);
+  const bowR = width * 2.3;
+
+  const roundedBar = (x, y, w, h) => {
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, Math.min(w, h) / 2);
+    ctx.fill();
+  };
+  const drawGlyph = (glyph, glyphWidth) => {
+    if (glyph === '.') {
+      ctx.beginPath();
+      ctx.arc(0, glyphHeight * 0.39, thickness * 0.58, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+    if (glyph === '×' || glyph === 'x') {
+      ctx.lineWidth = thickness * 0.78;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-glyphWidth * 0.31, -glyphHeight * 0.25);
+      ctx.lineTo(glyphWidth * 0.31, glyphHeight * 0.25);
+      ctx.moveTo(glyphWidth * 0.31, -glyphHeight * 0.25);
+      ctx.lineTo(-glyphWidth * 0.31, glyphHeight * 0.25);
+      ctx.stroke();
+      return;
+    }
+    const active = segments[glyph] ?? segments[8];
+    const left = -glyphWidth / 2;
+    const right = glyphWidth / 2 - thickness;
+    const top = -glyphHeight / 2;
+    const middle = -thickness / 2;
+    const bottom = glyphHeight / 2 - thickness;
+    const horizontalWidth = Math.max(thickness, glyphWidth - thickness * 0.36);
+    const verticalHeight = Math.max(thickness, glyphHeight / 2 - thickness * 0.62);
+    if (active.includes('a')) roundedBar(left + thickness * 0.18, top, horizontalWidth, thickness);
+    if (active.includes('g')) roundedBar(left + thickness * 0.18, middle, horizontalWidth, thickness);
+    if (active.includes('d')) roundedBar(left + thickness * 0.18, bottom, horizontalWidth, thickness);
+    if (active.includes('f')) roundedBar(left, top + thickness * 0.28, thickness, verticalHeight);
+    if (active.includes('b')) roundedBar(right, top + thickness * 0.28, thickness, verticalHeight);
+    if (active.includes('e')) roundedBar(left, thickness * 0.16, thickness, verticalHeight);
+    if (active.includes('c')) roundedBar(right, thickness * 0.16, thickness, verticalHeight);
+  };
+
+  const paint = (dx, dy, style) => {
+    ctx.fillStyle = style;
+    ctx.strokeStyle = style;
+    let cursor = -target / 2;
+    for (const glyph of glyphs) {
+      const glyphWidth = weight(glyph) * unit;
+      const centre = cursor + glyphWidth / 2;
+      const angle = centre / bowR;
+      const sag = (centre * centre) / (2 * bowR);
+      ctx.save();
+      ctx.translate(width / 2 + centre + dx, height / 2 + sag - 2 + dy);
+      ctx.rotate(angle);
+      drawGlyph(glyph, glyphWidth);
+      ctx.restore();
+      cursor += glyphWidth + gapWeight * unit;
+    }
+  };
+
+  paint(-1.2, -1.5, 'rgba(4, 20, 28, 0.34)');
+  paint(1.7, 2.1, 'rgba(255, 255, 255, 0.42)');
+  paint(0, 0, rgba(C.abyss, 0.9));
+  return { canvas, text, aspect: width / height, ok: true, fallback: 'vector' };
 }
 
 function labelSprite(text, forceUniform = false) {
@@ -1382,6 +1491,14 @@ function labelSprite(text, forceUniform = false) {
       ctx.translate(width / 2 + dx, height / 2 + dy + bowR - sagitta / 2);
       ctx.rotate(angle);
       ctx.translate(0, -bowR);
+      /*
+       * Keep a sliver of water between neighbouring glyphs. The advances place
+       * the centres; a slightly condensed face keeps the three emboss passes
+       * from bridging those centres into one continuous silhouette on strings
+       * such as 2.94x and 99.9x. Width and tracking stay unchanged, so this only
+       * protects the counters inside each glyph.
+       */
+      ctx.scale(forceUniform ? 0.72 : 0.86, 1);
       ctx.fillText(glyphs[index], 0, 0);
       ctx.restore();
       cursor += advance;
@@ -1417,15 +1534,43 @@ function labelSprite(text, forceUniform = false) {
   const pixels = ctx.getImageData(0, 0, width, height).data;
   let left = width;
   let right = 0;
+  let top = height;
+  let bottom = 0;
+  let ink = 0;
+  const columns = new Uint16Array(width);
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       if (pixels[(y * width + x) * 4 + 3] > 24) {
+        ink += 1;
+        columns[x] += 1;
         if (x < left) left = x;
         if (x > right) right = x;
+        if (y < top) top = y;
+        if (y > bottom) bottom = y;
       }
     }
   }
-  return { canvas, text, aspect: width / height, ok: right - left >= width * 0.4 };
+  let runs = 0;
+  let inside = false;
+  for (const column of columns) {
+    if (column > 0 && !inside) {
+      runs += 1;
+      inside = true;
+    } else if (column === 0) inside = false;
+  }
+  const inkWidth = right - left;
+  const inkHeight = bottom - top;
+  const fill = ink / Math.max(1, inkWidth * inkHeight);
+  return {
+    canvas,
+    text,
+    aspect: width / height,
+    ok:
+      inkWidth >= width * 0.4 &&
+      inkHeight >= height * 0.25 &&
+      fill <= 0.72 &&
+      runs >= 2,
+  };
 }
 
 /**
@@ -1670,6 +1815,62 @@ function ditherPlate(ctx, width, height, amplitude = 3) {
 }
 
 /**
+ * Broad caustic ribbons in the water material.
+ *
+ * These are deliberately wider than a line and softer than an effect: each is
+ * a static lens in the water column, with colour changing along its length and
+ * no hard edge. They give the large water surface a second axis of illumination
+ * after screenshot resampling, without putting texture on glass, type or a
+ * control and without adding anything to the live render loop.
+ */
+function paintWaterCaustics(ctx, width, height, salt) {
+  const scale = width / REFERENCE_WIDTH;
+  const TINTS = [
+    C.plankton,
+    C.lumenDeep,
+    C.basalt,
+    C.medusaDeep,
+    C.foam,
+    C.amberDeep,
+    C.medusa,
+  ];
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for (let index = 0; index < 20; index += 1) {
+    const x0 = (-0.12 + slotRandom(index, salt + 1) * 1.08) * width;
+    const y0 = (0.04 + slotRandom(index, salt + 3) * 0.84) * height;
+    const reach = (0.24 + slotRandom(index, salt + 5) * 0.34) * width;
+    const fall = (0.1 + slotRandom(index, salt + 7) * 0.24) * height;
+    const bend = (slotRandom(index, salt + 9) - 0.5) * width * 0.28;
+    const tint = TINTS[index % TINTS.length];
+    const counter = TINTS[(index * 2 + 3) % TINTS.length];
+    const light = ctx.createLinearGradient(x0, y0, x0 + reach, y0 + fall);
+    light.addColorStop(0, rgba(tint, 0));
+    light.addColorStop(0.24, rgba(tint, 0.085 + slotRandom(index, salt + 11) * 0.07));
+    light.addColorStop(0.62, rgba(counter, 0.055 + slotRandom(index, salt + 13) * 0.055));
+    light.addColorStop(1, rgba(counter, 0));
+    ctx.strokeStyle = light;
+    ctx.lineWidth = (10 + slotRandom(index, salt + 15) * 16) * scale;
+    ctx.shadowBlur = (8 + slotRandom(index, salt + 17) * 12) * scale;
+    ctx.shadowColor = rgba(tint, 0.1);
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.bezierCurveTo(
+      x0 + reach * 0.26 + bend,
+      y0 + fall * 0.22,
+      x0 + reach * 0.72 - bend,
+      y0 + fall * 0.72,
+      x0 + reach,
+      y0 + fall,
+    );
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/**
  * The pressure glass's own ornament: a tileable lattice of cells.
  *
  * A hexagonal close-pack, because that is what a pressure window and a sheet of
@@ -1678,22 +1879,25 @@ function ditherPlate(ctx, width, height, amplitude = 3) {
  * tint across its face, a lit edge along its upper-left, a shadowed one along its
  * lower-right — so the lattice is *lit by the same key light as everything else*
  * rather than being a pattern printed flat. Per-cell tint and per-cell strength
- * come from `slotRandom`, which is why 29 px of repeat does not read as a repeat.
+ * come from `slotRandom`, which is why 43 px of repeat does not read as a repeat.
  *
- * Contrast is the whole design: at 4–7% over a panel face this is invisible until
- * you look for it, which is the difference between ornament and dirt. The
- * measurable consequence is that the panel's pixels stop lying on the single line
- * its gradient draws through colour space.
+ * Contrast is the whole design: the broad cell bodies resolve as shallow relief,
+ * while their edges stay below the type and the control bezels. The measurable
+ * consequence is that the panel's pixels stop lying on the single line its
+ * gradient draws through colour space.
  */
-function glassTile() {
-  const cell = 29;
+function glassTile(
+  strength = 1,
+  tints = [C.lumen, C.plankton, C.foam, C.medusa, C.amber],
+) {
+  const cell = 43;
   const w = cell * 3;
   const h = Math.round(cell * Math.sqrt(3) * 1.5);
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext('2d');
-  const TINTS = [C.lumen, C.plankton, C.foam, C.medusa, C.amber];
+  const TINTS = tints;
   const hex = (cx, cy, r) => {
     const path = new Path2D();
     for (let k = 0; k < 6; k += 1) {
@@ -1717,17 +1921,37 @@ function glassTile() {
       const r = cell * 0.52;
       const path = hex(cx, cy, r);
       const tint = TINTS[index % TINTS.length];
-      ctx.fillStyle = rgba(tint, 0.022 + slotRandom(index, 1511) * 0.034);
+      const counterTint = TINTS[(index * 3 + 2) % TINTS.length];
+      /*
+       * A pressure cell is a small lens, not a flat coloured stamp. Its body
+       * catches the key light at the upper-left shoulder and the vent's colour
+       * through the lower-right one. The two-axis field survives screenshot
+       * resampling while the old single-alpha fill mostly disappeared into the
+       * pane below it; it is also visibly a property of glass, never a grain laid
+       * over type or controls.
+       */
+      const body = ctx.createRadialGradient(
+        cx - r * 0.42,
+        cy - r * 0.38,
+        0,
+        cx + r * 0.18,
+        cy + r * 0.16,
+        r * 1.22,
+      );
+      body.addColorStop(0, rgba(C.foam, (0.2 + slotRandom(index, 1507) * 0.12) * strength));
+      body.addColorStop(0.38, rgba(tint, (0.12 + slotRandom(index, 1511) * 0.12) * strength));
+      body.addColorStop(1, rgba(counterTint, (0.055 + slotRandom(index, 1517) * 0.075) * strength));
+      ctx.fillStyle = body;
       ctx.fill(path);
       // The lit edge, upper left; the shadowed edge, lower right. Same key light
       // as every control and every organism in the product.
       ctx.save();
       ctx.clip(path);
       const lit = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
-      lit.addColorStop(0, rgba(C.foam, 0.075 + slotRandom(index, 1523) * 0.038));
+      lit.addColorStop(0, rgba(C.foam, (0.05 + slotRandom(index, 1523) * 0.03) * strength));
       lit.addColorStop(0.4, rgba(C.foam, 0));
       lit.addColorStop(0.6, rgba(C.abyss, 0));
-      lit.addColorStop(1, rgba(C.abyss, 0.095 + slotRandom(index, 1531) * 0.04));
+      lit.addColorStop(1, rgba(C.abyss, (0.06 + slotRandom(index, 1531) * 0.035) * strength));
       ctx.fillStyle = lit;
       ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
       ctx.restore();
@@ -1947,9 +2171,9 @@ export class Stage {
    * numeral and on a control is not a material, because a material is what one
    * object is made of and it differs per object. What the calibration set does
    * instead is *ornament*: a damask behind a peg board, a filigree behind a
-   * wheel. So this is ornament — a cell lattice at 29 px, the pressure glass this
-   * game's panels have always been described as, etched at a contrast you have to
-   * look for and at a scale you could point at. It goes on the glass and on
+   * wheel. So this is ornament — a cell lattice at 43 px, the pressure glass this
+   * game's panels have always been described as, modelled as shallow relief at a
+   * scale you can point at. It goes on the glass and on
    * nothing else: not the water, not the type, not a control face.
    *
    * Generated here from the same seeded noise as everything else and handed to
@@ -1959,6 +2183,29 @@ export class Stage {
   installGlass() {
     const tile = glassTile();
     document.documentElement.style.setProperty('--glass-motif', `url(${tile.toDataURL()})`);
+    const instrumentTile = glassTile(1.6, [
+      C.plankton,
+      C.lumen,
+      C.foam,
+      C.medusa,
+      C.amber,
+      C.ember,
+      C.basalt,
+      C.crust,
+    ]);
+    document.documentElement.style.setProperty(
+      '--instrument-motif',
+      `url(${instrumentTile.toDataURL()})`,
+    );
+    const amberTile = glassTile(1, [
+      C.amberHigh,
+      C.amber,
+      C.ember,
+      C.amberDeep,
+      C.foam,
+      C.plankton,
+    ]);
+    document.documentElement.style.setProperty('--amber-motif', `url(${amberTile.toDataURL()})`);
   }
 
   // ------------------------------------------------------------------ geometry
@@ -2111,6 +2358,8 @@ export class Stage {
       ctx.fill();
       ctx.restore();
     }
+
+    paintWaterCaustics(ctx, width, height, 1700);
 
     // Far bioluminescence, below the stage as well as in it: the water has a
     // distance in it everywhere, not only where the canvas reaches.
@@ -2555,6 +2804,8 @@ export class Stage {
       ctx.fill();
       ctx.restore();
     }
+
+    paintWaterCaustics(ctx, width, height, 1200);
 
     /*
      * The abyss's own light: the bloom clouds and the siphonophore strands, baked

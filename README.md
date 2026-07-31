@@ -1,5 +1,9 @@
 # SWARM
 
+<p align="center">
+  <img src="docs/screenshots/gameplay.png" alt="SWARM banked settlement with luminous organisms and an amber pressure vessel" width="390">
+</p>
+
 **Seed three organisms in the dark. Every generation they die, hold, or split.
 Bank the colony whenever you like — or harvest part of it and let the rest keep
 growing.**
