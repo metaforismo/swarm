@@ -47,10 +47,6 @@
             nothing the bet depends on (§9.6).
           -->
           <div class="colony-aria" id="colony" role="img" aria-live="polite" aria-label="Colony"></div>
-          <!-- §6.2's grain, composited rather than drawn: the tile is generated
-               in `stage.js` from the same seeded noise and handed here as a data
-               URL, so the render loop spends no fill rate on a static texture. -->
-          <div class="stage-grain" id="stage-grain" aria-hidden="true"></div>
           <div class="legend" id="legend">DIE 40% · HOLD 40% · SPLIT 20%</div>
           <div class="stage-note" id="stage-note"></div>
         </section>
@@ -342,8 +338,37 @@
           <div class="payout-stage">
             <div class="payout-card" id="payout-card">
               <div class="card-sweep" aria-hidden="true"></div>
-              <div class="terminal" id="settlement-terminal">—</div>
-              <div class="headline" id="settlement-headline">—</div>
+              <!--
+                THE VESSEL.
+
+                On a winning round this is the object the ceremony is about: a lit
+                amber surface, born at the optical centre, with the payout printed
+                *inside* it in dark ink. Every payoff in the reference set builds a
+                physical surface and inverts the base state's light-on-dark to
+                dark-on-light — that inversion is what announces "this is the
+                moment" before a digit has been read. Round 1 had an amber numeral
+                on dark glass, which measured as a *darker* frame than the idle
+                screen it followed (mean luminance −7%, where the references
+                measure +84%).
+
+                On a losing round it is not drawn at all: no fill, no rim, no
+                bloom. Win and loss are then distinguishable pre-attentively, by
+                luminance and colour rather than by reading a number — which is the
+                honest version of the same rule, and the reason the vessel can
+                never appear on a round that returned less than it cost.
+              -->
+              <div class="vessel">
+                <div class="vessel-light" aria-hidden="true"></div>
+                <div class="terminal" id="settlement-terminal">—</div>
+                <div class="vessel-rule" aria-hidden="true"></div>
+                <div class="headline" id="settlement-headline">—</div>
+                <!-- The round's credited multiple of what the ticket cost: the
+                     tier's own basis (§7.1), shown on wins only, truncated like
+                     every other figure on screen. It arrives *after* the count-up
+                     lands, because a total printed beside a counting figure is a
+                     total that has already given the answer away. -->
+                <div class="multiple" id="settlement-multiple" hidden>—</div>
+              </div>
               <!--
                 The round's own shape: what the colony did, generation by
                 generation. It is the player's own resolved history and it is
@@ -359,12 +384,18 @@
                 is better than filling it with air.
               -->
               <div class="trace" id="settlement-trace" aria-hidden="true"></div>
-              <!-- The round's credited multiple of what the ticket cost: the
-                   tier's own basis (§7.1), shown on wins only, truncated like
-                   every other figure on screen. It arrives *after* the count-up
-                   lands, because a total printed beside a counting figure is a
-                   total that has already given the answer away. -->
-              <div class="multiple" id="settlement-multiple" hidden>—</div>
+              <!--
+                The trace needs four characters of caption or it is not
+                information, it is a mark.
+
+                One bar per generation at the population it resolved to is a real
+                record — the player's own, already in the receipt — but a round
+                that lasted two generations draws two teal bars in the middle of a
+                payout card, and an unlabelled shape that the viewer cannot name is
+                the exact defect class this pass exists to close. Either it says
+                what it is or it should not be on the card.
+              -->
+              <div class="trace-caption" aria-hidden="true">COLONY, GENERATION BY GENERATION</div>
               <div class="net" id="settlement-net">—</div>
               <p class="small" id="settlement-copy"></p>
             </div>
@@ -409,6 +440,34 @@
         </section>
 
         <div class="toast" id="toast" hidden></div>
+
+        <!--
+          §6.2's grain, composited rather than drawn: the tile is generated in
+          `stage.js` from the same seeded noise and handed here as a data URL, so
+          the render loop spends no fill rate on a static texture.
+
+          It sits at frame level and over every screen, because the grain is the
+          *frame's* material and not the canvas's. Half of this game's surfaces —
+          the stake screen, the harvest stepper, the settlement — are DOM above the
+          canvas, and a smooth CSS gradient with no material in it is the single
+          most common thing separating a generated interface from a made one. It
+          is under the free-play marker and the toast, and it never takes a tap.
+
+          The well is not optional. The layer is over-sized by a tile on every
+          side so it can be *translated* to cycle the noise without exposing an
+          edge, and `.frame` clips its own overflow — which makes `.frame` a
+          scroll container, and an absolutely-positioned child hanging 96 px past
+          its bottom and right edges adds exactly that much scrollable area.
+          Chrome's scroll anchoring then quietly scrolled the frame itself: the
+          top bar left the screen and the whole layout sat 110 px high and 20 px
+          left, on a winning round. This is the second time a decorative layer has
+          been able to move the money in this file. The well is `inset: 0`, so it
+          contributes nothing to the scroll area, and everything over-sized lives
+          inside it.
+        -->
+        <div class="grain-well" aria-hidden="true">
+          <div class="stage-grain" id="stage-grain"></div>
+        </div>
       </main>
     </div>
 

@@ -466,26 +466,51 @@ the help screen states both plainly rather than burying them in terms.
 
 ## 6. Art direction
 
-**Concept.** Absolute abyssal black. One warm ember from the vent below. The
-only other light in the universe is your colony. The light budget of the scene
-*is* the money — and §6.3 defines that as an exact, monotone function of colony
-value so the claim survives contact with a renderer.
+**Concept.** The deepest water there is, and it is *water* — not the absence of a
+picture. One warm ember from the vent below. The only other light in the universe
+is your colony. The light budget of the scene *is* the money — and §6.3 defines
+that as an exact, monotone function of colony value so the claim survives contact
+with a renderer.
 
 ### 6.1 Palette
 
+**The floor moved, and why.** Round 1 read "absolute abyssal black" literally and
+measured **37.3% of the idle frame and 41.7% of the winning frame at `L < 0.06`**
+— dead black — against **0.0–0.1%** in every premium reference of this category.
+The property those references actually share is not that they are dark: it is
+that their darks are **saturated and sit on gradients**. The controlled pair in
+the calibration set is the same game, same layout, same type, in two skins, at
+**87.8% versus 4.8% saturated pixels**; the flat one reads as a wireframe of the
+coloured one, and it is the failure mode this game shipped.
+
+So ABYSS is now the deepest *water* in the picture rather than the absence of
+one, and the water tones climb with it. Every value below is a **constant** —
+identical in every frame of every round — so §6.3's ordering promise is
+untouched: no frame can outrank another by value on account of the plate it is
+drawn on. Only `E(V)` moves.
+
+The rule that follows, and it is enforced in `styles.css` and `stage.js` alike:
+**nothing anywhere in the game is drawn darker than ABYSS.** Shadows, scrims,
+vignettes and trench walls are tinted toward ABYSS and never toward black, so
+they darken *to* the floor and stop there. Measured result: near-black is
+**0.0%** of every frame in every state.
+
 | Role | Name | Hex | Usage |
 | --- | --- | --- | --- |
-| Background void | ABYSS | `#02040A` | 55% of frame |
-| Mid water | TRENCH | `#061019` | gradient fill, vignette |
-| Floor / panels | SILT | `#0A1B28` | UI panel base |
-| Rock | BASALT | `#123240` | vent chimney body |
-| Lit rock edge | CRUST | `#1E4A56` | rim of the chimney |
+| Background void | ABYSS | `#061A24` | 55% of frame; the darkest pixel in the game |
+| Mid water | TRENCH | `#082430` | gradient fill, vignette |
+| Floor / panels | SILT | `#0D3040` | UI panel base |
+| Rock | BASALT | `#16495C` | vent chimney body |
+| Lit rock edge | CRUST | `#256D7D` | rim of the chimney |
 | **Organism core** | **LUMEN** | **`#39F5C8`** | primary brand colour, organism glow, primary CTA |
 | Organism specular | LUMEN HIGH | `#7CFFE3` | hottest 10% of each body |
 | Organism shadow rim | LUMEN DEEP | `#0FB894` | body edge away from core |
 | Ambient life | PLANKTON | `#5B8CFF` | drifting particles, secondary UI strokes |
 | Large-gain tint | MEDUSA | `#B06CFF` | verdict beats worth at least a whole stake, and only those |
-| Banked value | AMBER | `#FFC978` | harvest particles, balance chip, credited amounts |
+| Banked value | AMBER | `#FFC978` | harvest particles, balance chip, credited amounts, **the payout vessel's face** |
+| Vessel highlight | AMBER HIGH | `#FFE9C2` | the lit lip of the payout vessel |
+| Vessel shadow | AMBER DEEP | `#D9902F` | the vessel's seated lower edge |
+| Vessel ink | INK | `#23140A` | the payout numeral, dark-on-light *inside* the vessel (§7.1) |
 | Vent thermal | EMBER | `#FF9E6B` | vent glow only, ≤5% of frame, never used for loss |
 | Extinguished | ASH | `#8A97A6` | dead organisms, disabled controls |
 | Primary text | FOAM | `#E6F4F1` | numbers, labels |
@@ -498,6 +523,13 @@ beat worth at least one whole stake, so violet on screen always means the
 position just grew by more than the player paid to enter — a promise neither the
 old "violet on every split" rule nor the ratio bands that replaced it could keep
 (§6.5).
+
+**Hue economy.** One hue carries the frame and a second supports it — never more.
+Base states measure 71–87% of hue mass in the cyans with the vent's EMBER as the
+only other presence; the payoff swings warm, and measures roughly half its hue
+mass in the ambers with the cyans holding the rest. AMBER being scarce
+everywhere else is what makes that swing legible: **if gold were already on the
+play surface, the payoff would have nowhere to go.**
 
 ### 6.2 Materials
 
@@ -519,7 +551,10 @@ old "violet on every split" rule nor the ratio bands that replaced it could keep
   outcome, or a future state — so the art cannot leak information. This is a
   hard rule, not a preference.
 - **Water.** Volumetric fog with depth-based desaturation and a fine grain
-  (2% monochrome noise, animated at 12 fps). Halation around every light source:
+  (2% monochrome noise, **static**: it is the frame's material rather than a
+  weather effect, it sits over every screen the game has and not only the canvas,
+  and a texture that shimmers is dirt — the 12 fps cycle it used to run measured
+  264 changing regions between consecutive frames over a *settled* payout). Halation around every light source:
   a wide, low-opacity bloom (32 px radius, 12% opacity) plus a tight core bloom
   (6 px, 45%), both scaling with per-body intensity so a single late organism
   reads as a small sun. This is the single most important material effect —
@@ -599,6 +634,34 @@ curve, because "everything eases" is not an animation contract.
 | HARVEST | The harvested bodies take AMBER at their existing intensity, detach, travel to the balance chip and dissolve; survivors close ranks. No brightening, no shower, no swell (§6.5 R6) | 400 ms | `cubic-bezier(0.2, 0.0, 0.0, 1)` |
 | Environment reveal | Silt, rock and plankton fade up as the colony crosses `9.895833x`; once per round | 1,000 ms | See §7.2 |
 | Settlement ceremony | See §7 | 600–2,400 ms | per tier |
+
+**The effect budget, and it is a ceiling as well as a floor.**
+
+"Simple, but with a few beautiful effects" is only a brief if it is measurable, so
+it is measured the same way the rest of §6 is: as the pixel diff between two
+consecutive frames sampled 100 ms apart, changed pixels clustered and connected
+into regions.
+
+| State | Ceiling | Measured |
+| --- | --- | --- |
+| Idle (S1, no colony) | ≤ 3 moving regions, ≤ 3% of pixels | **0 regions, 0.00%** |
+| In-round, at rest | ≤ 3 regions, ≤ 7%, one region ≥ 60% of the motion | **1–2 regions, 0.6–0.7%, dominant region 96%** |
+| Settled payoff | ≤ 7 regions | **0 regions — it arrives, then holds** |
+
+The reference this is calibrated against animates *nothing* while it waits for the
+player: two consecutive frames are pixel-identical. Round 1 drifted and twinkled
+three hundred plankton and marine-snow motes on independent sines and measured
+**thirteen to fourteen** independently moving regions in the state the player sits
+in longest, with no region owning more than half the motion. Ambient particulate
+behind a live decision is the effect budget spent on nothing, and it is spent
+where there is no headroom left for the beat that matters.
+
+**The particulate therefore holds still.** It is still *lit* by the colony —
+brightness is `E(V)` times a quadratic falloff from the colony centroid, exactly
+as §6.3 requires — so it carries the one thing it was ever carrying information
+about, and it carries it on the generation beat rather than sixty times a second.
+The colony's own breath and drift are the only continuous motion in the frame,
+which is what makes the colony the thing the eye is on.
 
 **Colony choreography, resolved.** Bodies sit on a golden-angle phyllotaxis
 spiral around the vent plume centroid, ordered by slot index, so adding or
@@ -796,10 +859,21 @@ lying on the very first frame of the game.
 
 ### 6.6 Type direction
 
-- **Numerals**: a technical grotesque with **tabular lining figures** and a
-  monospaced numeric set — Space Grotesk, Basis Grotesque Mono or Suisse Intl
-  Mono are all correct choices. Tabular figures are non-negotiable: the
-  multiplier counts up and down and must not jitter.
+**Money is not a hash, and they do not get the same face.** Round 1 set every
+figure in the game in the monospace stack, including the payout — which reads as
+a terminal readout rather than as an amount, and is the typographic half of a win
+that measured as a receipt. The split is by *what the number is for*:
+
+- **Money and multipliers** — the payout, the colony value, the balance, the
+  action-bar amounts, the stake, the session net: the **heaviest grotesque the
+  device has**, at 700–800 weight, with `tabular-nums` and lining figures switched
+  on explicitly. Tabular figures are non-negotiable: these count up and down and
+  must not jitter. The payout numeral is ≥ 4% of frame height and sits *inside*
+  the vessel in INK, dark-on-light (§7.1).
+- **Commitments, seeds, chain values and the verify sheet**: the monospace stack
+  — Space Grotesk, Basis Grotesque Mono or Suisse Intl Mono. These are strings to
+  compare character by character, not amounts to feel, and a hash set in a display
+  face reads as a lie.
 - **UI text**: a humanist sans with a high x-height at small sizes (Inter,
   Söhne).
 - **Scale** (390 pt baseline): colony value 56/60 pt, yield line 28/32 pt,
@@ -807,6 +881,15 @@ lying on the very first frame of the game.
 - **Rules**: money always shows two decimals; multipliers always show two
   decimals; nothing is ever rounded up in display; a negative delta always shows
   its sign.
+
+**Contrast binds before every other criterion in §6.** Panel faces are lit at the
+*lip* rather than across their upper third, because MIST needs a background under
+WCAG relative luminance 0.06 to clear §9.6's 4.5:1 and a genuinely mid-lit teal is
+three times that. A first pass that lit the top 26% of every panel drove
+`COLONY STAKE` to 2.87:1 and the side-bet copy to 3.20:1 — measured pixel-true by
+Otsu on the real composite, because computed colours lie on a translucent surface
+over a canvas. Every text run on every screen is audited that way and the worst
+reading in the game is 4.79:1.
 
 ### 6.7 Three visual references (described, not reproduced)
 
@@ -861,6 +944,45 @@ it — and the first thing it splits on is whether the player is up or down:**
 | T1 | `2 ≤ X < 10` | 800 ms count-up, single soft swell, share card available but not offered |
 | T2 | `10 ≤ X < 50` | 250 ms of silence, frame lifts one exposure stop, 1,000 ms count-up, share card offered |
 | T3 | `X ≥ 50` | The full treatment: 250 ms silence, frame to full illumination, 1,200 ms count-up, freeze-frame share card. 2,400 ms |
+
+**The payout vessel, and it is an object rather than a colour.**
+
+Round 1 delivered every tier above as *amber type on dark glass*. Measured against
+the idle screen it followed, the winning frame was **7% darker**, its highlight
+area was unchanged, and the brightest most-saturated region in the whole picture
+was the full-LUMEN `NEW ROUND` button in the bottom 15% — focal centroid
+`y = 0.84` on a screen whose subject is the money. The reference payoffs in this
+category measure **+84% mean luminance, ×3.4 highlight area, focal object ×6.5,
+centroid `y = 0.48`**, and every one of them builds a *physical surface* with the
+number inside it. A win communicated by a number changing colour is the
+anti-pattern the whole set agrees on.
+
+So a winning settlement builds the **vessel**: the object the harvest has been
+pouring into all round, arriving at the optical centre as a lit amber slab.
+
+| Property | Specification | Measured, T1 |
+| --- | --- | --- |
+| Surface | AMBER face on a vertical gradient, AMBER HIGH lip, AMBER DEEP seat, specular blob upper-left, bright rim, three-stage outer bloom | — |
+| Area | 6–12% of the frame, and the frame's luminance maximum | **10.9%** |
+| Placement | optical centre, centroid `y` 0.35–0.55 | **y = 0.38** |
+| Numeral | **dark-on-light, INK on the face**, inverting the base state's light-on-dark; label above a hairline rule, amount below, multiple under it | 11.7:1 |
+| Frame lift vs idle | mean luminance ≥ +50%, highlight area ≥ ×2 | **+51.6%, ×2.23** |
+| Colour temperature | swings warm; roughly half the frame's hue mass in the ambers | 45–52% at 30° |
+| Entrance | 520 ms, back-out overshoot and settle; then **still** | 0 moving regions once settled |
+
+**And the loss builds nothing.** No vessel, no warm light, no lift: `T-nil` and
+`T0-loss` measure **0.14 mean luminance, 0.1% highlight, 2.2% lit surface** against
+the win's **0.36, 8.9%, 44.6%**. Win and loss are separable pre-attentively — by
+colour, luminance and motion, before a digit has been read — which is the honest
+form of the same rule and the reason nothing in the vessel's specification can be
+reached by a partial return that still came in under the stake.
+
+**The control after a result is demoted, deliberately.** `NEW ROUND` is a
+dimensional but unlit control on the settlement screen: full width, full height,
+full contrast, and never the brightest thing in the frame. Exactly one region may
+be the luminance maximum in any state, and at a payoff it is the vessel — the eye
+belongs on the money that was just won, not on the next stake. That reading is
+also the responsible one, and the two agree.
 
 **Why T0 had to be split, with the frequency.** Round 2 defined T0 as `X < 2` and
 gave it "value settles in place, balance chip counts up". `X` is the round's

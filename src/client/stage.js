@@ -69,11 +69,11 @@ const OVERDRAW = 1 / CAMERA_MIN;
 
 /** §6.1, and the only place these live in the renderer. */
 const C = {
-  abyss: [2, 4, 10],
-  trench: [6, 16, 25],
-  silt: [10, 27, 40],
-  basalt: [18, 50, 64],
-  crust: [30, 74, 86],
+  abyss: [6, 26, 36],
+  trench: [8, 36, 48],
+  silt: [13, 48, 64],
+  basalt: [22, 73, 92],
+  crust: [37, 109, 125],
   lumen: [57, 245, 200],
   lumenHigh: [124, 255, 227],
   lumenDeep: [15, 184, 148],
@@ -440,11 +440,11 @@ function bellSprite(archetype, variant, core, high, deep, edge = C.plankton) {
     ctx.scale(lobe.rx, lobe.ry);
     const gain = lobe.gain ?? 1;
     const gel = ctx.createRadialGradient(0, 0, 0, 0, 0, R);
-    gel.addColorStop(0, rgba(core, 0.52 * gain));
-    gel.addColorStop(0.3, rgba(core, 0.45 * gain));
-    gel.addColorStop(0.58, rgba(core, 0.33 * gain));
-    gel.addColorStop(0.78, rgba(deep, 0.21 * gain));
-    gel.addColorStop(0.91, rgba(edge, 0.1 * gain));
+    gel.addColorStop(0, rgba(core, 0.64 * gain));
+    gel.addColorStop(0.3, rgba(core, 0.56 * gain));
+    gel.addColorStop(0.58, rgba(core, 0.41 * gain));
+    gel.addColorStop(0.78, rgba(deep, 0.25 * gain));
+    gel.addColorStop(0.91, rgba(edge, 0.12 * gain));
     gel.addColorStop(1, rgba(edge, 0));
     ctx.fillStyle = gel;
     ctx.beginPath();
@@ -539,8 +539,8 @@ function bellSprite(archetype, variant, core, high, deep, edge = C.plankton) {
     const to = { x: Math.cos(angle + curl) * outer, y: Math.sin(angle + curl) * outer };
     const canal = og.createLinearGradient(from.x, from.y, to.x, to.y);
     canal.addColorStop(0, rgba(high, 0));
-    canal.addColorStop(0.3, rgba(high, 0.24));
-    canal.addColorStop(0.7, rgba(core, 0.17));
+    canal.addColorStop(0.3, rgba(high, 0.34));
+    canal.addColorStop(0.7, rgba(core, 0.24));
     canal.addColorStop(1, rgba(core, 0));
     og.strokeStyle = canal;
     og.lineWidth = R * (0.07 + slotRandom(index, salt + 13) * 0.03);
@@ -598,8 +598,8 @@ function bellSprite(archetype, variant, core, high, deep, edge = C.plankton) {
     const ly = cy + main.y * R + Math.sin(angle) * R * main.ry * reach;
     const lr = R * (0.15 + slotRandom(index, salt + 16) * 0.07);
     const lappet = og.createRadialGradient(lx, ly, 0, lx, ly, lr);
-    lappet.addColorStop(0, rgba(high, 0.1));
-    lappet.addColorStop(0.45, rgba(core, 0.06));
+    lappet.addColorStop(0, rgba(high, 0.15));
+    lappet.addColorStop(0.45, rgba(core, 0.09));
     lappet.addColorStop(1, rgba(deep, 0));
     og.fillStyle = lappet;
     og.fillRect(lx - lr, ly - lr, lr * 2, lr * 2);
@@ -666,11 +666,46 @@ function bellSprite(archetype, variant, core, high, deep, edge = C.plankton) {
   const rimX = cx + R * 0.86;
   const rimY = cy + R * 0.62;
   const rim = ctx.createRadialGradient(rimX, rimY, 0, rimX, rimY, R * 1.5);
-  rim.addColorStop(0, rgba(high, 0.3));
-  rim.addColorStop(0.45, rgba(high, 0.12));
+  rim.addColorStop(0, rgba(high, 0.42));
+  rim.addColorStop(0.45, rgba(high, 0.17));
   rim.addColorStop(1, rgba(edge, 0));
   ctx.fillStyle = rim;
   ctx.fillRect(0, 0, size, size);
+
+  /*
+   * The specular, and the reason a bell reads as a *volume* rather than as a
+   * bright patch of water.
+   *
+   * Every spherical object in the reference set carries one — the ball, the
+   * balloons, the glossy disc — and it is the cheapest, strongest three-dimensional
+   * cue there is: a small, soft, off-centre highlight on the side the key light
+   * comes from, sitting on top of the shading rather than in it. Recognition works
+   * on mass and shading; a body with a falloff and no specular has the mass and
+   * only half the shading, which is most of why the round-1 colony read as a
+   * cluster of glowing smudges.
+   *
+   * Clipped by `source-atop` to the gel, so it can never escape the silhouette and
+   * become a floating dot, and offset opposite the Fresnel limb so the two agree
+   * about where the light is.
+   */
+  const specX = cx - R * 0.34;
+  const specY = cy - R * 0.42;
+  const specR = R * 0.34;
+  ctx.save();
+  ctx.translate(specX, specY);
+  ctx.rotate(-0.5);
+  ctx.scale(1, 0.68);
+  const spec = ctx.createRadialGradient(0, 0, 0, 0, 0, specR);
+  spec.addColorStop(0, rgba(C.foam, 0.5));
+  spec.addColorStop(0.34, rgba(high, 0.28));
+  spec.addColorStop(0.72, rgba(high, 0.07));
+  spec.addColorStop(1, rgba(high, 0));
+  ctx.fillStyle = spec;
+  ctx.beginPath();
+  ctx.arc(0, 0, specR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
   ctx.restore();
   ctx.globalCompositeOperation = 'lighter';
 
@@ -906,7 +941,19 @@ function grainTile(seed) {
   const ctx = canvas.getContext('2d');
   const image = ctx.createImageData(size, size);
   for (let index = 0; index < size * size; index += 1) {
-    const value = slotRandom(index, seed) * 255;
+    /*
+     * Squared, not uniform, and this is what makes the tile usable as film grain
+     * on an abyssal frame.
+     *
+     * The layer is composited with `screen`, which lifts by roughly
+     * `opacity x value x (1 - base)`. A uniform tile therefore lifts the whole
+     * picture by half its opacity before it adds any texture at all — on a frame
+     * whose subject is darkness that is a grey veil, not a grain. Squaring the
+     * distribution drops the mean to a third while keeping the full spread, so
+     * most texels are nearly transparent, a few are bright, and what the eye gets
+     * is a sparse speckle over an unchanged black point.
+     */
+    const value = Math.pow(slotRandom(index, seed), 2) * 255;
     image.data[index * 4] = value;
     image.data[index * 4 + 1] = value;
     image.data[index * 4 + 2] = value;
@@ -1187,20 +1234,48 @@ export class Stage {
      * colony's own contribution is still `E(V)` and still the only term that
      * varies with the money.
      */
+    /*
+     * The floor, and why none of these stops is black.
+     *
+     * Round 1 ran the column from rgb(2, 6, 12) — `L = 0.022` — and the frame
+     * measured 29.8% of its pixels at `L < 0.06` in the state the player sits in
+     * longest. The premium references measure **0.0–0.1%** dead black; what makes
+     * their darks read as depth rather than as absence is that they are saturated
+     * and graded. So the deepest water here is ABYSS at `L = 0.088`, `S = 0.83`,
+     * and the column climbs from there.
+     *
+     * Every stop is a constant, identical in every frame of every round, so §6.3's
+     * ordering promise is untouched: no frame can outrank another by value because
+     * of the plate it is drawn on. Only `E(V)` moves.
+     */
+    /*
+     * A depth *axis*, not one colour at two brightnesses.
+     *
+     * The column runs blue at the surface — where what little light there is came
+     * from above and the long wavelengths went first — through to green at the
+     * floor, where the bed and the vent are. That is what water does, and it is
+     * also the measurable difference between a plate with 890 distinct colours in
+     * it and one with the 2 400–7 400 the references carry: a gradient between two
+     * points on the same line quantises to a handful of values no matter how many
+     * stops it is given, and it covers 60% of this frame.
+     *
+     * Still one hue family (the cyans, 150–210°), so §6.1's discipline holds; it
+     * simply has a range inside it now.
+     */
     const water = ctx.createLinearGradient(0, 0, 0, height);
-    water.addColorStop(0, 'rgb(2, 6, 12)');
-    water.addColorStop(0.26, 'rgb(4, 13, 21)');
-    water.addColorStop(0.58, 'rgb(6, 20, 29)');
-    water.addColorStop(0.84, 'rgb(8, 25, 34)');
-    water.addColorStop(1, 'rgb(6, 18, 26)');
+    water.addColorStop(0, 'rgb(7, 22, 42)');
+    water.addColorStop(0.26, 'rgb(8, 30, 48)');
+    water.addColorStop(0.52, 'rgb(9, 38, 51)');
+    water.addColorStop(0.78, 'rgb(12, 47, 51)');
+    water.addColorStop(1, 'rgb(10, 41, 43)');
     ctx.fillStyle = water;
     ctx.fillRect(0, 0, width, height);
 
     // A cold cast toward the trench walls, so the frame has depth before any
     // light exists in it.
     const cast = ctx.createRadialGradient(width / 2, height * 0.36, 0, width / 2, height * 0.36, width * 1.05);
-    cast.addColorStop(0, rgba(C.basalt, 0.36));
-    cast.addColorStop(0.7, 'rgba(2, 8, 14, 0)');
+    cast.addColorStop(0, rgba(C.basalt, 0.42));
+    cast.addColorStop(0.7, 'rgba(8, 36, 48, 0)');
     ctx.fillStyle = cast;
     ctx.fillRect(0, 0, width, height);
 
@@ -1212,14 +1287,15 @@ export class Stage {
      * frame a *depth axis* the eye can read before anything is lit.
      */
     for (const band of [
-      { y: 0.2, h: 0.14, a: 0.05 },
-      { y: 0.46, h: 0.17, a: 0.07 },
-      { y: 0.72, h: 0.13, a: 0.055 },
+      { y: 0.16, h: 0.13, a: 0.1, tint: C.plankton },
+      { y: 0.38, h: 0.15, a: 0.09, tint: C.plankton },
+      { y: 0.58, h: 0.16, a: 0.12, tint: C.lumenDeep },
+      { y: 0.79, h: 0.12, a: 0.1, tint: C.lumen },
     ]) {
       const strat = ctx.createLinearGradient(0, height * (band.y - band.h), 0, height * (band.y + band.h));
-      strat.addColorStop(0, rgba(C.plankton, 0));
-      strat.addColorStop(0.5, rgba(C.lumenDeep, band.a));
-      strat.addColorStop(1, rgba(C.plankton, 0));
+      strat.addColorStop(0, rgba(band.tint, 0));
+      strat.addColorStop(0.5, rgba(band.tint, band.a));
+      strat.addColorStop(1, rgba(band.tint, 0));
       ctx.fillStyle = strat;
       ctx.fillRect(0, height * (band.y - band.h), width, height * band.h * 2);
     }
@@ -1241,7 +1317,7 @@ export class Stage {
       const size = (0.6 + slotRandom(index, 313) * 0.42) * width;
       const x = (0.14 + slotRandom(index, 303) * 0.72) * width;
       const y = (0.12 + slotRandom(index, 307) * 0.76) * height;
-      ctx.globalAlpha = 0.2 + slotRandom(index, 337) * 0.16;
+      ctx.globalAlpha = 0.3 + slotRandom(index, 337) * 0.22;
       ctx.drawImage(this.sprites.clouds[index], x - size / 2, y - size / 2, size, size);
     }
     for (let index = 0; index < 6; index += 1) {
@@ -1267,8 +1343,8 @@ export class Stage {
       const warmth = slotRandom(index, 229);
       const colour = warmth > 0.86 ? C.amber : warmth > 0.5 ? C.plankton : C.lumenDeep;
       const dot = ctx.createRadialGradient(x, y, 0, x, y, r * 4);
-      dot.addColorStop(0, rgba(colour, 0.5));
-      dot.addColorStop(0.3, rgba(colour, 0.18));
+      dot.addColorStop(0, rgba(colour, 0.72));
+      dot.addColorStop(0.3, rgba(colour, 0.26));
       dot.addColorStop(1, rgba(colour, 0));
       ctx.fillStyle = dot;
       ctx.fillRect(x - r * 4, y - r * 4, r * 8, r * 8);
@@ -1385,22 +1461,30 @@ export class Stage {
      * they take light *away*, which is how ABYSS stays the deepest tone in the
      * picture while the middle of the column is water.
      */
+    /*
+     * Both of these darken *toward ABYSS* rather than toward black, at full
+     * opacity. That is the whole rule of the new floor: a vignette painted in
+     * `rgba(1, 2, 6, 0.86)` manufactures dead black in the corners of every frame
+     * no matter how well lit the middle of the picture is, and the corners of a
+     * portrait frame are a lot of pixels. Darkening to the floor and stopping
+     * there keeps every edge in the dark-*surface* band.
+     */
     for (const wall of [
       { x: 0, w: 0.2, dir: 1 },
       { x: 1, w: 0.17, dir: -1 },
     ]) {
       const edge = ctx.createLinearGradient(width * wall.x, 0, width * (wall.x + wall.w * wall.dir), 0);
-      edge.addColorStop(0, 'rgba(1, 3, 7, 0.86)');
-      edge.addColorStop(0.55, 'rgba(1, 3, 7, 0.34)');
-      edge.addColorStop(1, 'rgba(1, 3, 7, 0)');
+      edge.addColorStop(0, rgba(C.abyss, 0.9));
+      edge.addColorStop(0.55, rgba(C.abyss, 0.36));
+      edge.addColorStop(1, rgba(C.abyss, 0));
       ctx.fillStyle = edge;
       ctx.fillRect(0, 0, width, height);
     }
 
     const vignette = ctx.createRadialGradient(width / 2, height * 0.42, width * 0.3, width / 2, height * 0.42, width * 1.05);
-    vignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
-    vignette.addColorStop(0.62, 'rgba(1, 3, 7, 0.3)');
-    vignette.addColorStop(1, 'rgba(1, 2, 6, 0.86)');
+    vignette.addColorStop(0, rgba(C.abyss, 0));
+    vignette.addColorStop(0.62, rgba(C.abyss, 0.34));
+    vignette.addColorStop(1, rgba(C.abyss, 0.94));
     ctx.fillStyle = vignette;
     ctx.fillRect(0, 0, width, height);
     return canvas;
@@ -2529,26 +2613,42 @@ export class Stage {
   }
 
   /**
-   * Drifting plankton and marine snow.
+   * Plankton and marine snow.
    *
    * Nothing here emits: a mote's brightness is an ambient floor plus the colony's
    * own light falling on it with quadratic falloff, so the particulate is bright
    * exactly where and when the colony is (§6.3, "nothing is lit that the colony
    * does not light"). That also keeps the field monotone in value.
+   *
+   * **And nothing here moves.** Round 1 drifted all three hundred motes and
+   * twinkled each one on its own sine, which measured **thirteen to fourteen
+   * independently moving regions** in the state the player sits in longest —
+   * against a ceiling of three, with one region required to own 60% of the motion.
+   * The reference idle frames animate between zero and one thing; the best of them
+   * is *pixel-identical* across consecutive frames while it waits for you. Three
+   * hundred specks pulsing behind a decision is ambient noise competing with the
+   * decision surface, and it is the first thing the effect budget spends on
+   * nothing.
+   *
+   * What is left still changes — the field brightens and dims with `E(V)`, which
+   * is the colony's light falling on it — so it carries the one thing it was ever
+   * carrying information about, and it does so on the generation beat rather than
+   * sixty times a second.
    */
   drawParticles(ctx, level) {
     const { width, height } = this;
-    const seconds = this.time / 1000;
     const centre = this.centre;
     const colonyReach = (60 + 130 * level) * this.scale;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     const sprite = this.sprites.planktonGlow;
     for (const mote of this.motes) {
-      const drift = noise1(seconds * 0.08 + mote.phase, mote.driftSeed ?? 3);
-      const x = (mote.x + (drift - 0.5) * 26 * this.scale * mote.depth + width) % width;
-      const y = (mote.y + seconds * 0.9 * this.scale * mote.depth) % height;
-      const twinkle = 0.6 + 0.4 * Math.sin(seconds * mote.rate * Math.PI * 2 + mote.phase);
+      const x = mote.x;
+      const y = mote.y;
+      // A fixed per-mote brightness offset, from the mote's own phase and from
+      // nothing time-varying: the field still reads as a scatter of different
+      // depths rather than one uniform dusting, and it holds still.
+      const twinkle = 0.6 + 0.4 * Math.sin(mote.phase);
       const distance = Math.hypot(x - centre.x, y - centre.y);
       const falloff = 1 / (1 + Math.pow(distance / colonyReach, 2));
       // Drifting plankton is the last layer up in the reveal, at 700 ms (§7.2).
@@ -2571,8 +2671,8 @@ export class Stage {
     // changes a frame is sixty chances to break the rasteriser's batching.
     ctx.fillStyle = rgba(C.ash, 1);
     for (const mote of this.snow) {
-      const x = (mote.x + mote.drift * seconds * 4 * this.scale + width) % width;
-      const y = (mote.y + seconds * 1.4 * this.scale) % height;
+      const x = mote.x;
+      const y = mote.y;
       const distance = Math.hypot(x - centre.x, y - centre.y);
       const falloff = 1 / (1 + Math.pow(distance / colonyReach, 2));
       // Marine snow is what makes the water read as water rather than as fog, so
@@ -2601,10 +2701,20 @@ export class Stage {
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
 
-    // The wide bloom the mouth throws into the water.
-    const size = (250 + 90 * flash) * scale;
-    ctx.globalAlpha = 0.34 + 0.3 * flash;
-    ctx.drawImage(this.sprites.emberGlow, width / 2 - size / 2, height - size * 0.46, size, size * 0.72);
+    /*
+     * The wide bloom the mouth throws into the water, and the frame's only warm
+     * anchor.
+     *
+     * It is deliberately louder than it was. A frame carried by one hue is a frame
+     * with no colour identity to read — every reference in the set is carried by
+     * one dominant hue with a second supporting it, and this game's second is the
+     * vent. Round 1 measured 99.6% of its hue mass in the cyans, which is not
+     * discipline, it is monochrome. It stays inside §6.1's ~5%-of-frame cap and it
+     * stays EMBER-only; it is simply *present*.
+     */
+    const size = (330 + 110 * flash) * scale;
+    ctx.globalAlpha = 0.5 + 0.32 * flash;
+    ctx.drawImage(this.sprites.emberGlow, width / 2 - size / 2, height - size * 0.48, size, size * 0.76);
 
     /*
      * The plume: a column of warm shimmer rising from the mouth, built from soft
@@ -2636,8 +2746,8 @@ export class Stage {
     }
 
     // The mouth itself: hot, small, fixed.
-    const core = 96 * scale;
-    ctx.globalAlpha = 0.62 + 0.36 * flash;
+    const core = 118 * scale;
+    ctx.globalAlpha = 0.78 + 0.22 * flash;
     ctx.drawImage(this.sprites.emberGlow, width / 2 - core / 2, height - core * 0.48, core, core * 0.56);
     ctx.globalAlpha = 0.76 + 0.24 * flash;
     const mouth = 34 * scale;
@@ -2748,11 +2858,11 @@ export class Stage {
        * has to sum to bloom, not to paper.
        */
       const lamp = body.lamp ?? 1;
-      const size = radius * (3.2 + 6.6 * level);
-      ctx.globalAlpha = (0.16 + 0.4 * level) * alive * lamp;
+      const size = radius * (3.4 + 7.2 * level);
+      ctx.globalAlpha = (0.2 + 0.52 * level) * alive * lamp;
       ctx.drawImage(wide, body.x - size / 2, body.y - size / 2, size, size);
-      const cool = radius * (2.4 + 2.4 * level);
-      ctx.globalAlpha = (0.1 + 0.2 * level) * alive * lamp;
+      const cool = radius * (2.5 + 2.6 * level);
+      ctx.globalAlpha = (0.11 + 0.22 * level) * alive * lamp;
       ctx.drawImage(halo, body.x - cool / 2, body.y - cool / 2, cool, cool);
     }
     ctx.restore();
@@ -2768,15 +2878,31 @@ export class Stage {
     }
     ctx.restore();
 
-    // Tight core bloom, in front, so the nucleus reads as the hottest point.
+    /*
+     * The core bloom, in front — and it is now the size of the **nucleus**, not
+     * the size of the body.
+     *
+     * At `1.5 → 2.05 × radius` and up to 46% alpha it was a wash laid over the
+     * whole bell, and it erased the organism: the canals, the granulation, the
+     * lappets and the membrane crescent are all drawn into the sprite and none of
+     * them survived being painted over. A colony rendered that way measures as
+     * light but reads as *blur* — and an object the player cannot name is the one
+     * defect class this round exists to close. A bloom that is wider than the
+     * thing it is blooming from is not halation, it is fog.
+     *
+     * So it is a hotspot on the manubrium: small enough that the interior is
+     * still visible around it, bright enough that the nucleus is still the hottest
+     * point on the body. Both terms remain strictly increasing in `level`, which
+     * is all §6.3 requires of them.
+     */
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     const tight = this.sprites.lumenTight;
     for (const body of this.bodies) {
       if (body.alpha < 0.01 || body.tint === 'amber') continue;
       const radius = body.r * contract * (1 - 0.6 * body.die);
-      const size = radius * (1.5 + 0.55 * level);
-      ctx.globalAlpha = (0.2 + 0.26 * level) * body.alpha * (1 - body.die) * (body.lamp ?? 1);
+      const size = radius * (0.66 + 0.34 * level);
+      ctx.globalAlpha = (0.16 + 0.24 * level) * body.alpha * (1 - body.die) * (body.lamp ?? 1);
       ctx.drawImage(tight, body.x - size / 2, body.y - size / 2, size, size);
     }
     ctx.restore();
@@ -3156,7 +3282,17 @@ export class Stage {
    * it is handed over as a data URL rather than fetched.
    */
   installGrain() {
-    const layer = this.root.querySelector('#stage-grain');
+    /*
+     * Frame-level, not stage-level.
+     *
+     * The grain is the frame's material, and half the frame is not the stage: the
+     * stake screen, the harvest stepper and the settlement all sit above the
+     * canvas, and all three of them were rendering as untextured CSS gradients —
+     * which is exactly the surface the references never have. So the tile is
+     * looked up on the document rather than inside the stage element, and the
+     * layer it lands on spans the whole frame.
+     */
+    const layer = document.getElementById('stage-grain');
     if (layer === null) return;
     layer.style.backgroundImage = `url(${this.sprites.grain[0].toDataURL()})`;
   }
