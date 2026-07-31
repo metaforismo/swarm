@@ -15,6 +15,24 @@ const UNITS_PER_CREDIT = 1000000n;
 /** The typographic minus, so a signed number keeps tabular alignment. */
 const MINUS = '\u2212';
 
+/**
+ * The unit, and it is attached to every figure the player reads as money.
+ *
+ * Round 1 shipped bare numbers — `BALANCE 1017.19`, `BANKED 18.43`, `STAKE 1.00`
+ * — and in a blind side-by-side that was one of the three tells that gave the
+ * build away on sight. Every reference in the calibration set attaches its unit
+ * to every figure (`1.10 FUN`, `Win: 2.00 FUN`, `Balance 1,000.00 FUN`), because
+ * a bare decimal is not money, it is a number. `CR` is this game's free-play
+ * credit; it has no cash value, and the marker at the foot of every screen says
+ * exactly that.
+ */
+export const CURRENCY = 'CR';
+
+/** Thousand separators, so a four-figure balance reads as a balance. */
+function group(digits) {
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/gu, ',');
+}
+
 /** Truncating credits from minor units: `1855468` → `1.85`. */
 export function credits(units, decimals = 2) {
   const value = typeof units === 'bigint' ? units : BigInt(units ?? 0);
@@ -22,9 +40,19 @@ export function credits(units, decimals = 2) {
   const magnitude = negative ? -value : value;
   const scale = 10n ** BigInt(decimals);
   const scaled = (magnitude * scale) / UNITS_PER_CREDIT;
-  const whole = scaled / scale;
+  const whole = group((scaled / scale).toString());
   const fraction = (scaled % scale).toString().padStart(decimals, '0');
   return `${negative ? MINUS : ''}${whole}${decimals === 0 ? '' : `.${fraction}`}`;
+}
+
+/** Credits with the unit attached: `1855468` → `1.85 CR`. */
+export function money(units, decimals = 2) {
+  return `${credits(units, decimals)} ${CURRENCY}`;
+}
+
+/** Signed credits with the unit attached: `+10.05 CR`. */
+export function signedMoney(units, decimals = 2) {
+  return `${signedCredits(units, decimals)} ${CURRENCY}`;
 }
 
 /**

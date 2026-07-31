@@ -351,8 +351,23 @@ player; it never mentions a jackpot, a frequency or a "best" way to play; and th
 round would put a resolved outcome in front of a player before their first stake,
 which is a different product decision and is not made here.
 
-**S1 — Stake & seed.** Vent idle in darkness, stake stepper centred, side-bet
-row collapsed by default behind a single `+ SIDE BETS` control. Opening it shows
+**S1 — Stake & seed.** The vent, with **the three organisms the seed will light
+standing in it**, each carrying what it is worth on its face at the entry value
+(`19/20` of the stake, three ways: `0.31x`). The overlay reserves the top third of
+the frame as an open window onto the live stage and the scrim opens to 5–8% across
+it; the stake stepper, the profit rates and the two disclosures sit below.
+
+Round 1's stake screen had **no game object on it at all** — an empty dark
+gradient with one orange smudge, 12.3% lit surface and 924 distinct colours — and
+a first-time viewer could not tell what game they were about to play. No reference
+in the calibration set has an empty betting screen: Plinko shows the board and its
+chips, Space XY shows the rocket on the pad, Balloon Mania shows the field. The
+preview is not a free round and not a resolved outcome: it is the *opening
+position*, a constant of the rules, identical every round, and `E(V)` is set from
+that same entry value so the screen is lit by exactly the money about to be on the
+table.
+
+The side-bet row is collapsed by default behind a single `+ SIDE BETS` control. Opening it shows
 three independent stake steppers and a running **total at risk**. Beside the
 total, the per-line profit rates and — when the stakes are equal — the ticket
 figure from [MATH.md §7.4](MATH.md); when they are not equal, the per-line rates
@@ -507,6 +522,7 @@ they darken *to* the floor and stop there. Measured result: near-black is
 | Organism shadow rim | LUMEN DEEP | `#0FB894` | body edge away from core |
 | Ambient life | PLANKTON | `#5B8CFF` | drifting particles, secondary UI strokes |
 | Large-gain tint | MEDUSA | `#B06CFF` | verdict beats worth at least a whole stake, and only those |
+| Rich organism | MEDUSA HIGH | `#CBA0FF` | the body of an organism worth at least one whole stake on its own |
 | Banked value | AMBER | `#FFC978` | harvest particles, balance chip, credited amounts, **the payout vessel's face** |
 | Vessel highlight | AMBER HIGH | `#FFE9C2` | the lit lip of the payout vessel |
 | Vessel shadow | AMBER DEEP | `#D9902F` | the vessel's seated lower edge |
@@ -518,11 +534,33 @@ they darken *to* the floor and stop there. Measured result: near-black is
 
 Rules: **red is not in the palette.** Loss is communicated by darkness, by the
 removal of light, and by a signed number — never by an alarm colour. AMBER means
-"yours, banked, safe" and appears nowhere else. MEDUSA appears only on a verdict
-beat worth at least one whole stake, so violet on screen always means the
-position just grew by more than the player paid to enter — a promise neither the
-old "violet on every split" rule nor the ratio bands that replaced it could keep
-(§6.5).
+"yours, banked, safe" and appears nowhere else. **Violet means at least one whole
+stake**, in both of the two places it is allowed to appear: a verdict beat worth
+`D >= +1.00x`, and an organism whose own value has reached `1.00x`. Both are the
+same promise — violet on screen always means a quantity of money at least as large
+as the ticket — and neither the old "violet on every split" rule nor the ratio
+bands that replaced it could keep it (§6.5).
+
+**The value bands, and they are the payout scale made visible.** An organism's
+colour is *its own worth*, so the scale is learned by looking rather than read and
+multiplied. This is criterion 11 of the calibration bar, which the round-1 build
+failed on every frame: the references print `x5.6` on a yellow chip and `x16` on a
+purple balloon, and ours put the scale in a line of text in the value strip.
+
+| Per-organism value `u` | Band | Body core | Relative luminance | Emission gain |
+| --- | --- | --- | --- | --- |
+| `u < 0.50x` | dim | LUMEN DEEP `#0FB894` | 0.571 | 0.90 |
+| `0.50x <= u < 1.00x` | lumen | LUMEN `#39F5C8` | 0.792 | 1.00 |
+| `u >= 1.00x` | medusa | MEDUSA HIGH `#CBA0FF` | 0.690 | 1.20 |
+| harvested | amber | AMBER `#FFC978` | 0.810 | 1.00 |
+| extinct | husk | `#566C78` | 0.410 | 0.30 |
+
+The gain is not decoration: violet is intrinsically darker than cyan, so without
+it the colony would visibly *dim* as it got rich. `luminance x gain` is
+non-decreasing up the ladder — 0.514, 0.792, 0.828 — which is §6.3's ordering
+promise applied at the organism. The husk sits below every living band by
+construction and carries no halation, no interior and no nucleus, so a frame full
+of remains can never be brighter than a frame with one living organism in it.
 
 **Hue economy.** One hue carries the frame and a second supports it — never more.
 Base states measure 71–87% of hue mass in the cyans with the vent's EMBER as the
@@ -540,9 +578,40 @@ play surface, the payoff would have nowhere to go.**
   document is in points on the 390 × 844 pt reference frame, and the one figure
   an artist reads first is not the place to change unit. Subsurface
   scattering: the body transmits LUMEN outward with a soft quadratic falloff;
-  membrane is a 1.5 px Fresnel rim in LUMEN HIGH. Slight background refraction
-  (2–3 px displacement) so the water behind it warps. Never a flat sprite; never
-  outlined.
+  membrane is a 1.5 px Fresnel rim in LUMEN HIGH.
+
+  **It has mass, and that is the round-2 change the whole art direction turns
+  on.** Round 1 drew the colony as light and nothing else — every body an additive
+  falloff with no silhouette — and at twelve organisms fifteen overlapping glows
+  summed into one amorphous cloud that *could not be counted*. Population is half
+  of what the money is (`units x yield`), so the number that drives the payout was
+  legible only as the words "12 ALIVE" in the strip. The rubric names the failure
+  mechanically: recognition works on mass and shading, and an object with neither
+  has no identity, carries no state and gives the eye no entry point.
+
+  So a body is drawn in two passes. The **mass** goes down opaque, in
+  `source-over`: a shaded gel lit from the upper left, the band's deep tone at the
+  far limb, a bottom inner shadow, a Fresnel limb, a specular, and a contact
+  shadow outside the silhouette tinted toward ABYSS so two overlapping organisms
+  separate instead of fusing. The **light** goes on top additively, exactly as
+  before — subsurface transmission, gastric canals, granulation, the manubrium,
+  the tentacle skirt — at 55% of its old strength, because it is now anatomy
+  inside a body rather than the body itself.
+
+  "Never outlined" still holds, and the rim falloff is what holds it: the mass is
+  opaque to 82% of its radius and gone by 100%, which is about one device pixel of
+  softness at the small end of the range and three at the large one. That is an
+  edge, not a stroke — it occludes without drawing a line, and measured hard-edge
+  share stays inside the 8% ceiling.
+
+- **The organism carries its own money on its face.** The per-organism value is
+  printed in INK on the lit body, at most five glyphs (`0.31x`, `1.20x`, `14.5x`,
+  `119x`), sized to the bell so it shrinks with the population exactly as the
+  object does, over a soft print field that holds the contrast on all three
+  archetypes. It is baked once per string and blitted once per body, and it is
+  drawn *last*, in `source-over`, so the additive interior underneath cannot wash
+  it out. It is never drawn on an organism that is mid-split, mid-death or a husk:
+  a number on a corpse is money that is not there.
 - **Silhouette variation.** Three bell archetypes — `DOME` (wide, shallow),
   `BELL` (tall, pinched), `LOBE` (asymmetric, two-lobed) — assigned by
   `slotIndex mod 3`, with a per-body Perlin phase offset. Fifteen identical bells
@@ -644,9 +713,16 @@ into regions.
 
 | State | Ceiling | Measured |
 | --- | --- | --- |
-| Idle (S1, no colony) | ≤ 3 moving regions, ≤ 3% of pixels | **0 regions, 0.00%** |
+| Idle (S1, the seed colony at rest) | ≤ 3 moving regions, ≤ 3% of pixels | **1 region, 0.05%** |
 | In-round, at rest | ≤ 3 regions, ≤ 7%, one region ≥ 60% of the motion | **1–2 regions, 0.6–0.7%, dominant region 96%** |
 | Settled payoff | ≤ 7 regions | **0 regions — it arrives, then holds** |
+
+The payoff *entrance* is where round 1 broke the ceiling: ten independently moving
+regions against a limit of seven, with the largest owning only 46% of the motion
+against a required 50–80%. Three things caused it and all three are gone — the ray
+fan, the eighteen-bar trace, and a balance chip counting simultaneously with the
+payout figure. The chip now counts in the second half of the figure's count, so
+there is one dominant motion per beat rather than two equals.
 
 The reference this is calibrated against animates *nothing* while it waits for the
 player: two consecutive frames are pixel-identical. Round 1 drifted and twinkled
@@ -697,12 +773,19 @@ innermost at `R(n) / sqrt(n)`:
 The clamp bites at both ends and the table says exactly where. Below `n = 3` the
 unclamped radius exceeds the 34 pt ceiling; the floor first bites at **`n = 17`**,
 where the unclamped value is 11.6 pt. From there up to the state-space maximum of
-30 ([MATH.md §1](MATH.md)) every body is 12 pt and up to 30% overlap with
-additive blending is allowed: the colony deliberately reads as a *mass* rather
-than a countable set, which is correct, because 16+ is a terminal state that
-exists on screen for about 2.4 seconds and the exact count is always printed as a
-numeral anyway. There is no layout mode beyond this one and no dynamic re-packing
-to design later.
+30 ([MATH.md §1](MATH.md)) every body is 12 pt and up to 30% overlap is allowed.
+
+**That overlap is now occlusion rather than addition, and the difference is the
+whole of criterion 1.** Round 2 allowed the dense end of the range to read as a
+*mass* on the grounds that the count is printed as a numeral anyway. A blind
+side-by-side found the flaw in that reasoning: "the state gets communicated by
+text instead" is the exact failure the rubric diagnoses for line art, and at
+twelve organisms — a population well inside the ordinary range, not a 2.4-second
+terminal — the colony fused into one cloud a viewer could not count. With the mass
+drawn in `source-over` (§6.2) an overlap is one body in front of another, which is
+what every reference does with a dense field of objects, and the colony stays
+countable at every population the layout produces. There is no layout mode beyond
+this one and no dynamic re-packing to design later.
 
 **Wild-line ghosts** (§4.2) use the same spiral with the same `R(n)` for the
 wild population, drawn at 22% opacity in PLANKTON with no halation, no specular
@@ -870,6 +953,15 @@ that measured as a receipt. The split is by *what the number is for*:
   on explicitly. Tabular figures are non-negotiable: these count up and down and
   must not jitter. The payout numeral is ≥ 4% of frame height and sits *inside*
   the vessel in INK, dark-on-light (§7.1).
+- **The unit is attached to every figure the player reads as money.** `CR` — this
+  game's free-play credit, with no cash value, as the marker at the foot of every
+  screen states. `1,003.73 CR`, `STAKE 1.00 CR`, `BANKED 9.21 CR`, `NET +8.21 CR`.
+  Round 1 shipped bare decimals, and in a blind side-by-side that was one of three
+  tells that gave the build away on sight: every reference attaches its unit to
+  every figure (`1.10 FUN`, `Win: 2.00 FUN`, `Balance 1,000.00 FUN`), because a
+  bare decimal is not money, it is a number. On the payout it is set as a separate
+  smaller run at 0.30 em, so the unit is attached without being set at the
+  payout's size. Thousands are grouped, so a four-figure balance reads as one.
 - **Commitments, seeds, chain values and the verify sheet**: the monospace stack
   — Space Grotesk, Basis Grotesque Mono or Suisse Intl Mono. These are strings to
   compare character by character, not amounts to feel, and a hash set in a display
@@ -940,10 +1032,39 @@ it — and the first thing it splits on is whether the player is up or down:**
 | --- | --- | --- |
 | **T-nil** | `X = 0` | Screen S6. The extinction fall, flat copy, no count-up |
 | **T0-loss** | `0 < X < 1` | **Value settles in place with no count-up into the balance chip.** The credited amount is stated once, in MIST, beside an explicit signed net result: `RETURNED 0.40 · NET −0.60`. No swell, no card, no amber. 600 ms |
-| **T0-win** | `1 ≤ X < 2` | Value settles, balance chip counts up in AMBER, signed net result shown in FOAM. 600 ms. No swell, no card |
+| **T-even** | `X = 1` exactly | The cold slab, no count-up, no amber, no share: *"This round returned exactly what it cost."* A celebration for getting the stake back is louder than the result deserves, and every stake-back it fires on is headroom the tiers above no longer have |
+| **T0-win** | `1 < X < 2` | Value settles, balance chip counts up in AMBER, signed net result shown in FOAM. 600 ms. No swell, no card |
 | T1 | `2 ≤ X < 10` | 800 ms count-up, single soft swell, share card available but not offered |
-| T2 | `10 ≤ X < 50` | 250 ms of silence, frame lifts one exposure stop, 1,000 ms count-up, share card offered |
-| T3 | `X ≥ 50` | The full treatment: 250 ms silence, frame to full illumination, 1,200 ms count-up, freeze-frame share card. 2,400 ms |
+| T2 | `10 ≤ X < 50` | Frame lifts one exposure stop, 1,000 ms count-up, share card offered. **No shower** |
+| T3 | `X ≥ 50` | The full treatment: frame to full illumination, 1,200 ms count-up, a 26-spark shower, freeze-frame share card. 2,400 ms |
+
+**The screen-wide wash is T3's too, and T1/T2 lift the frame without it.** A
+full-screen radial crossing quantisation bands as it ramps registers as a handful
+of *separate* moving regions along its own edge — measured, ten of them in the
+400–600 ms window of a T2 settlement with the largest owning 37% of the motion.
+The lift was never the problem; a lift that animates across the whole frame while
+two objects are already arriving is. T1 and T2 get their exposure stop from the
+card's own spill and the tier's warm halo, both of which arrive with the card and
+then hold still.
+
+**The shower is T3's and nothing else's.** Measured on a T2 settlement with
+thirty-four sparks in the air: 10–11 independently moving regions between two
+consecutive samples, with the largest owning 37% of the motion — against a ceiling
+of seven and a required 50–80%. Thirty-four particles are thirty-four regions, and
+a payoff is one big thing plus a handful of supporting details. Removing it from
+T2 improved the frame on the measure and on the eye, which is what the subtraction
+test is for; T3 keeps a smaller one, because a fifty-stake round is genuinely once
+in thousands and the tier above has to have somewhere to go.
+
+**The 250 ms of silence before the loud tiers is cut.** Measured from the BANK
+tap, round 1 spent **1.4–1.8 s in which consecutive frames changed 0.16%** — with
+nothing happening at all — and the payout card was not fully readable until
+3.07 s. The player has already committed and already knows the number; three
+seconds of near-stillness before the payout surface arrives is the opposite of
+"the outcome legible the moment it is known", and every reference cuts straight to
+the gold banner. Anticipation belongs to the *reveal* of a generation, where it is
+bounded, fixed and carries real uncertainty — not to a total the player watched
+accumulate.
 
 **The payout vessel, and it is an object rather than a colour.**
 
@@ -960,6 +1081,39 @@ anti-pattern the whole set agrees on.
 So a winning settlement builds the **vessel**: the object the harvest has been
 pouring into all round, arriving at the optical centre as a lit amber slab.
 
+**And the stage stays.** Round 1's ceremony *replaced* the frame — a full-screen
+conic ray fan over a 0.86–0.97 opaque plate — and the subtraction test named it
+the picture's weakest effect: a second bright saturated region at 3.7% of frame,
+centred at `y = 0.19`, containing nothing, at the exact moment the frame is
+allowed one focal object. It also meant the colony, the vent and the vessel the
+money had just poured into all vanished at the loudest beat in the game. The rays
+are cut. The scrim is a **band**: 14–22% across the stage window so the frame
+keeps its picture, 94–97% from the value strip down because those numbers belong
+to a round that is over. And the stage is lit by the round's **credited value**
+rather than dropped to the floor — the same §6.3 contract, measured on the same
+money, since at settlement the money has not gone anywhere, it has stopped being a
+colony and become a balance.
+
+**The vessel is the object on the stage, not a chip in a corner.** Round 1 drew it
+at 46 × 62 pt in the bottom-right, about 0.5% of the frame, under the ray flood
+that hid it — for the beat the brief names by name. At settlement it grows to
+92 × 120 pt and rises into the water column above the card: the colony pours into
+it, it holds full and lit while the figure counts, and it pours home to the
+balance chip when the count lands. It stays on the stage afterwards, empty: a
+graded glass body with a lit left wall, a shaded right one, a bright rim and a
+contact shadow, so an emptied vessel is still a vessel. It throws no light once
+the money has left it, and at 3.4% of frame against the card's 11% it is a
+supporting object rather than a rival — the payout surface remains the single
+luminance maximum.
+
+**The generation-by-generation bar chart is cut.** It was a real record — the
+player's own resolved populations, already in the receipt — and it failed the
+subtraction test twice: unreadable at its rendered size, and on a loss it
+collapsed to a single grey stub that read as a broken render. It was also up to
+eighteen independently animating bars on the one beat whose whole instruction is
+*one dominant motion*. The full trace stays one tap away, in the receipt, where it
+is legible.
+
 | Property | Specification | Measured, T1 |
 | --- | --- | --- |
 | Surface | AMBER face on a vertical gradient, AMBER HIGH lip, AMBER DEEP seat, specular blob upper-left, bright rim, three-stage outer bloom | — |
@@ -970,12 +1124,43 @@ pouring into all round, arriving at the optical centre as a lit amber slab.
 | Colour temperature | swings warm; roughly half the frame's hue mass in the ambers | 45–52% at 30° |
 | Entrance | 520 ms, back-out overshoot and settle; then **still** | 0 moving regions once settled |
 
-**And the loss builds nothing.** No vessel, no warm light, no lift: `T-nil` and
-`T0-loss` measure **0.14 mean luminance, 0.1% highlight, 2.2% lit surface** against
-the win's **0.36, 8.9%, 44.6%**. Win and loss are separable pre-attentively — by
-colour, luminance and motion, before a digit has been read — which is the honest
-form of the same rule and the reason nothing in the vessel's specification can be
-reached by a partial return that still came in under the stake.
+**And the loss builds nothing warm — but it is still built.** No vessel, no amber,
+no lift; win and loss stay separable pre-attentively, by colour, luminance and
+motion, before a digit has been read, and nothing in the vessel's specification
+can be reached by a partial return that came in under the stake.
+
+What changed is that a loss is no longer *absent*. Round 1's extinction frame
+measured **97.2% dark band, 2.6% lit surface, 370 distinct colours and no game
+object at all** — below the desaturated skin the calibration set ships as its own
+example of amateur work, on the most-seen frame in the product, because extinction
+is this game's modal outcome. Removing the light was right; removing the picture
+was the defect. So the down tiers get:
+
+- **the husks** — the colony's own remains, mass with no emission, ASH-toned,
+  gathered in the water column above the card and completely still. They are laid
+  out there rather than left where they died, because the colony's centroid sits
+  at 30% of the frame and the card starts at 35%: a round that ended with one or
+  two organisms left its entire remains behind the card;
+- **the cold slab** — the same construction as the vessel (graded face, lit top
+  edge, seated bottom, specular, contact shadow) executed in BASALT and ASH
+  instead of AMBER. A spent, unlit slab of the same rock the vent is made of;
+- **FOAM on the slab, not MIST on a void.** A figure the player must read has to
+  be legible, and §9.6's contrast floor is not something the tone of a screen gets
+  to trade against.
+
+**And the primary control grows to keep its place.** With a colony standing at
+the vent on the stake screen, the button that starts the round has competition it
+did not have when the frame was empty — measured, the idle frame's focal object
+moved to the colony's own light at `y = 0.25`, against criterion 13's requirement
+that the idle focal object is the control, centroid `y >= 0.80`. The reference
+answer is not to dim the game object: Plinko keeps its whole board lit and still
+makes the glossy PLAY disc the focal point. So the CTA is 72 pt of full-width
+LUMEN with a *tinted* specular — a white sheen drops the face's saturation under
+the 0.35 the focal measure uses, which was excluding the brightest part of the
+control from the region it is supposed to own — and the volumetric water term
+starts smaller and grows faster, so the poorest frame in the game no longer throws
+the brightest cloud in it. Measured after: focal 7.6% of frame, 91.6% of width,
+centroid **`y = 0.81`**.
 
 **The control after a result is demoted, deliberately.** `NEW ROUND` is a
 dimensional but unlit control on the settlement screen: full width, full height,

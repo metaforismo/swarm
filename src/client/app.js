@@ -14,7 +14,17 @@
  * exposure, which is a pure function of the colony value the server sent.
  */
 import { ApiError, api, commandKey, generateClientSeed, isClientSeed } from './api.js';
-import { credits, elapsed, multiple, percent, shortHex, signedCredits, truncate } from './format.js';
+import {
+  credits,
+  elapsed,
+  money,
+  multiple,
+  percent,
+  shortHex,
+  signedCredits,
+  signedMoney,
+  truncate,
+} from './format.js';
 import { Sound } from './sound.js';
 import { shareSheet } from './sharecard.js';
 import {
@@ -90,9 +100,10 @@ const dom = {
   payoutCard: $('payout-card'),
   settlementTerminal: $('settlement-terminal'),
   settlementHeadline: $('settlement-headline'),
+  settlementFigure: $('settlement-figure'),
   settlementMultiple: $('settlement-multiple'),
   settlementNet: $('settlement-net'),
-  trace: $('settlement-trace'),
+  s1Entry: $('s1-entry'),
   settlementCopy: $('settlement-copy'),
   newRound: $('new-round'),
   openWild: $('open-wild'),
@@ -240,12 +251,12 @@ function rollMultiple(node, from, to, finalText, ms = 380) {
  * Returns a cancel function, because a player who taps `NEW ROUND` must not have
  * the previous round's count still writing into the chip.
  */
-function rollUnits(node, fromUnits, toUnits, ms, onDone) {
+function rollUnits(node, fromUnits, toUnits, ms, onDone, format = credits) {
   const from = BigInt(fromUnits);
   const to = BigInt(toUnits);
   let handle = null;
   const land = () => {
-    node.textContent = credits(to);
+    node.textContent = format(to);
     onDone?.();
   };
   if (reducedMotion.matches || ms <= 0 || from === to) {
@@ -273,7 +284,7 @@ function rollUnits(node, fromUnits, toUnits, ms, onDone) {
      * kind of thing a money display should be relying on.
      */
     const eased = BigInt(Math.round(outQuint(t) * 1000000));
-    node.textContent = credits(from + ((to - from) * eased) / 1000000n);
+    node.textContent = format(from + ((to - from) * eased) / 1000000n);
     handle = requestAnimationFrame(tick);
   };
   handle = requestAnimationFrame(tick);
@@ -295,10 +306,17 @@ function rollUnits(node, fromUnits, toUnits, ms, onDone) {
  * for the rest of the session.
  */
 function rollCredits(node, fromUnits, toUnits, ms) {
-  return rollUnits(node, fromUnits, toUnits, ms, () => {
-    state.chipUnits = BigInt(toUnits);
-    state.holdBalance = false;
-  });
+  return rollUnits(
+    node,
+    fromUnits,
+    toUnits,
+    ms,
+    () => {
+      state.chipUnits = BigInt(toUnits);
+      state.holdBalance = false;
+    },
+    money,
+  );
 }
 
 /**
@@ -362,16 +380,34 @@ function wirePressFeedback() {
     },
     { passive: true },
   );
-  for (const event of ['pointerup', 'pointercancel', 'pointerleave']) {
+  /*
+   * The release clears **every** pressed control, not the one the pointer happens
+   * to be over.
+   *
+   * Reading `event.target.closest('button')` on the way up only finds a button
+   * when the finger is released on top of one — so a pointer that lands on BANK
+   * and lifts an inch away left BANK visually held down for the rest of the
+   * round. It was caught during latency measurement, where it silently corrupted
+   * a reading, and it is the kind of defect that reads as an unresponsive app.
+   */
+  for (const event of ['pointerup', 'pointercancel']) {
     document.addEventListener(
       event,
-      (nativeEvent) => {
-        const target = nativeEvent.target.closest?.(pressable);
-        target?.classList.remove('pressed');
+      () => {
+        for (const node of document.querySelectorAll('button.pressed'))
+          node.classList.remove('pressed');
       },
       { passive: true },
     );
   }
+  // A pointer that leaves the control it is holding has left the control.
+  document.addEventListener(
+    'pointerleave',
+    (nativeEvent) => {
+      nativeEvent.target.closest?.(pressable)?.classList.remove('pressed');
+    },
+    { passive: true, capture: true },
+  );
   // A keyboard path has to feel the same, and §9.6 requires one everywhere.
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' || event.key === ' ') sound.unlock();
@@ -446,7 +482,7 @@ async function guard(action) {
  */
 function setBalanceChip(units) {
   state.chipUnits = BigInt(units);
-  dom.balance.textContent = credits(state.chipUnits);
+  dom.balance.textContent = money(state.chipUnits);
 }
 
 function renderSession(session) {
@@ -454,7 +490,7 @@ function renderSession(session) {
   state.session = session;
   if (!state.holdBalance) setBalanceChip(session.balanceUnits);
   const net = BigInt(session.netUnits);
-  dom.sessionNet.textContent = signedCredits(net);
+  dom.sessionNet.textContent = signedMoney(net);
   dom.sessionNet.dataset.sign = net > 0n ? 'up' : 'flat';
   if (typeof session.now === 'number') state.clockSkewMs = session.now - Date.now();
   if (session.realityCheck?.due === true) state.realityDue = true;
@@ -501,11 +537,15 @@ function stopTicking() {
 
 function renderStakePanel() {
   const config = state.config;
-  dom.stakeValue.textContent = credits(state.stakeUnits);
-  dom.stakeRange.textContent = `${credits(config.money.minStakeUnits)} – ${credits(config.money.maxStakeUnits)}`;
-  dom.totalAtRisk.textContent = credits(totalAtRiskUnits());
+  dom.stakeValue.textContent = money(state.stakeUnits);
+  dom.stakeRange.textContent = `${credits(config.money.minStakeUnits)} – ${money(config.money.maxStakeUnits)}`;
+  dom.totalAtRisk.textContent = money(totalAtRiskUnits());
   renderProfitRates();
-  dom.seed.textContent = `SEED COLONY · ${credits(totalAtRiskUnits())}`;
+  dom.seed.textContent = `SEED COLONY · ${money(totalAtRiskUnits())}`;
+  // What each of the three organisms will be worth the instant the ticket is
+  // paid for — the same figure printed on their faces at the vent behind this
+  // panel, so the screen and the object agree before a stake exists.
+  dom.s1Entry.textContent = `${truncate((ENTRY_VALUE / state.config.rules.seedUnits).toFixed(6), 2)}×`;
 }
 
 /**
@@ -538,7 +578,7 @@ function renderProfitRates() {
   } else if (selected.length > 0) {
     for (const [id, units] of selected) {
       const bet = state.config.sideBets.find((entry) => entry.id === id);
-      lines.push(`${bet.label} wins 1 in ${bet.oneIn} rounds and pays ${multiple(bet.multiplier)} on its own ${credits(units)} stake.`);
+      lines.push(`${bet.label} wins 1 in ${bet.oneIn} rounds and pays ${multiple(bet.multiplier)} on its own ${money(units)} stake.`);
     }
     lines.push(
       'A single combined figure is only published for equal stakes on every line, so the per-line rates are shown instead.',
@@ -578,7 +618,7 @@ function renderSideBetRows() {
     up.textContent = '+';
     const render = () => {
       const units = state.sideBets.get(bet.id) ?? 0n;
-      amount.textContent = units === 0n ? 'off' : credits(units);
+      amount.textContent = units === 0n ? 'off' : money(units);
       renderStakePanel();
     };
     const step = (direction) => {
@@ -638,6 +678,19 @@ function screen(name) {
    * the screen is about.
    */
   dom.frame.dataset.screen = name;
+  /*
+   * The stake screen shows the colony it is selling.
+   *
+   * Three organisms at the vent, at the value they are worth the instant the
+   * ticket is paid for, with that value printed on their faces. It is the opening
+   * position — a constant of the rules, identical every round — so nothing here
+   * is a draw, an outcome or a prediction, and §6.2's rule that the art may not
+   * leak information is untouched.
+   */
+  if (name === 's1' && state.config !== null) {
+    const seedUnits = state.config.rules.seedUnits;
+    stage.preview(seedUnits, ENTRY_VALUE / seedUnits);
+  }
 }
 
 /**
@@ -657,9 +710,9 @@ function realityCheckOr(next) {
   state.afterReality = next;
   const session = state.session;
   dom.realityElapsed.textContent = elapsed(sessionElapsedMs());
-  dom.realityStaked.textContent = credits(session.stakedUnits);
-  dom.realityCredited.textContent = credits(session.creditedUnits);
-  dom.realityNet.textContent = signedCredits(session.netUnits);
+  dom.realityStaked.textContent = money(session.stakedUnits);
+  dom.realityCredited.textContent = money(session.creditedUnits);
+  dom.realityNet.textContent = signedMoney(session.netUnits);
   dom.realityInterval.textContent = String(session.realityCheck?.intervalMinutes ?? 30);
   screen('reality');
   tickClock(dom.realityElapsed);
@@ -804,7 +857,7 @@ async function runHarvest(units) {
   stage.setNote(
     takesAll
       ? `<strong>BANKED.</strong> ${units} organism${units === 1 ? '' : 's'} into the vessel.${lesson}`
-      : `Banked <strong>${credits(credited)}</strong> from ${units} organism${units === 1 ? '' : 's'}.${lesson}`,
+      : `Banked <strong>${money(credited)}</strong> from ${units} organism${units === 1 ? '' : 's'}.${lesson}`,
   );
   // The dead period is a floor on the *decision* cycle (§9.7). A generation that
   // ended the round has no next decision to protect, so paying it there buys
@@ -906,7 +959,7 @@ async function terminalFlow() {
     await stage.extinguish();
     stage.setNote(
       state.bankedUnits > 0n
-        ? `Colony extinct. Banked this round: <strong>${credits(state.bankedUnits)}</strong>.`
+        ? `Colony extinct. Banked this round: <strong>${money(state.bankedUnits)}</strong>.`
         : 'Colony extinct.',
     );
   } else if (terminal === 'THRESHOLD') {
@@ -1003,6 +1056,12 @@ function renderFrame(delta) {
 
   const value = valueOf(frame);
   stage.setValue(value);
+  // What one organism is worth, printed on every one of them (§6.2). The band the
+  // colony wears is a function of the same number, so the colour and the figure
+  // can never disagree.
+  stage.setUnitValue(
+    frame.unitValue === null ? ENTRY_VALUE / state.config.rules.seedUnits : Number(frame.unitValue.decimal),
+  );
   dom.yield.textContent =
     frame.unitValue === null
       ? 'YIELD — · GENERATION 1 IS MANDATORY'
@@ -1023,7 +1082,7 @@ function renderFrame(delta) {
   state.displayedValue = frame.colonyValue === null ? null : value;
 
   const bankable = frame.colonyValue === null ? 0n : creditForK(frame.units);
-  dom.colonyValue.title = `${credits(bankable)} bankable now`;
+  dom.colonyValue.title = `${money(bankable)} bankable now`;
 
   if (delta === undefined || frame.stage === 0) {
     dom.delta.textContent = '';
@@ -1044,8 +1103,8 @@ function renderFrame(delta) {
   // decision (§9.3), and neither is ever dressed as a distance to travel.
   dom.position.textContent =
     frame.stage === 0
-      ? `STAKE ${credits(state.stakeUnits)}`
-      : `STAKE ${credits(state.stakeUnits)} · BANKABLE ${credits(bankable)}`;
+      ? `STAKE ${money(state.stakeUnits)}`
+      : `STAKE ${money(state.stakeUnits)} · BANKABLE ${money(bankable)}`;
 
   // The stake line is the exposure of a position worth exactly what was paid, so
   // the strip agrees with the frame rather than contradicting it (§6.3).
@@ -1216,7 +1275,7 @@ function renderActionBar() {
   if (decision) {
     dom.bank.removeAttribute('aria-disabled');
     dom.bank.firstChild.textContent = 'BANK';
-    dom.bankSub.textContent = credits(creditForK(frame.units));
+    dom.bankSub.textContent = money(creditForK(frame.units));
     const half = Math.floor(frame.units / 2);
     if (frame.units === 1) {
       dom.harvest.setAttribute('aria-disabled', 'true');
@@ -1227,8 +1286,8 @@ function renderActionBar() {
       dom.harvest.firstChild.textContent = `HARVEST ${half}`;
       dom.harvestSub.textContent =
         frame.units >= 3
-          ? `→ ${credits(creditForK(half))} · hold to choose k`
-          : `→ ${credits(creditForK(half))}`;
+          ? `→ ${money(creditForK(half))} · hold to choose k`
+          : `→ ${money(creditForK(half))}`;
     }
     dom.next.firstChild.textContent = 'NEXT';
     dom.nextSub.textContent =
@@ -1247,36 +1306,6 @@ function renderActionBar() {
 }
 
 // ------------------------------------------------------------------ ceremony
-
-/**
- * The round's shape, on the payout card: one bar per generation, at the
- * population that generation resolved to.
- *
- * It is the player's own resolved history — the same numbers the receipt lists —
- * so it is a record and never a counterfactual (§9.8), and there is nothing
- * forward-looking in it. It carries the same information on a loss as on a win,
- * in ASH rather than LUMEN: a colony that grew to eleven and then died is a
- * better story than a blank card, and telling it is not celebrating it.
- */
-function renderTrace(populations, down) {
-  dom.trace.replaceChildren();
-  dom.trace.hidden = populations.length === 0;
-  if (populations.length === 0) return;
-  const peak = Math.max(1, ...populations);
-  populations.forEach((population, index) => {
-    const bar = document.createElement('span');
-    bar.className = 'trace-bar';
-    if (population === 0) bar.classList.add('gone');
-    bar.style.height = `${Math.max(6, Math.round((population / peak) * 100))}%`;
-    // The bars grow in, left to right, *under* the counting figure — the round
-    // replayed at about the speed the total is counting. The stagger is stacked
-    // on top of the container's own reveal, because a bar that finishes growing
-    // while its container is still transparent is a bar nobody sees grow.
-    bar.style.animationDelay = `${300 + index * 34}ms`;
-    dom.trace.append(bar);
-  });
-  dom.trace.dataset.tone = down ? 'spent' : 'won';
-}
 
 /** Clears every timer and count the ceremony has in flight. */
 function stopCeremony() {
@@ -1327,24 +1356,40 @@ function showCeremony() {
   // multiple of what the ticket cost, and the first thing it splits on is whether
   // the player is up or down (§7.1).
   const atLeast = (multipleOfStake) => credited >= staked * BigInt(multipleOfStake);
+  /*
+   * `T-even` — a round that returned exactly what it cost.
+   *
+   * Round 1 classified it as `T0-win` and gave it the whole win apparatus: the
+   * gold vessel, the amber flood, a 600 ms count-up, all under the words
+   * `NET +0.00`. That is not a banned pattern — getting your stake back is not a
+   * net-losing outcome dressed as a win — but a celebration for breaking even is
+   * louder than the result deserves, and every stake-back it fires on is
+   * headroom spent that the tiers above it no longer have. It gets the cold slab
+   * and the quiet, and its copy says plainly what happened.
+   */
   const tier =
     credited === 0n
       ? 'T-nil'
       : !atLeast(1)
         ? 'T0-loss'
-        : !atLeast(2)
-          ? 'T0-win'
-          : !atLeast(10)
-            ? 'T1'
-            : !atLeast(50)
-              ? 'T2'
-              : 'T3';
+        : credited === staked
+          ? 'T-even'
+          : !atLeast(2)
+            ? 'T0-win'
+            : !atLeast(10)
+              ? 'T1'
+              : !atLeast(50)
+                ? 'T2'
+                : 'T3';
 
   dom.settlement.dataset.tier = tier;
   // Below the stake, the signed net *is* the headline: §7.1 requires it to be at
   // least as prominent as the credited amount, and a player must never have to do
   // subtraction to find out they lost.
   const down = tier === 'T-nil' || tier === 'T0-loss';
+  /** Break-even: not a loss, and not a win either. No amber, no count, no share. */
+  const flat = tier === 'T-even';
+  const quiet = down || flat;
   /*
    * The eyebrow above the figure.
    *
@@ -1375,11 +1420,11 @@ function showCeremony() {
     node.textContent = text;
     return node;
   };
-  if (down) dom.settlementNet.append(reading(`RETURNED ${credits(credited)} OF ${credits(staked)} STAKED`));
+  if (down) dom.settlementNet.append(reading(`RETURNED ${money(credited)} OF ${money(staked)} STAKED`));
   else
     dom.settlementNet.append(
-      reading(`RETURNED ${credits(credited)}`),
-      reading(`NET ${signedCredits(net)}`),
+      reading(`RETURNED ${money(credited)}`),
+      reading(`NET ${signedMoney(net)}`),
     );
   const lines = settlement.receipts.filter((receipt) => receipt.direction === 'DEBIT').length;
   dom.settlementCopy.textContent =
@@ -1387,15 +1432,15 @@ function showCeremony() {
       ? 'Colony extinct. Whatever was not harvested is gone.'
       : tier === 'T0-loss'
         ? 'This round returned less than it cost.'
-        : `Staked ${credits(staked)} across ${lines} ${lines === 1 ? 'line' : 'lines'}.`;
+        : tier === 'T-even'
+          ? 'This round returned exactly what it cost.'
+          : `Staked ${money(staked)} across ${lines} ${lines === 1 ? 'line' : 'lines'}.`;
 
   // The round's credited multiple — the tier's own basis. Wins only: below the
   // stake the signed net *is* the headline, and a third figure beside it would
   // dilute the one number §9.3 requires to lead.
-  dom.settlementMultiple.hidden = down;
-  if (!down) dom.settlementMultiple.textContent = `${stakeMultiple(credited, staked)}× YOUR STAKE`;
-
-  renderTrace(settlement.proof.populations ?? [], down);
+  dom.settlementMultiple.hidden = quiet;
+  if (!quiet) dom.settlementMultiple.textContent = `${stakeMultiple(credited, staked)}× YOUR STAKE`;
 
   dom.openWild.hidden = settlement.proof.sideBetResults.every(
     (result) => result.resolved === 'NOT_SELECTED',
@@ -1413,8 +1458,21 @@ function showCeremony() {
   // settling in place, in MIST, with no count-up into the balance chip — a number
   // flowing into an amber chip reads as a win in peripheral vision, which is
   // exactly the frame the most common outcome class in the game must not get.
-  const countUp = { 'T0-win': 600, T1: 800, T2: 1000, T3: 1200 }[tier] ?? 0;
-  const silence = tier === 'T2' || tier === 'T3' ? 250 : 0;
+  const countUp = quiet ? 0 : ({ 'T0-win': 600, T1: 800, T2: 1000, T3: 1200 }[tier] ?? 0);
+  /*
+   * The silence before the loud tiers is **gone**, and that is a fix rather than
+   * a trim.
+   *
+   * Measured from the BANK tap, round 1 spent 1.4–1.8 s in which consecutive
+   * frames changed 0.16% — nothing happening at all — and the payout card was
+   * not fully readable until 3.07 s. The player has already committed and
+   * already knows the number; three seconds of near-stillness before the payout
+   * surface arrives is the opposite of "the outcome legible the moment it is
+   * known", and every reference cuts straight to the gold banner. Anticipation
+   * belongs to the *reveal* of a generation, where it is bounded, fixed and
+   * carries real uncertainty — not to a total the player watched accumulate.
+   */
+  const silence = 0;
   // The figures that confirm the headline wait for the count-up to land. A loss
   // has no count-up, so on a loss the whole card is on screen inside 400 ms —
   // quick, and over.
@@ -1426,14 +1484,17 @@ function showCeremony() {
   stopCeremony();
 
   const balance = BigInt(state.session?.balanceUnits ?? 0);
-  // Sized from the figure the headline will *end* on, so it does not resize
-  // under the count-up.
+  /*
+   * The figure, without its unit: the unit is a separate, smaller run inside the
+   * headline (see `index.html`), so it is attached to the payout without being
+   * set at the payout's size — and so the count-up writes digits and nothing else.
+   */
   const finalHeadline = down ? signedCredits(net) : credits(credited);
-  dom.settlementHeadline.style.fontSize = `${fitHeadline(finalHeadline, tier).toFixed(1)}px`;
+  dom.settlementHeadline.style.fontSize = `${fitHeadline(`${finalHeadline}·`, tier).toFixed(1)}px`;
   if (down || countUp <= 0) {
     // The value settles in place. The chip is simply the truth, at once.
     state.holdBalance = false;
-    dom.settlementHeadline.textContent = finalHeadline;
+    dom.settlementFigure.textContent = finalHeadline;
     setBalanceChip(balance);
   } else {
     // The chip goes back to the moment the ticket was paid for, and the round's
@@ -1441,7 +1502,7 @@ function showCeremony() {
     // lighting, so what the player sees is money that is visibly *in the vessel*
     // and has not reached the balance yet — not a chip that glitched downward.
     state.holdBalance = true;
-    dom.settlementHeadline.textContent = credits(0n);
+    dom.settlementFigure.textContent = credits(0n);
     /*
      * Where the chip counts from, and it is never backwards.
      *
@@ -1456,20 +1517,52 @@ function showCeremony() {
     const paidFor = credited > balance ? 0n : balance - credited;
     const from = state.chipUnits > paidFor && state.chipUnits <= balance ? state.chipUnits : paidFor;
     state.chipUnits = from;
-    dom.balance.textContent = credits(from);
-    beat(silence, () => {
-      // The round's take goes home: the vessel drains and anything still alive
-      // streams out of frame toward the chip, which is where the value landed.
-      void stage.bankOut(() => {
-        dom.balanceButton.classList.add('credited');
-      });
-    });
-    beat(silence + 220, () => {
-      dom.balanceButton.classList.add('credited');
-      state.ceremony.cancels.push(
-        rollUnits(dom.settlementHeadline, 0n, credited, countUp),
-        rollCredits(dom.balance, from, balance, countUp),
+    dom.balance.textContent = money(from);
+    /*
+     * The vessel waits for the card to land, and the 240 ms is a budget decision.
+     *
+     * Measured on the overlapping version: the card's 460 ms entrance and the
+     * vessel's 520 ms rise running together produced **ten independently moving
+     * regions** between two consecutive samples with the largest owning 48% of
+     * the motion — against a ceiling of seven and a required 50–80%. They are two
+     * big objects arriving at once, which is the definition of a stacked effect.
+     * Sequenced, each beat has one dominant motion: the card lands, then the
+     * vessel rises under a figure that is already counting.
+     */
+    beat(240, () => {
+      /*
+       * The round's take goes home: the vessel drains and anything still alive
+       * streams out of frame toward the chip, which is where the value landed.
+       *
+       * The stage is left lit by the **credited multiple** rather than dropped to
+       * the floor, so the water, the plume and the environment are still there
+       * behind the card. §6.3's contract is unchanged — the light budget is still
+       * the money — it is simply measured on the money the round actually paid
+       * instead of on a colony that no longer exists.
+       */
+      void stage.bankOut(
+        () => {
+          dom.balanceButton.classList.add('credited');
+        },
+        staked > 0n ? Number(credited) / Number(staked) : 0,
+        // The glass holds for the length of the count-up, so the pour home is the
+        // beat *after* the figure lands rather than a second animation beside it.
+        countUp,
       );
+    });
+    beat(silence + 160, () => {
+      dom.balanceButton.classList.add('credited');
+      // The figure is the dominant motion of the beat and the chip is support, so
+      // the chip counts in the *second* half of the figure's count rather than
+      // beside it: the effect budget wants one region owning 50–80% of the motion
+      // at a payoff, not two equals.
+      state.ceremony.cancels.push(rollUnits(dom.settlementFigure, 0n, credited, countUp));
+      // The chip counts *after* the figure lands, not beside it. Two figures
+      // counting at once is two equal moving regions on the one beat that is
+      // supposed to have a dominant one.
+      beat(countUp, () => {
+        state.ceremony.cancels.push(rollCredits(dom.balance, from, balance, 420));
+      });
       beat(countUp + 240, () => dom.balanceButton.classList.remove('credited'));
     });
   }
@@ -1485,8 +1578,10 @@ function showCeremony() {
    * as an extinction with an amber figure in the middle of it. A tier the table
    * says has a swell has to have one.
    */
-  if (tier === 'T1' || tier === 'T2' || tier === 'T3')
-    beat(silence, () => void stage.celebrate(tier));
+  // Only T3 has a stage beat left: T1's and T2's swell is delivered by the card's
+  // own spill and the tier's warm halo, both of which arrive with the card and
+  // then hold still (§7.1).
+  if (tier === 'T3') beat(silence, () => void stage.celebrate(tier));
 
   // The settlement hold, and the round-cycle floor: a loss cannot be skipped into
   // the next stake, and a whole round cannot be chained faster than 2.5 s (§9.7).
@@ -1750,10 +1845,10 @@ function setK(value) {
 function renderStepper() {
   const units = state.frame?.units ?? 0;
   dom.kValue.textContent = String(state.k);
-  dom.kCredit.textContent = credits(creditForK(state.k));
+  dom.kCredit.textContent = money(creditForK(state.k));
   const left = units - state.k;
   dom.kLeft.textContent = `${left} organism${left === 1 ? '' : 's'}`;
-  $('k-commit').textContent = `HARVEST ${state.k} → ${credits(creditForK(state.k))}`;
+  $('k-commit').textContent = `HARVEST ${state.k} → ${money(creditForK(state.k))}`;
 }
 
 function wireSheets() {

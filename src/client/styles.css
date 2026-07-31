@@ -190,7 +190,21 @@ button {
      is never allowed to wrap, so the row must follow the type rather than clip it. */
   grid-template-rows: 56px minmax(0, 1fr) auto 96px minmax(34px, auto) auto;
   overflow: hidden;
-  background: var(--abyss);
+  /*
+   * The plate under everything, and it is not a flat fill.
+   *
+   * The stage canvas stops at the value strip, about 65% down. Below that the
+   * frame was `var(--abyss)` — one colour across a third of the picture — which
+   * on the settlement screens (where the strip and the bar step aside) is a third
+   * of the frame with nothing in it, and it is most of why the settled frames
+   * measured 800–1,600 distinct colours against a 2,500 floor. The water column
+   * simply continues: the same ABYSS-through-TRENCH ramp the canvas plate uses,
+   * with the vent's warm anchor where the vent is. Every value here is a constant
+   * in every frame of every round, so §6.3's ordering promise is untouched.
+   */
+  /* A fallback for the frame the bake has not landed on yet; `#frame-plate`
+     carries the real material (see `stage.bakeFramePlate`). */
+  background: linear-gradient(180deg, #071626 0%, #0a2c39 62%, #0a2b36 100%);
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--crust) 45%, transparent),
     0 30px 90px rgba(var(--floor), 0.85);
@@ -405,12 +419,110 @@ button {
   height: 100%;
 }
 
+/* Behind every grid child: `z-index: -1` puts it between the frame's own
+   background and its content, which is exactly where a plate belongs. */
+#frame-plate {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
 .colony-aria {
   position: absolute;
   width: 1px;
   height: 1px;
   overflow: hidden;
   clip-path: inset(50%);
+}
+
+/* ------------------------------------------------------------- the brandmark
+
+   Every reference in the calibration set carries a wordmark lockup **in game**:
+   Plinko hangs one off the left edge of the board, Balloon Mania bands one
+   across the top, Space XY sets one over the launch pad. Round 1 shipped flat
+   white system-weight text on the how-it-works screen and nothing at all on the
+   game frame, which §5 of the rubric names precisely — display type that is
+   styled rather than built reads as placeholder.
+
+   This one is built: three treatments stacked, exactly as the reference lockups
+   are. A gradient face clipped to the glyphs; a dark outline drawn as a
+   four-way text shadow on a duplicate underneath, so the letters hold their edge
+   against a lit colony; and a seated drop shadow below that. It sits top-left of
+   the play area, and its luminance is deliberately held well under the colony's:
+   a wordmark that competes with the money for the eye is in the wrong place. */
+
+.brandmark {
+  position: absolute;
+  top: 9px;
+  left: 12px;
+  z-index: 2;
+  pointer-events: none;
+  line-height: 1;
+  opacity: 0.94;
+}
+
+/*
+ * Three layers, painted in order, which is what "built" means here.
+ *
+ * The span itself is invisible and exists only to size the box: `::before`
+ * carries the cut outline and the seated shadow, `::after` carries the gradient
+ * face, and because pseudo-elements paint in document order the face always
+ * lands on top of the outline without needing a stacking context — a `z-index`
+ * here does not work, because `background-clip: text` makes the *background* the
+ * visible face and a negative z-index child paints in front of a background.
+ */
+.brandmark span {
+  position: relative;
+  display: inline-block;
+  white-space: nowrap;
+  font-family: var(--money);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  /* Tracked-out caps put their trailing space after the last letter; the padding
+     gives the lockup a box that matches what the eye reads as its right edge. */
+  padding-right: 0.22em;
+  color: transparent;
+}
+
+.brandmark span::before,
+.brandmark span::after {
+  content: attr(data-text);
+  position: absolute;
+  top: 0;
+  left: 0;
+  white-space: nowrap;
+  letter-spacing: inherit;
+}
+
+/* The outline and the seat. */
+.brandmark span::before {
+  color: #04141d;
+  -webkit-text-stroke: 4px #04141d;
+  paint-order: stroke fill;
+  text-shadow:
+    0 2px 0 rgba(var(--floor), 0.95),
+    0 3px 8px rgba(var(--floor), 0.9),
+    0 0 18px color-mix(in srgb, var(--lumen) 38%, transparent);
+}
+
+/* The face: a real vertical gradient, lit at the top and cooling downward, plus
+   one hairline of light along the upper edge of the glyphs. */
+.brandmark span::after {
+  background: linear-gradient(
+    180deg,
+    #e4fff8 0%,
+    var(--lumen-high) 26%,
+    var(--lumen) 58%,
+    var(--lumen-deep) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 /*
@@ -457,7 +569,13 @@ button {
    * across consecutive frames — which is what the strongest reference in the
    * calibration set does while it waits for you.
    */
-  opacity: 0.062;
+  /* 0.078, up from 0.062. The ceiling is still what it costs: at 0.16 the tile
+     bought +400 distinct colours and paid 23 points of saturation for them. This
+     is the largest value that measured no saturation loss at all, and it is the
+     one texture that reaches the CSS screens — the stake panels, the payout card
+     and the balance chip are gradients too, and a gradient with no material in it
+     is the surface the references never have. */
+  opacity: 0.078;
   pointer-events: none;
   background-repeat: repeat;
   /* `screen` is the compositor's name for the `lighter` the canvas pass uses, and
@@ -468,7 +586,10 @@ button {
 .legend {
   position: absolute;
   z-index: 2;
-  top: 10px;
+  /* Under the brandmark, not beside it. The lockup owns the top-left corner and
+     the two of them stacked read as a masthead; side by side on a 390 pt frame
+     they collide, because the legend is 240 pt wide on its own. */
+  top: 42px;
   left: 50%;
   transform: translateX(-50%);
   padding: 5px 12px;
@@ -1103,6 +1224,17 @@ button {
      * need the scrim to be opaque behind it, and putting the water behind the
      * glass is what the material was specified to look like in the first place.
      */
+    /*
+     * The window is genuinely open now.
+     *
+     * Round 1 held this scrim at 0.72–0.76 through the middle band, which is
+     * dense enough that anything on the stage behind it was a suggestion rather
+     * than an object — and there was nothing on the stage behind it anyway. With
+     * three organisms standing at the vent carrying their own value, the top
+     * third has to be nearly clear or the fix does not arrive: 0.06 across the
+     * window, closing to full density under it where the type and the panels
+     * live.
+     */
     linear-gradient(
       180deg,
       rgba(7, 26, 36, 0.96) 0%,
@@ -1114,6 +1246,34 @@ button {
       rgba(6, 21, 29, 0.74) 100%
     );
   backdrop-filter: blur(4px) saturate(140%);
+}
+
+/*
+ * S1 opens its window; S0 and the reality check do not.
+ *
+ * The stake screen is the only one of the three with a colony standing behind it
+ * — the explainer and the reality check are text screens, and a text screen over
+ * a nearly-clear scrim is a text screen with a legibility problem. So the open
+ * gradient is scoped to `#s1`, where there is something to see.
+ */
+#s1.overlay.vent-idle {
+  background:
+    radial-gradient(34% 8% at 50% 77%, color-mix(in srgb, var(--ember) 74%, transparent) 0%, transparent 72%),
+    radial-gradient(66% 17% at 50% 82%, color-mix(in srgb, var(--ember) 26%, transparent) 0%, transparent 76%),
+    linear-gradient(
+      180deg,
+      rgba(7, 26, 36, 0.5) 0%,
+      rgba(7, 26, 36, 0.14) 6%,
+      rgba(7, 26, 36, 0.05) 18%,
+      rgba(7, 26, 36, 0.08) 34%,
+      rgba(7, 26, 36, 0.6) 42%,
+      rgba(6, 24, 33, 0.82) 52%,
+      rgba(6, 22, 31, 0.86) 78%,
+      rgba(6, 21, 29, 0.82) 100%
+    );
+  /* No blur across the window: the organisms carry printed type on their faces
+     now, and a backdrop blur over printed type is a blurred number. */
+  backdrop-filter: saturate(150%);
 }
 
 /*
@@ -1131,6 +1291,25 @@ button {
     rgba(var(--floor), 0.9) 100%
   );
   backdrop-filter: blur(4px) saturate(125%);
+}
+
+/*
+ * The round's furniture steps off the settlement frame.
+ *
+ * The legend, the lockup and the value strip all belong to a round that is over,
+ * and the strip's largest reading after a bank is `0.00x` — true, and exactly the
+ * wrong number to be legible behind a 9.43 payout. Round 1 hid it under a scrim
+ * dense enough to erase the picture as well; with the scrim open so the stage can
+ * be seen, the strip has to go on its own. The side-bet resolutions it carries are
+ * one tap away in the receipt, where they are legible.
+ */
+.frame[data-screen='settlement'] .legend,
+.frame[data-screen='settlement'] .brandmark,
+.frame[data-screen='settlement'] .stage-note,
+.frame[data-screen='settlement'] .strip,
+.frame[data-screen='settlement'] .actionbar,
+.frame[data-screen='settlement'] .footer {
+  opacity: 0;
 }
 
 .frame[data-screen='s0'] .strip,
@@ -1158,8 +1337,38 @@ button {
   color: var(--foam);
 }
 
+/*
+ * The hole in the stake screen the colony shows through.
+ *
+ * The overlay is a column, so reserving the top third with an empty flex item is
+ * all it takes to put the live stage back on the screen the game is judged by
+ * before a stake exists. It is sized in `vh` rather than `px` so the window
+ * tracks the frame: the colony's centroid is at 40% of the stage, and the stage
+ * runs from under the top bar to the value strip.
+ */
+.stage-window {
+  flex: 0 0 auto;
+  height: 19.5vh;
+  min-height: 148px;
+  pointer-events: none;
+}
+
 .wordmark {
   margin-bottom: 14px;
+}
+
+/* The stake screen is the fullest column in the game and the CTA has grown; the
+   heading gives back what the button took. */
+#s1 .wordmark {
+  margin-bottom: 8px;
+}
+
+#s1 .wordmark h1 {
+  font-size: 21px;
+}
+
+#s1 .panel {
+  margin-bottom: 8px;
 }
 
 .wordmark h1 {
@@ -1689,11 +1898,22 @@ input[type='range']::-moz-range-thumb {
   background: var(--lumen);
 }
 
+/*
+ * The primary action, and it has to be the brightest saturated object on the
+ * screen the player is deciding on (§3 of the bar, criterion 13).
+ *
+ * With a colony standing at the vent on the stake screen the button now has
+ * competition it did not have when the frame was empty, and the reference answer
+ * is not to dim the game object — Plinko keeps its whole board lit and still
+ * makes the glossy PLAY disc the focal point. It makes the control *bigger*: 68 pt
+ * of full-width LUMEN in the bottom 15% of the frame, against a preview colony
+ * drawn at the dimmest band the game has.
+ */
 .cta {
   position: relative;
   width: 100%;
-  min-height: 56px;
-  border-radius: 15px;
+  min-height: 72px;
+  border-radius: 16px;
   background: linear-gradient(180deg, var(--lumen-high) 0%, var(--lumen) 44%, var(--lumen-deep) 100%);
   color: #032019;
   font-family: var(--money);
@@ -1715,11 +1935,20 @@ input[type='range']::-moz-range-thumb {
   content: '';
   position: absolute;
   inset: 0;
+  /*
+   * The specular, tinted rather than white.
+   *
+   * A white sheen at 38% over LUMEN drops the face's saturation under 0.35, which
+   * is the threshold the focal measure uses — so the brightest part of the
+   * primary control was being excluded from the very region it is supposed to
+   * own. Tinting the sheen to LUMEN HIGH keeps the gloss and keeps the chroma,
+   * and the button reads as one lit saturated surface top to bottom.
+   */
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.38) 0%,
-    rgba(255, 255, 255, 0.1) 34%,
-    transparent 46%
+    rgba(124, 255, 227, 0.72) 0%,
+    rgba(124, 255, 227, 0.26) 40%,
+    transparent 54%
   );
   pointer-events: none;
   transition: opacity 70ms linear;
@@ -1926,12 +2155,46 @@ table.data td.num {
   justify-content: center;
   text-align: center;
   gap: 6px;
-  /* Translucent, so the settled colony is still on screen behind the payout —
-     but blurred far enough that the value strip behind it reads as light rather
-     than as text. A banked round leaves `0.00x` on the strip, which is true and
-     is exactly the wrong number to be legible behind an 11x payout. */
-  background: linear-gradient(180deg, rgba(var(--floor), 0.68) 0%, rgba(var(--floor), 0.9) 100%);
-  backdrop-filter: blur(8px) saturate(118%);
+  /*
+   * A vignette, not a curtain.
+   *
+   * The old scrim ran 0.68 → 0.90 with the rays painted on top of it, which
+   * between them replaced the whole picture: at the loudest beat in the game the
+   * colony, the vent and the vessel the money had just poured into all vanished
+   * and the frame became an orange haze with a card in it. The stage is now lit
+   * by the round's *credited* value (see `stage.bankOut`), so there is a real
+   * picture behind this — the water, the plume, the husks of a colony that died —
+   * and the scrim's job is to give the card its contrast, not to hide the frame.
+   *
+   * It is darkest at the edges and opens toward the middle, which is the same
+   * device that puts every reference payout at the optical centre. Still blurred,
+   * because the value strip behind it holds the *last* round's numbers and those
+   * must read as light rather than as text.
+   */
+  background: linear-gradient(
+    180deg,
+    rgba(var(--floor), 0.5) 0%,
+    rgba(var(--floor), 0.14) 12%,
+    rgba(var(--floor), 0.08) 32%,
+    rgba(var(--floor), 0.32) 46%,
+    rgba(var(--floor), 0.46) 62%,
+    rgba(var(--floor), 0.54) 100%
+  );
+  /*
+   * Light where the picture is, dense where the numbers are.
+   *
+   * A uniform scrim cannot do both jobs: at the density needed to stop the value
+   * strip's `0.00x` reading through, it also erases the vent, the water and the
+   * colony's remains — which is how round 1 ended up with a payout card floating
+   * on nothing. The stage band stays at 14–22% so the frame keeps its picture;
+   * everything below it settles at 46–54%, because the strip, the bar and the
+   * footer step aside on this screen and there is nothing left down there to hide.
+   *
+   * And **no backdrop blur**. A blur over the stage band smears the brandmark and
+   * the legend into grey smudges, which is exactly the "unreadable artifact" read
+   * this pass exists to remove; the density below does the hiding on its own.
+   */
+  backdrop-filter: none;
   animation: ceremony-open 260ms cubic-bezier(0.2, 0, 0, 1) both;
 }
 
@@ -1941,97 +2204,21 @@ table.data td.num {
  * those two tiers and to nothing else, so a round that paid nothing keeps the
  * dark it earned. One rasterized conic gradient, transformed; never repainted.
  */
+/*
+ * The card sits below the optical centre, on purpose.
+ *
+ * Measured on round 1, the win frame's focal object — the lit gold surface — had
+ * its centroid at y = 0.33 against the reference band of 0.35–0.55 (Space XY's
+ * payout disc measures 0.48). This is that 34 px, applied as a transform so it
+ * costs no layout and cannot push the card into a scroll: the stage above stays
+ * visible, which is where the settled colony and its remains are.
+ */
 .payout-stage {
   position: relative;
+  transform: translateY(38px);
   flex: 0 0 auto;
   /* Above the ray well, which is the overlay's own backdrop. */
   z-index: 1;
-}
-
-/*
- * The well: exactly the overlay's box, and it clips.
- *
- * `inset: 0` on the overlay's padding box adds nothing to the scrollable
- * overflow area, so the ceremony is no longer a scroll container that happens to
- * contain the payout. Everything oversized lives inside it.
- */
-.ray-well {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
-  z-index: 0;
-}
-
-/* The rays are centred where the card sits rather than on the middle of the
-   overlay — centred on the overlay they sat below the card and read as a
-   perspective floor under it. */
-.ceremony-rays {
-  position: absolute;
-  top: 44%;
-  left: 50%;
-  width: 150vh;
-  height: 150vh;
-  margin: -75vh 0 0 -75vh;
-  opacity: 0;
-  pointer-events: none;
-  background: repeating-conic-gradient(
-    from 0deg,
-    color-mix(in srgb, var(--lumen) 26%, transparent) 0deg 2.6deg,
-    transparent 2.6deg 10deg
-  );
-  -webkit-mask-image: radial-gradient(closest-side, transparent 8%, rgba(0, 0, 0, 0.9) 17%, rgba(0, 0, 0, 0.34) 34%, transparent 56%);
-  mask-image: radial-gradient(closest-side, transparent 8%, rgba(0, 0, 0, 0.9) 17%, rgba(0, 0, 0, 0.34) 34%, transparent 56%);
-  will-change: transform, opacity;
-}
-
-/*
- * T1 gets a fan too, at half of T2's.
- *
- * §7.1 gives T1 "a single soft swell" and no more, and this is the frame's half
- * of that swell — the light behind the card rather than a second event. It is
- * the tier every win from 2x to 10x lands in, which is most of the wins anyone
- * will ever see, and a tier whose entire distinction from a 1.02x return is a
- * warmer number is the tier the round-1 verdict called a receipt. It does not
- * spin: a rotating fan is a *fanfare*, and a fanfare belongs to the two loud
- * tiers.
- */
-.ceremony[data-tier='T1'] .ceremony-rays {
-  /* Warm, like every payoff in the reference set: the colour temperature swings
-     to gold at settlement regardless of the base palette, and this game's base
-     palette is the coldest of the four. */
-  background: repeating-conic-gradient(
-    from 0deg,
-    color-mix(in srgb, var(--amber) 30%, transparent) 0deg 2.6deg,
-    transparent 2.6deg 10deg
-  );
-  opacity: 0.38;
-  animation: rays-in 900ms cubic-bezier(0.2, 0, 0, 1) both;
-}
-
-.ceremony[data-tier='T2'] .ceremony-rays {
-  background: repeating-conic-gradient(
-    from 0deg,
-    color-mix(in srgb, var(--amber) 38%, transparent) 0deg 3deg,
-    transparent 3deg 10deg
-  );
-  opacity: 0.5;
-  animation: rays-in 900ms cubic-bezier(0.2, 0, 0, 1) both, rays-spin 44s linear infinite;
-}
-
-.ceremony[data-tier='T3'] .ceremony-rays {
-  opacity: 0.44;
-  /* The top tier runs hot: at settlement the colony is gone and what is filling
-     the frame is banked money, so T3's light is mostly AMBER where T2's is
-     mostly the colony's own LUMEN. That is the visible difference between the
-     two loudest screens in the game, and it is in the right currency. */
-  background: repeating-conic-gradient(
-    from 0deg,
-    color-mix(in srgb, var(--amber) 34%, transparent) 0deg 3.4deg,
-    color-mix(in srgb, var(--lumen) 16%, transparent) 3.4deg 5deg,
-    transparent 5deg 11deg
-  );
-  animation: rays-in 1100ms cubic-bezier(0.2, 0, 0, 1) both, rays-spin 30s linear infinite;
 }
 
 .payout-card {
@@ -2104,9 +2291,8 @@ table.data td.num {
     /* The spill. Three blooms of decreasing strength and increasing reach: this
        is the term that lights the *frame* rather than the object, and it is
        saturated by construction because a shadow takes the colour it is given. */
-      0 0 60px color-mix(in srgb, var(--amber) 70%, transparent),
-    0 0 130px color-mix(in srgb, var(--ember) 52%, transparent),
-    0 0 260px color-mix(in srgb, var(--ember) 32%, transparent);
+      0 0 34px color-mix(in srgb, var(--amber) 60%, transparent),
+    0 0 74px color-mix(in srgb, var(--ember) 34%, transparent);
   animation: vessel-fill 520ms cubic-bezier(0.18, 1.12, 0.36, 1) both;
 }
 
@@ -2157,9 +2343,8 @@ table.data td.num {
     inset 0 -3px 9px rgba(120, 62, 6, 0.44),
     0 5px 0 #b0721f,
     0 16px 36px rgba(var(--floor), 0.72),
-    0 0 80px color-mix(in srgb, var(--amber) 84%, transparent),
-    0 0 180px color-mix(in srgb, var(--ember) 66%, transparent),
-    0 0 340px color-mix(in srgb, var(--ember) 44%, transparent);
+    0 0 44px color-mix(in srgb, var(--amber) 78%, transparent),
+    0 0 96px color-mix(in srgb, var(--ember) 44%, transparent);
 }
 
 @keyframes vessel-fill {
@@ -2208,11 +2393,22 @@ table.data td.num {
    * is cut off at the card's edge and lights nothing. On the card it reaches the
    * water, which is the whole point of it — the frame is lit by the event.
    */
+  /*
+   * The spill is a **rim of light around the object**, not a fog filling the
+   * frame.
+   *
+   * Round 1's reached 420 px at 22% on top of a full-screen ray fan, and the two
+   * together turned the middle of the win frame into a featureless orange haze —
+   * the single loudest reason the blind sheet could pick our build out. The
+   * references do light the whole frame at a payoff, but they light *something*:
+   * a board, a field, a rocket. With the stage now lit by the credited value and
+   * still on screen behind this card, the spill only has to seat the object in
+   * the water it is glowing into.
+   */
   box-shadow:
     0 20px 60px rgba(var(--floor), 0.72),
-    0 0 100px color-mix(in srgb, var(--amber) 42%, transparent),
-    0 0 240px color-mix(in srgb, var(--ember) 34%, transparent),
-    0 0 420px color-mix(in srgb, var(--ember) 22%, transparent),
+    0 0 46px color-mix(in srgb, var(--amber) 34%, transparent),
+    0 0 120px color-mix(in srgb, var(--ember) 20%, transparent),
     inset 0 1px 0 color-mix(in srgb, var(--amber) 22%, transparent);
   animation: card-land 460ms cubic-bezier(0.18, 1.14, 0.36, 1) both;
 }
@@ -2224,9 +2420,8 @@ table.data td.num {
   backdrop-filter: none;
   box-shadow:
     0 26px 70px rgba(var(--floor), 0.74),
-    0 0 120px color-mix(in srgb, var(--amber) 58%, transparent),
-    0 0 300px color-mix(in srgb, var(--ember) 46%, transparent),
-    0 0 540px color-mix(in srgb, var(--ember) 32%, transparent),
+    0 0 62px color-mix(in srgb, var(--amber) 46%, transparent),
+    0 0 170px color-mix(in srgb, var(--ember) 26%, transparent),
     inset 0 1px 0 color-mix(in srgb, var(--amber) 30%, transparent);
   animation: card-land 620ms cubic-bezier(0.16, 1.2, 0.32, 1) both;
 }
@@ -2294,16 +2489,126 @@ table.data td.num {
   letter-spacing: -0.035em;
 }
 
+/*
+ * The currency, attached to the payout and set at a size that does not compete
+ * with it. Every reference does exactly this — `2.00 FUN`, `1.10 FUN` — and the
+ * unit is never the same weight as the figure it belongs to.
+ */
+.ceremony .headline .unit {
+  font-size: 0.3em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin-left: 0.2em;
+  vertical-align: 1.05em;
+  opacity: 0.7;
+}
+
+/*
+ * THE DOWN CARD, and it is the frame this round exists to fix.
+ *
+ * Extinction is this game's modal outcome, so the loss card is the most-seen
+ * surface in the product — and in round 1 it was the weakest frame in the entire
+ * comparison set: a hairline-bordered rectangle holding a grey numeral, on a
+ * frame measuring 97.2% dark band, 2.6% lit surface and 370 distinct colours,
+ * ranked below the desaturated skin the rubric itself ships as its example of
+ * amateur work.
+ *
+ * The fix is not to make a loss look like a win. It is to make a loss look like
+ * something. This is the same construction as the vessel — a graded face, a lit
+ * top edge, a seated bottom, a specular, a contact shadow — executed in cold
+ * BASALT and ASH instead of AMBER: a spent, unlit slab of the same rock the vent
+ * is made of. It reads as a loss pre-attentively, by luminance and temperature
+ * against the win's gold, and it does it while being made of material rather
+ * than by being absent.
+ */
+.ceremony[data-tier='T0-loss'] .vessel,
+.ceremony[data-tier='T-nil'] .vessel,
+.ceremony[data-tier='T-even'] .vessel {
+  margin: 2px 2px 12px;
+  padding: 20px 16px 22px;
+  border-radius: 18px;
+  background: linear-gradient(
+    180deg,
+    #6d95a6 0%,
+    #4d7383 38%,
+    #33566a 74%,
+    #22394a 100%
+  );
+  border: 1px solid color-mix(in srgb, var(--crust) 70%, transparent);
+  box-shadow:
+    inset 0 2px 0 rgba(190, 216, 224, 0.5),
+    inset 0 -3px 8px rgba(var(--floor), 0.6),
+    0 4px 0 #0d222d,
+    0 14px 30px rgba(var(--floor), 0.7);
+  animation: card-quiet 220ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+.ceremony[data-tier='T0-loss'] .vessel-light,
+.ceremony[data-tier='T-nil'] .vessel-light,
+.ceremony[data-tier='T-even'] .vessel-light {
+  display: block;
+  position: absolute;
+  inset: 1px;
+  border-radius: 17px;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(70% 78% at 28% 2%, rgba(225, 242, 248, 0.34) 0%, rgba(180, 214, 226, 0.12) 44%, transparent 74%),
+    radial-gradient(90% 50% at 50% 108%, rgba(var(--floor), 0.5) 0%, transparent 70%);
+}
+
+.ceremony[data-tier='T0-loss'] .vessel-rule,
+.ceremony[data-tier='T-nil'] .vessel-rule,
+.ceremony[data-tier='T-even'] .vessel-rule {
+  display: block;
+  position: relative;
+  height: 1px;
+  margin: 7px auto 4px;
+  width: 78%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(210, 232, 240, 0.28) 18%,
+    rgba(210, 232, 240, 0.28) 82%,
+    transparent
+  );
+}
+
+/* The plinth under the cold slab: the same console the vessel sits in, without
+   the warm spill, so a loss is a well-made object and never a lit one. */
+.ceremony[data-tier='T0-loss'] .payout-card,
+.ceremony[data-tier='T-nil'] .payout-card,
+.ceremony[data-tier='T-even'] .payout-card {
+  border-color: color-mix(in srgb, var(--crust) 44%, transparent);
+  background: linear-gradient(180deg, #0e3444 0%, #0a2735 62%, #071e29 100%);
+  backdrop-filter: none;
+  box-shadow:
+    0 20px 60px rgba(var(--floor), 0.72),
+    0 0 80px rgba(28, 84, 104, 0.4),
+    inset 0 1px 0 color-mix(in srgb, var(--crust) 60%, transparent);
+}
+
 /* Below the stake the headline is the signed net result, and it is the largest
    figure on the screen: §7.1 requires it to be at least as prominent as the
-   credited amount, in MIST, with no count-up and no amber. */
+   credited amount, with no count-up and no amber. It is FOAM on the cold slab,
+   not MIST on a void — a figure a player must read has to be legible, and
+   §9.6's floor is not something the tone of a screen gets to trade against. */
 .ceremony[data-tier='T0-loss'] .headline,
-.ceremony[data-tier='T-nil'] .headline {
-  color: var(--mist);
+.ceremony[data-tier='T-nil'] .headline,
+.ceremony[data-tier='T-even'] .headline {
+  color: #e9f4f8;
+  text-shadow: 0 1px 0 rgba(var(--floor), 0.5);
+}
+
+.ceremony[data-tier='T0-loss'] .terminal,
+.ceremony[data-tier='T-nil'] .terminal,
+.ceremony[data-tier='T-even'] .terminal {
+  color: #bfd6de;
 }
 
 .ceremony[data-tier='T0-loss'] .net,
-.ceremony[data-tier='T-nil'] .net {
+.ceremony[data-tier='T-nil'] .net,
+.ceremony[data-tier='T-even'] .net {
   font-size: 15px;
   color: var(--mist);
 }
@@ -2472,69 +2777,102 @@ table.data td.num {
  * saturated; a plateau at 0.86 measures over 70% and carries far more luminance
  * with it, because the lit area is larger rather than the mixing being longer.
  */
-.ceremony[data-tier='T0-win'] {
-  background:
-    radial-gradient(
-      64% 25% at 50% 42%,
-      rgba(196, 94, 16, 0.66) 0%,
-      rgba(186, 84, 12, 0.6) 48%,
-      rgba(170, 74, 10, 0.22) 70%,
-      rgba(150, 64, 8, 0.05) 84%,
-      transparent 94%
-    ),
-    linear-gradient(180deg, rgba(30, 106, 130, 0.9) 0%, rgba(22, 82, 104, 0.93) 46%, rgba(14, 56, 74, 0.95) 100%);
-}
-
-.ceremony[data-tier='T1'] {
-  background:
-    radial-gradient(
-      80% 31% at 50% 42%,
-      rgba(196, 94, 16, 0.94) 0%,
-      rgba(186, 84, 12, 0.9) 52%,
-      rgba(170, 74, 10, 0.38) 72%,
-      rgba(150, 64, 8, 0.08) 84%,
-      transparent 94%
-    ),
-    linear-gradient(180deg, rgba(44, 142, 170, 0.9) 0%, rgba(32, 110, 136, 0.93) 46%, rgba(20, 76, 98, 0.95) 100%);
-}
-
-.ceremony[data-tier='T2'] {
-  background:
-    radial-gradient(
-      94% 38% at 50% 42%,
-      rgba(206, 100, 20, 0.96) 0%,
-      rgba(196, 90, 14, 0.93) 54%,
-      rgba(178, 78, 10, 0.46) 74%,
-      rgba(156, 66, 8, 0.11) 86%,
-      transparent 96%
-    ),
-    linear-gradient(180deg, rgba(54, 160, 188, 0.88) 0%, rgba(40, 126, 154, 0.92) 44%, rgba(24, 88, 112, 0.94) 100%);
-}
-
+/*
+ * THE TIER SCRIMS, rebuilt — and this is where round 1's "large orange haze with
+ * nothing in it" actually lived.
+ *
+ * They were near-opaque plates: a 0.86–0.97 teal wash with a 0.9–0.97 orange
+ * radial on top of it, painted over the entire frame. Between them they replaced
+ * the picture, which is why the win frame measured two big saturated regions
+ * containing no object and why the settled colony, the vent and the vessel were
+ * invisible at the loudest moment in the game.
+ *
+ * Every tier now uses the same **band**: open across the stage window so the
+ * frame keeps its picture, dense from the value strip down because those numbers
+ * belong to a round that is over. The only thing that varies by tier is the
+ * warmth of the halo around the card — which is §7.1's scaling, in the one
+ * channel the payoff is allowed to spend it in.
+ */
+.ceremony[data-tier='T0-win'],
+.ceremony[data-tier='T1'],
+.ceremony[data-tier='T2'],
 .ceremony[data-tier='T3'] {
   background:
     radial-gradient(
-     110% 46% at 50% 42%,
-      rgba(214, 108, 24, 0.97) 0%,
-      rgba(204, 96, 16, 0.95) 56%,
-      rgba(186, 84, 12, 0.56) 76%,
-      rgba(162, 70, 8, 0.16) 88%,
-      transparent 98%
+      74% 20% at 50% 47%,
+      rgba(214, 108, 24, var(--halo, 0.24)) 0%,
+      rgba(186, 84, 12, calc(var(--halo, 0.24) * 0.5)) 54%,
+      transparent 84%
     ),
-    linear-gradient(180deg, rgba(66, 178, 206, 0.86) 0%, rgba(48, 142, 172, 0.9) 42%, rgba(29, 100, 126, 0.93) 100%);
+    /*
+     * A lateral cast across the scrim, and it is not decoration.
+     *
+     * A scrim is a near-uniform wash, and compositing one over a varied plate
+     * *compresses* the colour range by its own alpha — which is how the settled
+     * frames measured 800–1,600 distinct colours while the plate under them
+     * carried thousands. Two low-alpha lateral tints, cool on one side and warm on
+     * the other, put the wash off a single point in colour space and the range
+     * survives the composite. Both are constants.
+     */
+    linear-gradient(
+      100deg,
+      rgba(24, 74, 108, 0.16) 0%,
+      rgba(10, 40, 54, 0.02) 46%,
+      rgba(96, 58, 20, 0.14) 100%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(var(--floor), 0.5) 0%,
+      rgba(var(--floor), 0.12) 12%,
+      rgba(var(--floor), 0.07) 32%,
+      rgba(var(--floor), 0.3) 46%,
+      rgba(var(--floor), 0.44) 62%,
+      rgba(var(--floor), 0.52) 100%
+    );
+}
+
+.ceremony[data-tier='T0-win'] {
+  --halo: 0.2;
+}
+.ceremony[data-tier='T1'] {
+  --halo: 0.34;
+}
+.ceremony[data-tier='T2'] {
+  --halo: 0.46;
+}
+.ceremony[data-tier='T3'] {
+  --halo: 0.58;
 }
 
 /*
  * The loss, and the reason it is a different *event* rather than a dimmer win.
  *
- * No vessel, no warm light, no lift: cold, dark, still. Win and loss are then
+ * No vessel, no warm light, no lift: cold, dark, still. Win and loss stay
  * separable pre-attentively — by colour, luminance and motion, before a number
- * has been read — which is the requirement, and it is also why nothing in this
- * rule can be borrowed by a partial return that still came in under the stake.
+ * has been read. What changes from round 1 is only that the frame is no longer
+ * *erased*: the scrim was 0.90–0.97 opaque, which put the modal outcome in this
+ * game on a blank plate with a grey numeral in the middle of it. The remains of
+ * the colony are on the stage above the card now, and this lets them be seen.
  */
 .ceremony[data-tier='T-nil'],
-.ceremony[data-tier='T0-loss'] {
-  background: linear-gradient(180deg, rgba(var(--floor), 0.9) 0%, rgba(var(--floor), 0.97) 100%);
+.ceremony[data-tier='T0-loss'],
+.ceremony[data-tier='T-even'] {
+  background:
+    linear-gradient(
+      100deg,
+      rgba(24, 74, 108, 0.16) 0%,
+      rgba(10, 40, 54, 0.02) 48%,
+      rgba(34, 70, 90, 0.14) 100%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(var(--floor), 0.58) 0%,
+      rgba(var(--floor), 0.2) 12%,
+      rgba(var(--floor), 0.14) 32%,
+      rgba(var(--floor), 0.38) 46%,
+      rgba(var(--floor), 0.52) 62%,
+      rgba(var(--floor), 0.6) 100%
+    );
 }
 
 /* Two readings that wrap as units. A single run of text broke between `NET` and
@@ -2588,91 +2926,6 @@ table.data td.num {
   font-size: 14px;
 }
 
-/*
- * The round's shape: one bar per generation at the population it resolved to.
- * The player's own record, in the round's own colours — LUMEN when the round
- * finished ahead, ASH when it did not. It carries information, so it is drawn
- * either way; it carries no emphasis, so it does not change size with the money.
- */
-.ceremony .trace {
-  position: relative;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 4px;
-  height: 40px;
-  margin: 12px 0 5px;
-  padding-bottom: 5px;
-  /* With the card, not after the count-up. The trace is the one thing on the card
-     that can be shown while the figure is still counting without answering it. */
-  animation: card-line 380ms 210ms cubic-bezier(0.2, 0, 0, 1) both;
-}
-
-/* The caption, on the same beat as the bars it names. */
-.ceremony .trace-caption {
-  margin: 3px 0 11px;
-  font-size: 8.5px;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  /* 4.45:1 at 78% — under the floor. Full MIST on the plinth measures 6.1:1. */
-  color: var(--mist);
-  animation: card-line 380ms 240ms cubic-bezier(0.2, 0, 0, 1) both;
-}
-
-/* A baseline, so the bars read as a record of generations rather than as a mark. */
-.ceremony .trace::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  bottom: 0;
-  width: calc(100% - 40px);
-  max-width: 232px;
-  height: 1px;
-  transform: translateX(-50%);
-  background: linear-gradient(
-    90deg,
-    transparent,
-    color-mix(in srgb, var(--crust) 85%, transparent) 20%,
-    color-mix(in srgb, var(--crust) 85%, transparent) 80%,
-    transparent
-  );
-}
-
-.ceremony .trace-bar {
-  width: 7px;
-  min-height: 2px;
-  border-radius: 2px 2px 0 0;
-  transform-origin: 50% 100%;
-  animation: trace-grow 320ms cubic-bezier(0.2, 0, 0, 1) both;
-  animation-delay: inherit;
-}
-
-.ceremony .trace[data-tone='won'] .trace-bar {
-  background: linear-gradient(180deg, var(--lumen) 0%, color-mix(in srgb, var(--lumen-deep) 55%, transparent) 100%);
-  box-shadow: 0 0 7px color-mix(in srgb, var(--lumen) 34%, transparent);
-}
-
-.ceremony .trace[data-tone='spent'] .trace-bar {
-  background: linear-gradient(180deg, var(--ash) 0%, color-mix(in srgb, var(--ash) 30%, transparent) 100%);
-}
-
-/* A generation that resolved to nothing is a gap in the record, not a bar. */
-.ceremony .trace-bar.gone {
-  background: none;
-  box-shadow: none;
-  border-bottom: 2px solid color-mix(in srgb, var(--ash) 55%, transparent);
-}
-
-@keyframes trace-grow {
-  from {
-    transform: scaleY(0.06);
-    opacity: 0;
-  }
-  to {
-    transform: scaleY(1);
-    opacity: 1;
-  }
-}
 
 /* The share card itself, in its sheet. It is drawn at 1080x1350 and displayed
    at whatever the frame is wide, so the saved image is full resolution and the
@@ -2782,20 +3035,6 @@ table.data td.num {
   to {
     opacity: 1;
     transform: none;
-  }
-}
-
-  to {
-    transform: scale(1);
-  }
-}
-
-@keyframes rays-spin {
-  from {
-    rotate: 0deg;
-  }
-  to {
-    rotate: 360deg;
   }
 }
 

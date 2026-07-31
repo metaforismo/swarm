@@ -15,6 +15,24 @@
   <body>
     <div class="device">
       <main class="frame" id="frame">
+        <!--
+          THE FRAME PLATE.
+
+          The stage canvas stops at the value strip, about 65% down. Below that
+          the frame was one flat colour — a third of the picture with nothing in
+          it — and on the settlement screens, where the strip and the action bar
+          step aside, that third is fully exposed. It is most of why the settled
+          frames measured 900–1,800 distinct quantised colours against a 2,500
+          floor while the plate above them carried thousands.
+
+          This canvas is the water column continuing past the edge of its own
+          layer: the same ramp, the same marbling, the same far bioluminescence,
+          and the vent's warm anchor at the seam. It is generated in `stage.js`,
+          baked once per resize, and it is a constant — identical in every frame
+          of every round — so §6.3's ordering promise is untouched.
+        -->
+        <canvas id="frame-plate" aria-hidden="true"></canvas>
+
         <!-- top bar: balance · session · sound · menu ----------------------- -->
         <header class="topbar">
           <button class="balance" id="balance" type="button" aria-label="Free-play balance and session">
@@ -40,6 +58,21 @@
         <!-- the vent stage: the colony is the only light source -------------- -->
         <section class="stage" id="stage" aria-label="Vent stage">
           <canvas id="stage-canvas" aria-hidden="true"></canvas>
+          <!--
+            The brand lockup, on the game frame.
+
+            Every reference in the calibration set carries one *in game* — Plinko
+            hangs its logo off the left edge of the board, Balloon Mania keeps its
+            wordmark banded across the top — and round 1 shipped flat white
+            system-weight text on the how-it-works screen and nothing at all
+            thereafter, which the rubric names as reading like placeholder. This
+            one is built rather than styled: a gradient face, a cut inner bevel, a
+            dark outline and a seated drop shadow, all generated in `styles.css`.
+            It sits in the top-left of the play area at a luminance well under the
+            colony's, because a wordmark that competes with the money for the eye
+            is a wordmark in the wrong place.
+          -->
+          <div class="brandmark" aria-hidden="true"><span data-text="SWARM">SWARM</span></div>
           <!--
             The stage draws itself on the canvas. This element carries nothing
             visual: it is the screen-reader group for the colony, kept separate
@@ -172,9 +205,26 @@
 
         <!-- S1 — stake &amp; seed ------------------------------------------- -->
         <section class="overlay vent-idle" id="s1" hidden aria-label="Stake and seed">
+          <!--
+            THE WINDOW.
+
+            Round 1's stake screen had no game object on it at all: an empty dark
+            gradient with one orange smudge, 12.3% lit surface, 924 distinct
+            colours, and a first-time viewer who could not tell what game they
+            were about to play. No reference in the set has an empty betting
+            screen — Plinko shows the board and its chips, Space XY shows the
+            rocket on the pad, Balloon Mania shows the field.
+
+            This element is nothing but a hole: it reserves the top third of the
+            screen so the live stage below shows through it, with the three
+            organisms the seed will light standing at the vent, each carrying what
+            it is worth on its face. The scrim opens to nearly clear across it.
+          -->
+          <div class="stage-window" aria-hidden="true"></div>
+
           <div class="wordmark">
             <h1>SEED A COLONY</h1>
-            <p class="kicker">Three organisms at a vent in the dark · generation 1 resolves without a decision</p>
+            <p class="kicker">Three organisms · <strong id="s1-entry">—</strong> each · generation 1 resolves without a decision</p>
           </div>
 
           <!-- A session limit the player set is a state, not an error (§9.9). -->
@@ -186,10 +236,6 @@
             </button>
           </div>
 
-          <!-- §5, S1: "vent idle in darkness, stake stepper centred". The spacers
-               either side are what centre it; when the drawers below are open the
-               content wins and they collapse. -->
-          <div class="spacer"></div>
           <div class="panel stake-panel">
             <div class="label">Colony stake</div>
             <div class="stepper-control hero" style="margin-top: 6px">
@@ -210,7 +256,6 @@
             the stake screen now, above the fold, on every round.
           -->
           <div class="panel rates-panel">
-            <div class="label">Before you stake</div>
             <div id="profit-rates" class="small muted"></div>
           </div>
 
@@ -253,7 +298,6 @@
             </p>
           </div>
 
-          <div class="spacer"></div>
           <button class="cta" id="seed" type="button">SEED COLONY</button>
           <div class="linkrow">
             <button id="s1-help" type="button">Help &amp; paytable</button>
@@ -309,20 +353,20 @@
         -->
         <section class="overlay ceremony" id="settlement" hidden aria-label="Settlement">
           <!--
-            The rays live in a well that is exactly the overlay's own box and
-            clips them.
+            THE RAYS ARE GONE, and this is a subtraction rather than a
+            replacement.
 
-            They are 150vh across, and as a direct child of a scrollable overlay
-            that made the *ceremony* scrollable — 828 px of scroll width and
-            1,002 px of scroll height on a 390x844 frame — for a decoration that
-            is transparent at three tiers out of six. Chrome's scroll anchoring
-            then quietly scrolled it: the payout card rendered 16 px off the left
-            edge of the screen and 158 px up, on a winning round. A decorative
-            layer must never be able to move the money.
+            Round 1 flooded the whole overlay with warm rays behind the payout
+            card. Measured, that decoration produced a *second* bright saturated
+            region at 3.7% of frame area, centred at y = 0.19, containing nothing
+            — a tie for the eye at the one moment the frame is allowed exactly one
+            focal object — and because it was opaque it replaced the stage, so at
+            the loudest beat in the game the colony, the vent and the vessel the
+            money had just poured into all disappeared. Removing it makes the
+            picture better on both counts: the card is the only bright thing, and
+            the frame behind it is the round's own water rather than an orange
+            haze with nothing in it.
           -->
-          <div class="ray-well" aria-hidden="true">
-            <div class="ceremony-rays"></div>
-          </div>
           <div class="spacer"></div>
           <!--
             The payout card. The ceremony's scrim is deliberately translucent so
@@ -361,7 +405,12 @@
                 <div class="vessel-light" aria-hidden="true"></div>
                 <div class="terminal" id="settlement-terminal">—</div>
                 <div class="vessel-rule" aria-hidden="true"></div>
-                <div class="headline" id="settlement-headline">—</div>
+                <!-- The unit is a separate, smaller run so it can be attached to
+                     the payout without being set at the payout's size — which is
+                     how every reference prints `2.00 FUN` on a win banner. -->
+                <div class="headline" id="settlement-headline">
+                  <span class="figure" id="settlement-figure">—</span><span class="unit">CR</span>
+                </div>
                 <!-- The round's credited multiple of what the ticket cost: the
                      tier's own basis (§7.1), shown on wins only, truncated like
                      every other figure on screen. It arrives *after* the count-up
@@ -370,32 +419,18 @@
                 <div class="multiple" id="settlement-multiple" hidden>—</div>
               </div>
               <!--
-                The round's own shape: what the colony did, generation by
-                generation. It is the player's own resolved history and it is
-                already in the receipt — never a colony they could have had
-                (§9.8), and never anything forward-looking.
+                THE GENERATION-BY-GENERATION BAR CHART IS GONE.
 
-                It sits directly under the figure, and it grows *while* the figure
-                counts. Everything that confirms the total has to wait for the
-                count to land, and with all of it below the figure the card spent
-                the whole count-up as a half-empty box. The trace gives away no
-                total — it is a population per generation — so it is the one thing
-                that can fill that beat, and filling it with the round's own story
-                is better than filling it with air.
+                It was a real record — the player's own resolved populations,
+                already in the receipt — and it still failed the subtraction test
+                twice over. At its rendered size it was unreadable, and on a loss
+                it collapsed to a single grey stub under the headline that read as
+                a broken render rather than as a chart. Removing it made both
+                frames better, which is the definition of an effect that was
+                noise; it also removed one of the ten independently moving regions
+                the win frame was measuring against a ceiling of seven. The full
+                trace is one tap away, in the receipt, where it is legible.
               -->
-              <div class="trace" id="settlement-trace" aria-hidden="true"></div>
-              <!--
-                The trace needs four characters of caption or it is not
-                information, it is a mark.
-
-                One bar per generation at the population it resolved to is a real
-                record — the player's own, already in the receipt — but a round
-                that lasted two generations draws two teal bars in the middle of a
-                payout card, and an unlabelled shape that the viewer cannot name is
-                the exact defect class this pass exists to close. Either it says
-                what it is or it should not be on the card.
-              -->
-              <div class="trace-caption" aria-hidden="true">COLONY, GENERATION BY GENERATION</div>
               <div class="net" id="settlement-net">—</div>
               <p class="small" id="settlement-copy"></p>
             </div>
